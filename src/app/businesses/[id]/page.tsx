@@ -48,7 +48,7 @@ type SatelliteRow = {
   sort_order: number | null;
   is_active: boolean | null;
   site_id: string | null;
-  site?: SiteRow | null;
+  site?: SiteRow | SiteRow[] | null;
 };
 
 function asText(value: FormDataEntryValue | null) {
@@ -212,7 +212,9 @@ export default async function BusinessDetailPage({
   }
 
   const business = data as SatelliteRow;
-  const site = business.site as SiteRow | null;
+  const site = Array.isArray(business.site)
+    ? business.site[0] ?? null
+    : business.site ?? null;
 
   return (
     <div className="space-y-6">

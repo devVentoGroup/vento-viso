@@ -33,7 +33,7 @@ type EmployeeSiteRow = {
   site_id: string;
   is_primary: boolean | null;
   is_active: boolean | null;
-  site?: { id: string; name: string | null; code: string | null } | null;
+  site?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
 };
 
 function asText(value: FormDataEntryValue | null) {
@@ -354,9 +354,11 @@ export default async function StaffDetailPage({
               </TableRow>
             </TableHead>
             <TableBody>
-              {siteLinks.map((link) => (
-                <TableRow key={link.site_id}>
-                  <TableCell>{link.site?.name ?? link.site?.code ?? link.site_id}</TableCell>
+              {siteLinks.map((link) => {
+                const site = Array.isArray(link.site) ? link.site[0] ?? null : link.site ?? null;
+                return (
+                  <TableRow key={link.site_id}>
+                    <TableCell>{site?.name ?? site?.code ?? link.site_id}</TableCell>
                   <TableCell>
                     <form action={toggleEmployeeSite} className="flex items-center gap-2">
                       <input type="hidden" name="employee_id" value={emp.id} />
@@ -392,8 +394,9 @@ export default async function StaffDetailPage({
                       </button>
                     </form>
                   </TableCell>
-                </TableRow>
-              ))}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

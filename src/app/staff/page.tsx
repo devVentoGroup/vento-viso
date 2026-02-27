@@ -12,7 +12,7 @@ type EmployeeRow = {
   alias: string | null;
   role: string | null;
   is_active: boolean | null;
-  site?: { id: string; name: string | null } | null;
+  site?: { id: string; name: string | null } | { id: string; name: string | null }[] | null;
 };
 
 export default async function StaffPage() {
@@ -55,26 +55,29 @@ export default async function StaffPage() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {employees.map((employee) => (
-                <TableRow key={employee.id}>
-                  <TableCell>
-                    <div className="font-semibold">{employee.full_name ?? "Sin nombre"}</div>
-                    <div className="ui-caption">{employee.alias ?? employee.id}</div>
-                  </TableCell>
-                  <TableCell>{employee.role ?? ""}</TableCell>
-                  <TableCell>{employee.site?.name ?? "Sin sede"}</TableCell>
-                  <TableCell>
-                    <span className={`ui-chip ${employee.is_active ? "ui-chip--success" : ""}`}>
-                      {employee.is_active ? "Activo" : "Inactivo"}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Link href={`/staff/${employee.id}`} className="ui-btn ui-btn--ghost">
-                      Editar
-                    </Link>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {employees.map((employee) => {
+                const site = Array.isArray(employee.site) ? employee.site[0] ?? null : employee.site ?? null;
+                return (
+                  <TableRow key={employee.id}>
+                    <TableCell>
+                      <div className="font-semibold">{employee.full_name ?? "Sin nombre"}</div>
+                      <div className="ui-caption">{employee.alias ?? employee.id}</div>
+                    </TableCell>
+                    <TableCell>{employee.role ?? ""}</TableCell>
+                    <TableCell>{site?.name ?? "Sin sede"}</TableCell>
+                    <TableCell>
+                      <span className={`ui-chip ${employee.is_active ? "ui-chip--success" : ""}`}>
+                        {employee.is_active ? "Activo" : "Inactivo"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Link href={`/staff/${employee.id}`} className="ui-btn ui-btn--ghost">
+                        Editar
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}
