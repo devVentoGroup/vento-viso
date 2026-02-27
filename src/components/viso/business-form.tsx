@@ -237,6 +237,15 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
               <option value="utensils">utensils</option>
               <option value="pizza">pizza</option>
               <option value="shopping-bag">shopping-bag</option>
+              <option value="coffee">coffee</option>
+              <option value="chef-hat">chef-hat</option>
+              <option value="ice-cream">ice-cream</option>
+              <option value="sandwich">sandwich</option>
+              <option value="cup-soda">cup-soda</option>
+              <option value="beef">beef</option>
+              <option value="fish">fish</option>
+              <option value="cookie">cookie</option>
+              <option value="drumstick">drumstick</option>
             </select>
           </label>
           <div className="grid gap-3 sm:grid-cols-2 sm:col-span-2">
