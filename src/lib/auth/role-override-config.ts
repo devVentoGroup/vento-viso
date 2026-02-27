@@ -1,4 +1,4 @@
-export const ROLE_OVERRIDE_COOKIE = "nexo_role_override";
+export const ROLE_OVERRIDE_COOKIE = "viso_role_override";
 
 export const PRIVILEGED_ROLE_OVERRIDES = new Set([
   "propietario",

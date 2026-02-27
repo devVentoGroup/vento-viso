@@ -21,7 +21,7 @@ export async function buildShellLoginUrl(returnTo?: string) {
   }
 
   const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "nexo.ventogroup.co";
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "viso.ventogroup.co";
   const proto = h.get("x-forwarded-proto") ?? "https";
   const absolute = `${proto}://${host}${normalized}`;
 

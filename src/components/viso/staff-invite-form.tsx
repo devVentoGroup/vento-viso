@@ -54,6 +54,15 @@ export function StaffInviteForm({ sites, roles }: StaffInviteFormProps) {
     const supabase = createClient();
     const { data: userRes } = await supabase.auth.getUser();
     const userId = userRes.user?.id ?? null;
+    let createdBy: string | null = null;
+    if (userId) {
+      const { data: creatorRow } = await supabase
+        .from("users")
+        .select("id")
+        .eq("id", userId)
+        .maybeSingle();
+      createdBy = creatorRow?.id ?? null;
+    }
 
     const inviteToken = crypto.randomUUID();
     const payload = {
@@ -63,7 +72,7 @@ export function StaffInviteForm({ sites, roles }: StaffInviteFormProps) {
       staff_site_id: siteId || null,
       staff_role: role || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-      created_by: userId,
+      created_by: createdBy,
       status: "pending",
     };
 
