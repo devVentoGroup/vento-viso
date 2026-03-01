@@ -77,7 +77,8 @@ async function updateUser(formData: FormData) {
   }
 
   revalidatePath(`/pass-users/${id}`);
-  redirect(`/pass-users/${id}?ok=updated`);
+  revalidatePath("/pass-users");
+  redirect("/pass-users?ok=" + encodeURIComponent("Usuario actualizado."));
 }
 
 async function deleteUser(formData: FormData) {

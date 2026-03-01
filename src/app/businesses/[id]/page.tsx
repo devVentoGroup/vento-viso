@@ -159,7 +159,8 @@ async function updateBusiness(formData: FormData) {
   }
 
   revalidatePath(`/businesses/${id}`);
-  redirect(`/businesses/${id}?ok=updated`);
+  revalidatePath("/businesses");
+  redirect("/businesses?ok=" + encodeURIComponent("Negocio actualizado."));
 }
 
 async function deleteBusiness(formData: FormData) {

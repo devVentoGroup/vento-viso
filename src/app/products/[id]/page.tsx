@@ -100,7 +100,7 @@ async function updateProduct(formData: FormData) {
 
   revalidatePath(`/products/${id}`);
   revalidatePath("/products");
-  redirect(`/products/${id}?ok=${encodeURIComponent("Producto actualizado.")}`);
+  redirect("/products?ok=" + encodeURIComponent("Producto actualizado."));
 }
 
 async function disableProduct(formData: FormData) {

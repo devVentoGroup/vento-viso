@@ -131,7 +131,8 @@ async function updateEmployee(formData: FormData) {
   }
 
   revalidatePath(`/staff/${id}`);
-  redirect(`/staff/${id}?ok=updated`);
+  revalidatePath("/staff");
+  redirect("/staff?ok=" + encodeURIComponent("Trabajador actualizado."));
 }
 
 async function deleteEmployee(formData: FormData) {
