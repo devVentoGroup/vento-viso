@@ -6,7 +6,8 @@ type PassStylePreviewProps = {
   name: string;
   subtitle: string;
   tags: string;
-  logoUrl: string;
+  cardLogoUrl: string;
+  headerLogoUrl: string;
   gradientStart: string;
   gradientEnd: string;
   accentColor: string;
@@ -24,18 +25,12 @@ function safeColor(value: string, fallback: string) {
   return trimmed.length ? trimmed : fallback;
 }
 
-function pickWatermark(tags: string, accent: string) {
-  const value = tags.toLowerCase();
-  if (value.includes("pizza")) return { label: "pizza", color: `${accent}22` };
-  if (value.includes("shopping")) return { label: "bag", color: `${accent}22` };
-  return { label: "utensils", color: `${accent}22` };
-}
-
 export function PassStylePreview({
   name,
   subtitle,
   tags,
-  logoUrl,
+  cardLogoUrl,
+  headerLogoUrl,
   gradientStart,
   gradientEnd,
   accentColor,
@@ -92,41 +87,32 @@ export function PassStylePreview({
     borderColor,
   ]);
 
-  const watermark = pickWatermark(tags, preview.accent);
+  const cardLogo = cardLogoUrl || headerLogoUrl;
+  const headerLogo = headerLogoUrl || cardLogoUrl;
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow-1)]">
         <div className="ui-label">Tarjeta en home (real)</div>
         <div
-          className="relative mt-4 overflow-visible rounded-[24px] border p-6 text-[var(--ui-text)] shadow-[0_8px_24px_rgba(15,23,42,0.12)]"
+          className="relative mt-4 overflow-hidden rounded-[24px] border p-6 shadow-[0_8px_24px_rgba(15,23,42,0.12)]"
           style={{
             borderColor: `${preview.accent}2A`,
             background: `linear-gradient(135deg, ${preview.start} 0%, ${preview.end} 100%)`,
           }}
         >
-          <div
-            className="pointer-events-none absolute right-[-14px] top-[-14px] flex h-[90px] w-[90px] items-center justify-center rounded-full bg-white shadow-[0_10px_24px_rgba(15,23,42,0.2)]"
-            style={{ border: `4px solid ${preview.accent}30` }}
-          >
-            {logoUrl ? (
+          <div className="absolute right-5 top-5 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border bg-white/95" style={{ borderColor: `${preview.accent}40` }}>
+            {cardLogo ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={logoUrl} alt={name} className="h-[68px] w-[68px] object-contain" />
+              <img src={cardLogo} alt={name || "Logo"} className="h-12 w-12 object-contain" />
             ) : (
-              <span className="text-base font-bold" style={{ color: preview.accent }}>
-                {name.slice(0, 2).toUpperCase()}
+              <span className="text-sm font-bold" style={{ color: preview.accent }}>
+                {(name || "??").slice(0, 2).toUpperCase()}
               </span>
             )}
           </div>
 
-          <div
-            className="pointer-events-none absolute right-2 top-3 text-[11px] font-semibold uppercase tracking-wide"
-            style={{ color: watermark.color }}
-          >
-            {watermark.label}
-          </div>
-
-          <div className="pr-20 text-[22px] font-black leading-tight" style={{ color: preview.text }}>
+          <div className="pr-20 text-[24px] font-black leading-tight" style={{ color: preview.text }}>
             {name || "Nombre de marca"}
           </div>
           <div className="mt-2 text-[14px] font-semibold" style={{ color: preview.textSecondary }}>
@@ -138,11 +124,11 @@ export function PassStylePreview({
               preview.tagList.map((tag) => (
                 <span
                   key={tag}
-                  className="rounded-full border px-3 py-[7px] text-[11px] font-extrabold uppercase tracking-[0.06em]"
+                  className="rounded-full border px-3 py-[6px] text-[11px] font-bold uppercase tracking-[0.05em]"
                   style={{
-                    borderColor: preview.border,
-                    color: preview.textSecondary,
-                    background: "rgba(255,255,255,0.72)",
+                    borderColor: `${preview.text}22`,
+                    color: preview.text,
+                    background: "rgba(255,255,255,0.85)",
                   }}
                 >
                   {tag}
@@ -164,13 +150,13 @@ export function PassStylePreview({
         <div className="ui-label">Pantalla interna (real)</div>
 
         <div
-          className="mx-auto mt-4 w-full max-w-[360px] overflow-hidden rounded-[26px] border p-0 shadow-[0_12px_28px_rgba(15,23,42,0.14)]"
+          className="mx-auto mt-4 w-full max-w-[390px] overflow-hidden rounded-[26px] border p-0 shadow-[0_12px_28px_rgba(15,23,42,0.14)]"
           style={{ borderColor: preview.border, background: preview.background, color: preview.text }}
         >
           <div className="px-4 pb-3 pt-4">
             <div className="flex items-center justify-between">
               <div className="text-[11px] font-semibold" style={{ color: preview.textSecondary }}>
-                Punto actual
+                Puntos actuales
               </div>
               <button
                 type="button"
@@ -182,19 +168,6 @@ export function PassStylePreview({
             </div>
 
             <div className="mt-3 flex items-center gap-3">
-              <div
-                className="flex h-11 w-11 items-center justify-center rounded-full bg-white"
-                style={{ border: `2px solid ${preview.accent}` }}
-              >
-                {logoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={logoUrl} alt={name} className="h-6 w-6 object-contain" />
-                ) : (
-                  <span className="text-xs font-semibold" style={{ color: preview.accent }}>
-                    {name.slice(0, 2).toUpperCase()}
-                  </span>
-                )}
-              </div>
               <div className="min-w-0">
                 <div className="truncate text-[15px] font-extrabold">{name || "Marca"}</div>
                 <div className="truncate text-[12px] font-medium" style={{ color: preview.textSecondary }}>
@@ -202,21 +175,24 @@ export function PassStylePreview({
                 </div>
               </div>
             </div>
+
+            <div className="mt-3 flex h-10 w-full items-center overflow-hidden rounded-lg border bg-white px-2" style={{ borderColor: `${preview.border}` }}>
+              {headerLogo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={headerLogo} alt={name || "Logo horizontal"} className="h-8 w-full object-contain object-left" />
+              ) : (
+                <span className="ui-caption">Logo horizontal interno</span>
+              )}
+            </div>
           </div>
 
-          <div
-            className="border-y px-4 py-2 text-[11px] font-semibold"
-            style={{ borderColor: preview.border, color: preview.textSecondary }}
-          >
+          <div className="border-y px-4 py-2 text-[11px] font-semibold" style={{ borderColor: preview.border, color: preview.textSecondary }}>
             Canjear | Historial | QR pendientes
             <div className="mt-2 h-[3px] w-14 rounded-full" style={{ background: preview.indicator }} />
           </div>
 
           <div className="space-y-3 px-4 py-3">
-            <div
-              className="rounded-xl border bg-white px-3 py-2 text-[12px]"
-              style={{ borderColor: preview.border, color: preview.textSecondary }}
-            >
+            <div className="rounded-xl border bg-white px-3 py-2 text-[12px]" style={{ borderColor: preview.border, color: preview.textSecondary }}>
               Buscar productos...
             </div>
 

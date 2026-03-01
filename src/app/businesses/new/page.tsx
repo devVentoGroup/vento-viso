@@ -1,4 +1,4 @@
-﻿import { redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 
 import { BusinessForm } from "@/components/viso/business-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
@@ -69,13 +69,19 @@ async function createBusiness(formData: FormData) {
     redirect("/businesses/new?error=" + encodeURIComponent(siteError?.message || "No se pudo crear la sede."));
   }
 
+  const cardLogoUrl = asText(formData.get("card_logo_url")) || null;
+  const headerLogoUrl = asText(formData.get("header_logo_url")) || null;
+  const legacyLogo = asText(formData.get("logo_url")) || cardLogoUrl || headerLogoUrl;
+
   const satellitePayload = {
     code,
     name,
     subtitle: asText(formData.get("subtitle")) || null,
     tags: parseTags(asText(formData.get("tags"))),
     site_id: siteRow.id,
-    logo_url: asText(formData.get("logo_url")) || null,
+    logo_url: legacyLogo || null,
+    card_logo_url: cardLogoUrl,
+    header_logo_url: headerLogoUrl,
     watermark_icon: asText(formData.get("watermark_icon")) || null,
     gradient_start: asText(formData.get("gradient_start")) || null,
     gradient_end: asText(formData.get("gradient_end")) || null,
@@ -97,9 +103,7 @@ async function createBusiness(formData: FormData) {
     is_active: asBool(formData.get("is_active")),
   };
 
-  const { error: satelliteError } = await supabase
-    .from("pass_satellites")
-    .insert(satellitePayload);
+  const { error: satelliteError } = await supabase.from("pass_satellites").insert(satellitePayload);
 
   if (satelliteError) {
     await supabase.from("sites").delete().eq("id", siteRow.id);
@@ -133,10 +137,7 @@ export default async function NewBusinessPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Crear negocio"
-        subtitle="Alta completa de sede y configuracion Vento Pass."
-      />
+      <PageHeader title="Crear negocio" subtitle="Alta completa de sede y configuracion Vento Pass." />
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
 
@@ -151,6 +152,8 @@ export default async function NewBusinessPage({
           sort_order: 0,
           is_active: true,
           logo_url: "",
+          card_logo_url: "",
+          header_logo_url: "",
           watermark_icon: "",
           gradient_start: "#F6F2FF",
           gradient_end: "#EFE8FF",

@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -28,6 +28,8 @@ type SatelliteRow = {
   subtitle: string | null;
   tags: string[] | null;
   logo_url: string | null;
+  card_logo_url: string | null;
+  header_logo_url: string | null;
   watermark_icon: string | null;
   gradient_start: string | null;
   gradient_end: string | null;
@@ -114,12 +116,18 @@ async function updateBusiness(formData: FormData) {
     redirect(`/businesses/${id}?error=${encodeURIComponent(siteError.message)}`);
   }
 
+  const cardLogoUrl = asText(formData.get("card_logo_url")) || null;
+  const headerLogoUrl = asText(formData.get("header_logo_url")) || null;
+  const legacyLogo = asText(formData.get("logo_url")) || cardLogoUrl || headerLogoUrl;
+
   const satellitePayload = {
     code,
     name,
     subtitle: asText(formData.get("subtitle")) || null,
     tags: parseTags(asText(formData.get("tags"))),
-    logo_url: asText(formData.get("logo_url")) || null,
+    logo_url: legacyLogo || null,
+    card_logo_url: cardLogoUrl,
+    header_logo_url: headerLogoUrl,
     watermark_icon: asText(formData.get("watermark_icon")) || null,
     gradient_start: asText(formData.get("gradient_start")) || null,
     gradient_end: asText(formData.get("gradient_end")) || null,
@@ -202,7 +210,7 @@ export default async function BusinessDetailPage({
   const { data } = await supabase
     .from("pass_satellites")
     .select(
-      "id,code,name,subtitle,tags,logo_url,watermark_icon,gradient_start,gradient_end,accent_color,primary_color,background_color,text_color,text_secondary_color,card_color,border_color,indicator_color,loading_color,review_url,maps_url,address_override,latitude_override,longitude_override,sort_order,is_active,site_id,site:sites(id,code,name,site_type,address,latitude,longitude,is_public,is_active)"
+      "id,code,name,subtitle,tags,logo_url,card_logo_url,header_logo_url,watermark_icon,gradient_start,gradient_end,accent_color,primary_color,background_color,text_color,text_secondary_color,card_color,border_color,indicator_color,loading_color,review_url,maps_url,address_override,latitude_override,longitude_override,sort_order,is_active,site_id,site:sites(id,code,name,site_type,address,latitude,longitude,is_public,is_active)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -212,9 +220,7 @@ export default async function BusinessDetailPage({
   }
 
   const business = data as SatelliteRow;
-  const site = Array.isArray(business.site)
-    ? business.site[0] ?? null
-    : business.site ?? null;
+  const site = Array.isArray(business.site) ? business.site[0] ?? null : business.site ?? null;
 
   return (
     <div className="space-y-6">
@@ -244,6 +250,8 @@ export default async function BusinessDetailPage({
           sort_order: business.sort_order ?? 0,
           is_active: Boolean(business.is_active),
           logo_url: business.logo_url ?? "",
+          card_logo_url: business.card_logo_url ?? business.logo_url ?? "",
+          header_logo_url: business.header_logo_url ?? business.logo_url ?? "",
           watermark_icon: business.watermark_icon ?? "",
           gradient_start: business.gradient_start ?? "#F6F2FF",
           gradient_end: business.gradient_end ?? "#EFE8FF",
@@ -272,12 +280,15 @@ export default async function BusinessDetailPage({
         }}
       />
 
-      <form action={deleteBusiness} className="flex items-center gap-2">
-        <input type="hidden" name="id" value={business.id} />
-        <button type="submit" className="ui-btn ui-btn--danger">
-          Eliminar negocio
-        </button>
-      </form>
+      <div className="ui-panel-soft flex flex-wrap items-center justify-between gap-3">
+        <div className="ui-caption">Accion irreversible: elimina la configuracion de este negocio en Vento Pass.</div>
+        <form action={deleteBusiness}>
+          <input type="hidden" name="id" value={business.id} />
+          <button type="submit" className="ui-btn ui-btn--danger">
+            Eliminar negocio
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

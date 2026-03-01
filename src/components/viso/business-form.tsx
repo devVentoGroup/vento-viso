@@ -1,6 +1,6 @@
-﻿"use client";
+"use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { PassStylePreview } from "./pass-style-preview";
 
@@ -14,6 +14,8 @@ type BusinessFormValues = {
   sort_order: number;
   is_active: boolean;
   logo_url: string;
+  card_logo_url: string;
+  header_logo_url: string;
   watermark_icon: string;
   gradient_start: string;
   gradient_end: string;
@@ -49,12 +51,66 @@ type BusinessFormProps = {
 
 const LOGO_UPLOAD_ENDPOINT = "/api/viso/upload-logo";
 
+type UploadTarget = "card" | "header";
+
+function LogoField({
+  title,
+  hint,
+  value,
+  onChange,
+  onUpload,
+  uploadLabel,
+}: {
+  title: string;
+  hint: string;
+  value: string;
+  onChange: (value: string) => void;
+  onUpload: (file: File | null) => void;
+  uploadLabel: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-3">
+      <div>
+        <div className="ui-h3">{title}</div>
+        <div className="ui-caption">{hint}</div>
+      </div>
+
+      <div className="h-16 w-full rounded-xl border border-[var(--ui-border)] bg-white px-3 flex items-center overflow-hidden">
+        {value ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={value} alt={title} className="h-12 w-full object-contain object-left" />
+        ) : (
+          <span className="ui-caption">Sin logo cargado</span>
+        )}
+      </div>
+
+      <label className="space-y-2 block">
+        <span className="ui-label">Subir archivo</span>
+        <input type="file" accept="image/*" className="ui-input" onChange={(event) => onUpload(event.target.files?.[0] ?? null)} />
+      </label>
+
+      <label className="space-y-2 block">
+        <span className="ui-label">URL manual (opcional)</span>
+        <input
+          className="ui-input"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="https://..."
+        />
+      </label>
+
+      <div className="ui-caption">{uploadLabel}</div>
+    </div>
+  );
+}
+
 export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
   const [name, setName] = useState(initial.name);
   const [subtitle, setSubtitle] = useState(initial.subtitle);
   const [tags, setTags] = useState(initial.tags);
   const [code, setCode] = useState(initial.code);
-  const [logoUrl, setLogoUrl] = useState(initial.logo_url);
+  const [cardLogoUrl, setCardLogoUrl] = useState(initial.card_logo_url || initial.logo_url);
+  const [headerLogoUrl, setHeaderLogoUrl] = useState(initial.header_logo_url || initial.logo_url);
   const [gradientStart, setGradientStart] = useState(initial.gradient_start);
   const [gradientEnd, setGradientEnd] = useState(initial.gradient_end);
   const [accentColor, setAccentColor] = useState(initial.accent_color);
@@ -66,19 +122,23 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
   const [loadingColor, setLoadingColor] = useState(initial.loading_color);
   const [cardColor, setCardColor] = useState(initial.card_color);
   const [borderColor, setBorderColor] = useState(initial.border_color);
-  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
-  const [uploadMessage, setUploadMessage] = useState("");
+  const [uploadStatus, setUploadStatus] = useState<Record<UploadTarget, "idle" | "uploading" | "done" | "error">>({ card: "idle", header: "idle" });
+  const [uploadMessage, setUploadMessage] = useState<Record<UploadTarget, string>>({ card: "", header: "" });
 
-  const handleUpload = async (file: File | null) => {
+  const legacyLogo = useMemo(() => cardLogoUrl || headerLogoUrl || initial.logo_url || "", [cardLogoUrl, headerLogoUrl, initial.logo_url]);
+
+  const handleUpload = async (file: File | null, target: UploadTarget) => {
     if (!file) return;
-    setUploadStatus("uploading");
-    setUploadMessage("");
+    setUploadStatus((prev) => ({ ...prev, [target]: "uploading" }));
+    setUploadMessage((prev) => ({ ...prev, [target]: "" }));
     try {
       const formData = new FormData();
       formData.append("file", file);
       if (code) {
         formData.append("code", code);
       }
+      formData.append("kind", target === "card" ? "card" : "header");
+
       const response = await fetch(LOGO_UPLOAD_ENDPOINT, {
         method: "POST",
         body: formData,
@@ -87,13 +147,16 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
       if (!response.ok) {
         throw new Error(payload?.error || "Error subiendo logo.");
       }
-      setLogoUrl(payload.url || "");
-      setUploadStatus("done");
-      setUploadMessage("Logo cargado.");
+
+      if (target === "card") setCardLogoUrl(payload.url || "");
+      if (target === "header") setHeaderLogoUrl(payload.url || "");
+
+      setUploadStatus((prev) => ({ ...prev, [target]: "done" }));
+      setUploadMessage((prev) => ({ ...prev, [target]: "Logo cargado." }));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Error subiendo logo.";
-      setUploadStatus("error");
-      setUploadMessage(message);
+      setUploadStatus((prev) => ({ ...prev, [target]: "error" }));
+      setUploadMessage((prev) => ({ ...prev, [target]: message }));
     }
   };
 
@@ -101,6 +164,7 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
     <form action={action} className="space-y-8">
       <input type="hidden" name="id" value={initial.id ?? ""} />
       <input type="hidden" name="site_id" value={initial.site_id ?? ""} />
+      <input type="hidden" name="logo_url" value={legacyLogo} />
 
       <div className="ui-panel space-y-6">
         <div className="ui-h3">Datos del negocio</div>
@@ -112,7 +176,7 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
               className="ui-input"
               value={code}
               onChange={(event) => setCode(event.target.value)}
-              placeholder="viso_cafe"
+              placeholder="molka"
               required
             />
           </label>
@@ -144,22 +208,47 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
               className="ui-input"
               value={tags}
               onChange={(event) => setTags(event.target.value)}
-              placeholder="cafe, brunch, bakery"
+              placeholder="amasijos colombianos, panaderia, pasteleria"
             />
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Orden</span>
-            <input
-              name="sort_order"
-              type="number"
-              className="ui-input"
-              defaultValue={initial.sort_order}
-            />
+            <span className="ui-label">Orden en Home</span>
+            <input name="sort_order" type="number" className="ui-input" defaultValue={initial.sort_order} />
           </label>
           <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
             <input type="checkbox" name="is_active" defaultChecked={initial.is_active} />
-            Activo
+            Negocio activo
           </label>
+        </div>
+      </div>
+
+      <div className="ui-panel space-y-6">
+        <div>
+          <div className="ui-h3">Logos Vento Pass</div>
+          <p className="ui-caption">Usa un logo cuadrado para la tarjeta en Home y uno horizontal para el header interno.</p>
+        </div>
+
+        <input type="hidden" name="card_logo_url" value={cardLogoUrl} />
+        <input type="hidden" name="header_logo_url" value={headerLogoUrl} />
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <LogoField
+            title="Logo de tarjeta (cuadrado)"
+            hint="Se muestra en la tarjeta de Home. Ideal 512x512 PNG o SVG."
+            value={cardLogoUrl}
+            onChange={setCardLogoUrl}
+            onUpload={(file) => handleUpload(file, "card")}
+            uploadLabel={uploadStatus.card === "uploading" ? "Subiendo logo..." : uploadMessage.card}
+          />
+
+          <LogoField
+            title="Logo interno (horizontal)"
+            hint="Se muestra en la pantalla interna. Ideal 1200x320 PNG o SVG."
+            value={headerLogoUrl}
+            onChange={setHeaderLogoUrl}
+            onUpload={(file) => handleUpload(file, "header")}
+            uploadLabel={uploadStatus.header === "uploading" ? "Subiendo logo..." : uploadMessage.header}
+          />
         </div>
       </div>
 
@@ -206,30 +295,8 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
       </div>
 
       <div className="ui-panel space-y-6">
-        <div className="ui-h3">Branding Vento Pass</div>
+        <div className="ui-h3">Estilo de la experiencia</div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Logo URL</span>
-            <input
-              name="logo_url"
-              className="ui-input"
-              value={logoUrl}
-              onChange={(event) => setLogoUrl(event.target.value)}
-              placeholder="https://..."
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="ui-label">Subir logo</span>
-            <input
-              type="file"
-              accept="image/*"
-              className="ui-input"
-              onChange={(event) => handleUpload(event.target.files?.[0] ?? null)}
-            />
-          </label>
-          <div className="flex items-center text-sm">
-            {uploadStatus === "uploading" ? "Subiendo logo..." : uploadMessage}
-          </div>
           <label className="space-y-2">
             <span className="ui-label">Icono watermark</span>
             <select name="watermark_icon" className="ui-input" defaultValue={initial.watermark_icon}>
@@ -248,142 +315,85 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
               <option value="drumstick">drumstick</option>
             </select>
           </label>
+          <div className="ui-caption flex items-center">Este icono se usa como marca de agua suave en la tarjeta.</div>
+
           <div className="grid gap-3 sm:grid-cols-2 sm:col-span-2">
             <label className="space-y-2">
               <span className="ui-label">Gradient start</span>
-              <input
-                name="gradient_start"
-                type="color"
-                className="ui-input"
-                value={gradientStart}
-                onChange={(event) => setGradientStart(event.target.value)}
-              />
+              <input name="gradient_start" type="color" className="ui-input" value={gradientStart} onChange={(event) => setGradientStart(event.target.value)} />
             </label>
             <label className="space-y-2">
               <span className="ui-label">Gradient end</span>
-              <input
-                name="gradient_end"
-                type="color"
-                className="ui-input"
-                value={gradientEnd}
-                onChange={(event) => setGradientEnd(event.target.value)}
-              />
+              <input name="gradient_end" type="color" className="ui-input" value={gradientEnd} onChange={(event) => setGradientEnd(event.target.value)} />
             </label>
             <label className="space-y-2">
               <span className="ui-label">Accent color</span>
-              <input
-                name="accent_color"
-                type="color"
-                className="ui-input"
-                value={accentColor}
-                onChange={(event) => setAccentColor(event.target.value)}
-              />
+              <input name="accent_color" type="color" className="ui-input" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} />
             </label>
             <label className="space-y-2">
               <span className="ui-label">Text color</span>
-              <input
-                name="text_color"
-                type="color"
-                className="ui-input"
-                value={textColor}
-                onChange={(event) => setTextColor(event.target.value)}
-              />
+              <input name="text_color" type="color" className="ui-input" value={textColor} onChange={(event) => setTextColor(event.target.value)} />
             </label>
             <label className="space-y-2">
               <span className="ui-label">Text secondary</span>
-              <input
-                name="text_secondary_color"
-                type="color"
-                className="ui-input"
-                value={textSecondaryColor}
-                onChange={(event) => setTextSecondaryColor(event.target.value)}
-              />
+              <input name="text_secondary_color" type="color" className="ui-input" value={textSecondaryColor} onChange={(event) => setTextSecondaryColor(event.target.value)} />
             </label>
             <label className="space-y-2">
               <span className="ui-label">Primary color</span>
-              <input
-                name="primary_color"
-                type="color"
-                className="ui-input"
-                value={primaryColor}
-                onChange={(event) => setPrimaryColor(event.target.value)}
-              />
+              <input name="primary_color" type="color" className="ui-input" value={primaryColor} onChange={(event) => setPrimaryColor(event.target.value)} />
             </label>
             <label className="space-y-2">
               <span className="ui-label">Background color</span>
-              <input
-                name="background_color"
-                type="color"
-                className="ui-input"
-                value={backgroundColor}
-                onChange={(event) => setBackgroundColor(event.target.value)}
-              />
+              <input name="background_color" type="color" className="ui-input" value={backgroundColor} onChange={(event) => setBackgroundColor(event.target.value)} />
             </label>
             <label className="space-y-2">
               <span className="ui-label">Indicator color</span>
-              <input
-                name="indicator_color"
-                type="color"
-                className="ui-input"
-                value={indicatorColor}
-                onChange={(event) => setIndicatorColor(event.target.value)}
-              />
+              <input name="indicator_color" type="color" className="ui-input" value={indicatorColor} onChange={(event) => setIndicatorColor(event.target.value)} />
             </label>
             <label className="space-y-2">
               <span className="ui-label">Loading color</span>
-              <input
-                name="loading_color"
-                type="color"
-                className="ui-input"
-                value={loadingColor}
-                onChange={(event) => setLoadingColor(event.target.value)}
-              />
+              <input name="loading_color" type="color" className="ui-input" value={loadingColor} onChange={(event) => setLoadingColor(event.target.value)} />
             </label>
             <label className="space-y-2">
               <span className="ui-label">Card color</span>
-              <input
-                name="card_color"
-                type="color"
-                className="ui-input"
-                value={cardColor}
-                onChange={(event) => setCardColor(event.target.value)}
-              />
+              <input name="card_color" type="color" className="ui-input" value={cardColor} onChange={(event) => setCardColor(event.target.value)} />
             </label>
             <label className="space-y-2">
               <span className="ui-label">Border color</span>
-              <input
-                name="border_color"
-                type="color"
-                className="ui-input"
-                value={borderColor}
-                onChange={(event) => setBorderColor(event.target.value)}
-              />
+              <input name="border_color" type="color" className="ui-input" value={borderColor} onChange={(event) => setBorderColor(event.target.value)} />
             </label>
           </div>
         </div>
       </div>
 
       <div className="ui-panel space-y-6">
-        <div className="ui-h3">Links y overrides</div>
+        <div className="ui-h3">Links principales</div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2">
             <span className="ui-label">Review URL</span>
-            <input name="review_url" className="ui-input" defaultValue={initial.review_url} />
+            <input name="review_url" className="ui-input" defaultValue={initial.review_url} placeholder="Link de reseñas (Google, etc.)" />
           </label>
           <label className="space-y-2">
             <span className="ui-label">Maps URL</span>
-            <input name="maps_url" className="ui-input" defaultValue={initial.maps_url} />
+            <input name="maps_url" className="ui-input" defaultValue={initial.maps_url} placeholder="Link de ubicación (Google Maps, Waze, etc.)" />
           </label>
+        </div>
+      </div>
+
+      <div className="ui-panel space-y-4">
+        <div className="ui-h3">Ubicacion avanzada (opcional)</div>
+        <p className="ui-caption">Solo usa estos campos si quieres forzar una direccion o coordenadas distintas a las de la sede.</p>
+        <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Direccion override</span>
+            <span className="ui-label">Direccion personalizada</span>
             <input name="address_override" className="ui-input" defaultValue={initial.address_override} />
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Lat override</span>
+            <span className="ui-label">Latitud personalizada</span>
             <input name="latitude_override" className="ui-input" defaultValue={initial.latitude_override} />
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Lng override</span>
+            <span className="ui-label">Longitud personalizada</span>
             <input name="longitude_override" className="ui-input" defaultValue={initial.longitude_override} />
           </label>
         </div>
@@ -393,7 +403,8 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
         name={name}
         subtitle={subtitle}
         tags={tags}
-        logoUrl={logoUrl}
+        cardLogoUrl={cardLogoUrl}
+        headerLogoUrl={headerLogoUrl}
         gradientStart={gradientStart}
         gradientEnd={gradientEnd}
         accentColor={accentColor}
@@ -406,7 +417,7 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
         borderColor={borderColor}
       />
 
-      <div className="flex items-center gap-3">
+      <div className="ui-mobile-sticky-footer flex flex-wrap items-center gap-3">
         <button type="submit" className="ui-btn ui-btn--brand">
           {mode === "create" ? "Crear negocio" : "Guardar cambios"}
         </button>

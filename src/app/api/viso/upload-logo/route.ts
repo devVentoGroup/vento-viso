@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 const BUCKET = process.env.NEXT_PUBLIC_VISO_LOGO_BUCKET || "pass-satellite-logos";
@@ -31,11 +31,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  const { data: employee } = await supabase
-    .from("employees")
-    .select("role")
-    .eq("id", userData.user.id)
-    .maybeSingle();
+  const { data: employee } = await supabase.from("employees").select("role").eq("id", userData.user.id).maybeSingle();
   const role = String(employee?.role ?? "").toLowerCase();
   if (!["propietario", "gerente_general"].includes(role)) {
     return NextResponse.json({ error: "Sin permisos para subir imagenes" }, { status: 403 });
@@ -64,8 +60,10 @@ export async function POST(req: Request) {
 
   const rawCode = (formData.get("code") as string)?.trim() || "satellite";
   const code = sanitizePathToken(rawCode, "satellite");
+  const rawKind = String(formData.get("kind") ?? "legacy").toLowerCase();
+  const kind = rawKind === "card" || rawKind === "header" ? rawKind : "legacy";
   const ext = getExt(mime);
-  const path = `${code}/logo-${Date.now()}.${ext}`;
+  const path = `${code}/${kind}-logo-${Date.now()}.${ext}`;
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
