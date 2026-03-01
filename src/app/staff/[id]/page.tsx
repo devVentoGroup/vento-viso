@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -36,6 +36,33 @@ type EmployeeSiteRow = {
   site?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
 };
 
+type AttendanceStatusRow = {
+  employee_id: string;
+  current_status: "check_in" | "check_out" | null;
+  last_action_at: string | null;
+  last_site_id: string | null;
+};
+
+type AttendanceLogRow = {
+  id: string;
+  action: "check_in" | "check_out";
+  occurred_at: string;
+  source: string | null;
+  accuracy_meters: number | null;
+  site_id: string | null;
+  site?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
+};
+
+type ShiftRow = {
+  id: string;
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  site_id: string;
+  site?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
+};
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -48,6 +75,27 @@ function safeDecode(value: string | null | undefined) {
   if (!value) return "";
   try {
     return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "-";
+  try {
+    return new Intl.DateTimeFormat("es-CO", {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "-";
+  try {
+    return new Intl.DateTimeFormat("es-CO", { dateStyle: "medium" }).format(new Date(value));
   } catch {
     return value;
   }
@@ -221,43 +269,65 @@ export default async function StaffDetailPage({
     returnTo: `/staff/${id}`,
   });
 
-  const { data: employee } = await supabase
-    .from("employees")
-    .select("id,full_name,alias,role,is_active,site_id")
-    .eq("id", id)
-    .maybeSingle();
+  const [{ data: employee }, { data: sites }, { data: roles }, { data: employeeSites }, { data: attendanceStatus }, { data: attendanceLogs }, { data: shifts }] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("id,full_name,alias,role,is_active,site_id")
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("sites")
+      .select("id,name,code")
+      .order("name", { ascending: true }),
+    supabase
+      .from("roles")
+      .select("code,name")
+      .eq("is_active", true)
+      .order("name", { ascending: true }),
+    supabase
+      .from("employee_sites")
+      .select("site_id,is_primary,is_active,site:sites(id,name,code)")
+      .eq("employee_id", id)
+      .order("is_primary", { ascending: false }),
+    supabase
+      .from("employee_attendance_status")
+      .select("employee_id,current_status,last_action_at,last_site_id")
+      .eq("employee_id", id)
+      .maybeSingle(),
+    supabase
+      .from("attendance_logs")
+      .select("id,action,occurred_at,source,accuracy_meters,site_id,site:sites(id,name,code)")
+      .eq("employee_id", id)
+      .order("occurred_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("employee_shifts")
+      .select("id,shift_date,start_time,end_time,status,site_id,site:sites(id,name,code)")
+      .eq("employee_id", id)
+      .gte("shift_date", new Date().toISOString().slice(0, 10))
+      .order("shift_date", { ascending: true })
+      .limit(15),
+  ]);
 
   if (!employee) {
     redirect("/staff?error=" + encodeURIComponent("Empleado no encontrado."));
   }
 
-  const { data: sites } = await supabase
-    .from("sites")
-    .select("id,name,code")
-    .order("name", { ascending: true });
-
-  const { data: roles } = await supabase
-    .from("roles")
-    .select("code,name")
-    .eq("is_active", true)
-    .order("name", { ascending: true });
-
-  const { data: employeeSites } = await supabase
-    .from("employee_sites")
-    .select("site_id,is_primary,is_active,site:sites(id,name,code)")
-    .eq("employee_id", id)
-    .order("is_primary", { ascending: false });
-
   const siteRows = (sites ?? []) as SiteRow[];
   const roleRows = (roles ?? []) as RoleRow[];
   const emp = employee as EmployeeRow;
   const siteLinks = (employeeSites ?? []) as EmployeeSiteRow[];
+  const attendance = (attendanceStatus ?? null) as AttendanceStatusRow | null;
+  const attendanceRows = (attendanceLogs ?? []) as AttendanceLogRow[];
+  const shiftRows = (shifts ?? []) as ShiftRow[];
+
+  const attendanceLabel = attendance?.current_status === "check_in" ? "En turno" : attendance?.current_status === "check_out" ? "Fuera de turno" : "Sin registros";
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Editar trabajador"
-        subtitle="Actualiza datos, roles y sedes asignadas."
+        subtitle="Actualiza datos, roles, sedes y revisa asistencia/turnos."
         actions={
           <Link href="/staff" className="ui-btn ui-btn--ghost">
             Volver
@@ -359,41 +429,118 @@ export default async function StaffDetailPage({
                 return (
                   <TableRow key={link.site_id}>
                     <TableCell>{site?.name ?? site?.code ?? link.site_id}</TableCell>
-                  <TableCell>
-                    <form action={toggleEmployeeSite} className="flex items-center gap-2">
-                      <input type="hidden" name="employee_id" value={emp.id} />
-                      <input type="hidden" name="site_id" value={link.site_id} />
-                      <input type="hidden" name="is_active" value={String(!link.is_active)} />
-                      <span className={`ui-chip ${link.is_active ? "ui-chip--success" : ""}`}>
-                        {link.is_active ? "Activo" : "Inactivo"}
-                      </span>
-                      <button type="submit" className="ui-btn ui-btn--ghost">
-                        {link.is_active ? "Desactivar" : "Activar"}
-                      </button>
-                    </form>
-                  </TableCell>
-                  <TableCell>
-                    {link.is_primary ? (
-                      <span className="ui-chip ui-chip--brand">Principal</span>
-                    ) : (
-                      <form action={setPrimarySite}>
+                    <TableCell>
+                      <form action={toggleEmployeeSite} className="flex items-center gap-2">
                         <input type="hidden" name="employee_id" value={emp.id} />
                         <input type="hidden" name="site_id" value={link.site_id} />
-                        <button type="submit" className="ui-btn ui-btn--ghost">
-                          Hacer principal
+                        <input type="hidden" name="is_active" value={String(!link.is_active)} />
+                        <span className={`ui-chip ${link.is_active ? "ui-chip--success" : ""}`}>
+                          {link.is_active ? "Activo" : "Inactivo"}
+                        </span>
+                        <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+                          {link.is_active ? "Desactivar" : "Activar"}
                         </button>
                       </form>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <form action={removeEmployeeSite}>
-                      <input type="hidden" name="employee_id" value={emp.id} />
-                      <input type="hidden" name="site_id" value={link.site_id} />
-                      <button type="submit" className="ui-btn ui-btn--ghost">
-                        Quitar
-                      </button>
-                    </form>
-                  </TableCell>
+                    </TableCell>
+                    <TableCell>
+                      {link.is_primary ? (
+                        <span className="ui-chip ui-chip--brand">Principal</span>
+                      ) : (
+                        <form action={setPrimarySite}>
+                          <input type="hidden" name="employee_id" value={emp.id} />
+                          <input type="hidden" name="site_id" value={link.site_id} />
+                          <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+                            Hacer principal
+                          </button>
+                        </form>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <form action={removeEmployeeSite}>
+                        <input type="hidden" name="employee_id" value={emp.id} />
+                        <input type="hidden" name="site_id" value={link.site_id} />
+                        <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+                          Quitar
+                        </button>
+                      </form>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+
+      <div className="ui-panel space-y-4">
+        <div className="ui-h3">Asistencia</div>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className={`ui-chip ${attendance?.current_status === "check_in" ? "ui-chip--success" : ""}`}>
+            {attendanceLabel}
+          </span>
+          <span className="ui-caption">Ultimo registro: {formatDateTime(attendance?.last_action_at)}</span>
+        </div>
+
+        {attendanceRows.length === 0 ? (
+          <div className="ui-empty">No hay registros de asistencia para este trabajador.</div>
+        ) : (
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Fecha</TableHeaderCell>
+                <TableHeaderCell>Accion</TableHeaderCell>
+                <TableHeaderCell>Sede</TableHeaderCell>
+                <TableHeaderCell>Origen</TableHeaderCell>
+                <TableHeaderCell>Precision</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {attendanceRows.map((row) => {
+                const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site ?? null;
+                return (
+                  <TableRow key={row.id}>
+                    <TableCell>{formatDateTime(row.occurred_at)}</TableCell>
+                    <TableCell>
+                      <span className={`ui-chip ${row.action === "check_in" ? "ui-chip--success" : ""}`}>
+                        {row.action === "check_in" ? "Entrada" : "Salida"}
+                      </span>
+                    </TableCell>
+                    <TableCell>{site?.name ?? site?.code ?? row.site_id ?? "-"}</TableCell>
+                    <TableCell>{row.source ?? "-"}</TableCell>
+                    <TableCell>{row.accuracy_meters != null ? `${row.accuracy_meters} m` : "-"}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+
+      <div className="ui-panel space-y-4">
+        <div className="ui-h3">Proximos turnos</div>
+        {shiftRows.length === 0 ? (
+          <div className="ui-empty">No hay turnos programados para este trabajador.</div>
+        ) : (
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Fecha</TableHeaderCell>
+                <TableHeaderCell>Horario</TableHeaderCell>
+                <TableHeaderCell>Sede</TableHeaderCell>
+                <TableHeaderCell>Estado</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {shiftRows.map((shift) => {
+                const site = Array.isArray(shift.site) ? shift.site[0] ?? null : shift.site ?? null;
+                return (
+                  <TableRow key={shift.id}>
+                    <TableCell>{formatDate(shift.shift_date)}</TableCell>
+                    <TableCell>{`${shift.start_time} - ${shift.end_time}`}</TableCell>
+                    <TableCell>{site?.name ?? site?.code ?? shift.site_id}</TableCell>
+                    <TableCell>
+                      <span className="ui-chip">{shift.status}</span>
+                    </TableCell>
                   </TableRow>
                 );
               })}

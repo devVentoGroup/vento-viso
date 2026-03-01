@@ -87,11 +87,17 @@ const NAV_GROUPS: NavGroup[] = [
         description: "Sedes y Vento Pass",
         icon: "store",
       },
+      {
+        href: "/products",
+        label: "Productos",
+        description: "Catalogo de recompensas",
+        icon: "package",
+      },
     ],
   },
 ];
 
-type IconName = "dashboard" | "users" | "store" | "sparkles";
+type IconName = "dashboard" | "users" | "store" | "sparkles" | "package";
 
 function Icon({ name }: { name?: IconName }) {
   const common = "none";
@@ -128,6 +134,14 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M12 3l1.5 3.5L17 8l-3.5 1.5L12 13l-1.5-3.5L7 8l3.5-1.5L12 3z" />
           <path d="M5 16l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2z" />
           <path d="M18 14l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2z" />
+        </svg>
+      );
+    case "package":
+      return (
+        <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
+          <path d="M3 8.5L12 4l9 4.5v7L12 20l-9-4.5z" />
+          <path d="M12 20v-8" />
+          <path d="M3 8.5l9 4.5 9-4.5" />
         </svg>
       );
     default:

@@ -25,12 +25,12 @@ export default async function VisoHomePage() {
     returnTo: "/",
   });
 
-  const [employeeCount, passUserCount, businessCount, siteCount] =
+  const [employeeCount, passUserCount, businessCount, productCount] =
     await Promise.all([
       countRows(supabase, "employees"),
       countRows(supabase, "users", { column: "is_client", value: true }),
       countRows(supabase, "pass_satellites"),
-      countRows(supabase, "sites"),
+      countRows(supabase, "loyalty_rewards"),
     ]);
 
   return (
@@ -57,13 +57,13 @@ export default async function VisoHomePage() {
           <p className="mt-2 ui-body-muted">Sedes y configuracion Pass.</p>
         </Link>
         <div className="ui-card">
-          <div className="ui-caption">Sedes activas</div>
-          <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">{siteCount}</div>
-          <p className="mt-2 ui-body-muted">Mapa general de ubicaciones.</p>
+          <div className="ui-caption">Productos</div>
+          <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">{productCount}</div>
+          <p className="mt-2 ui-body-muted">Catalogo publicado para canjes.</p>
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Link href="/businesses/new" className="ui-panel-soft">
           <div className="ui-title">Crear negocio</div>
           <p className="mt-2 ui-body-muted">Alta rapida de sede y satelite de Pass.</p>
@@ -71,6 +71,10 @@ export default async function VisoHomePage() {
         <Link href="/staff/new" className="ui-panel-soft">
           <div className="ui-title">Invitar trabajador</div>
           <p className="mt-2 ui-body-muted">Genera invitaciones con rol y sede.</p>
+        </Link>
+        <Link href="/products/new" className="ui-panel-soft">
+          <div className="ui-title">Crear producto</div>
+          <p className="mt-2 ui-body-muted">Agrega items que se muestran en Vento Pass.</p>
         </Link>
       </div>
     </div>
