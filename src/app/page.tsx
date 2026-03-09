@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 async function countRows(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: { from: Awaited<ReturnType<typeof createClient>>["from"] },
   table: string,
   filter?: { column: string; value: string | boolean }
 ) {
@@ -29,8 +29,8 @@ export default async function VisoHomePage() {
     await Promise.all([
       countRows(supabase, "employees"),
       countRows(supabase, "users", { column: "is_client", value: true }),
-      countRows(supabase, "pass_satellites"),
-      countRows(supabase, "loyalty_rewards"),
+      countRows(supabase.schema("pass"), "pass_satellites"),
+      countRows(supabase.schema("pass"), "loyalty_rewards"),
     ]);
 
   return (
@@ -80,3 +80,4 @@ export default async function VisoHomePage() {
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-﻿begin;
+begin;
 
 insert into storage.buckets (
   id,

@@ -93,11 +93,17 @@ const NAV_GROUPS: NavGroup[] = [
         description: "Catalogo de recompensas",
         icon: "package",
       },
+      {
+        href: "/menu",
+        label: "Menu",
+        description: "Catalogo comercial",
+        icon: "menu",
+      },
     ],
   },
 ];
 
-type IconName = "dashboard" | "users" | "store" | "sparkles" | "package";
+type IconName = "dashboard" | "users" | "store" | "sparkles" | "package" | "menu";
 
 function Icon({ name }: { name?: IconName }) {
   const common = "none";
@@ -142,6 +148,17 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M3 8.5L12 4l9 4.5v7L12 20l-9-4.5z" />
           <path d="M12 20v-8" />
           <path d="M3 8.5l9 4.5 9-4.5" />
+        </svg>
+      );
+    case "menu":
+      return (
+        <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
+          <path d="M4 7h16" />
+          <path d="M7 12h13" />
+          <path d="M10 17h10" />
+          <path d="M4 17h2" />
+          <path d="M4 12h2" />
+          <path d="M4 7h2" />
         </svg>
       );
     default:

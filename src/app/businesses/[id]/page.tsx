@@ -150,7 +150,7 @@ async function updateBusiness(formData: FormData) {
   };
 
   const { error: satelliteError } = await supabase
-    .from("pass_satellites")
+    .schema("pass").from("pass_satellites")
     .update(satellitePayload)
     .eq("id", id);
 
@@ -172,7 +172,7 @@ async function deleteBusiness(formData: FormData) {
     redirect("/businesses?error=" + encodeURIComponent("Negocio invalido."));
   }
 
-  const { error } = await supabase.from("pass_satellites").delete().eq("id", id);
+  const { error } = await supabase.schema("pass").from("pass_satellites").delete().eq("id", id);
 
   if (error) {
     redirect(`/businesses/${id}?error=${encodeURIComponent(error.message)}`);
@@ -209,7 +209,7 @@ export default async function BusinessDetailPage({
   });
 
   const { data } = await supabase
-    .from("pass_satellites")
+    .schema("pass").from("pass_satellites")
     .select(
       "id,code,name,subtitle,tags,logo_url,card_logo_url,header_logo_url,watermark_icon,gradient_start,gradient_end,accent_color,primary_color,background_color,text_color,text_secondary_color,card_color,border_color,indicator_color,loading_color,review_url,maps_url,address_override,latitude_override,longitude_override,sort_order,is_active,site_id,site:sites(id,code,name,site_type,address,latitude,longitude,is_public,is_active)"
     )
@@ -293,3 +293,4 @@ export default async function BusinessDetailPage({
     </div>
   );
 }
+

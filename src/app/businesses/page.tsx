@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
@@ -38,7 +38,7 @@ export default async function BusinessesPage({
   });
 
   const { data } = await supabase
-    .from("pass_satellites")
+    .schema("pass").from("pass_satellites")
     .select("id,code,name,is_active,site:sites(id,name,code,is_public)")
     .order("sort_order", { ascending: true });
 
@@ -103,3 +103,4 @@ export default async function BusinessesPage({
     </div>
   );
 }
+
