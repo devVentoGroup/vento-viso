@@ -99,11 +99,17 @@ const NAV_GROUPS: NavGroup[] = [
         description: "Catalogo comercial",
         icon: "menu",
       },
+      {
+        href: "/content-blocks",
+        label: "Contenido Pass",
+        description: "Textos y bloques de la app",
+        icon: "fileText",
+      },
     ],
   },
 ];
 
-type IconName = "dashboard" | "users" | "store" | "sparkles" | "package" | "menu";
+type IconName = "dashboard" | "users" | "store" | "sparkles" | "package" | "menu" | "fileText";
 
 function Icon({ name }: { name?: IconName }) {
   const common = "none";
@@ -159,6 +165,16 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M4 17h2" />
           <path d="M4 12h2" />
           <path d="M4 7h2" />
+        </svg>
+      );
+    case "fileText":
+      return (
+        <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M16 13H8" />
+          <path d="M16 17H8" />
+          <path d="M10 9H8" />
         </svg>
       );
     default:

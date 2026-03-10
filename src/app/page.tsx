@@ -76,6 +76,10 @@ export default async function VisoHomePage() {
           <div className="ui-title">Crear producto</div>
           <p className="mt-2 ui-body-muted">Agrega items que se muestran en Vento Pass.</p>
         </Link>
+        <Link href="/content-blocks" className="ui-panel-soft">
+          <div className="ui-title">Contenido Pass</div>
+          <p className="mt-2 ui-body-muted">Textos y bloques de la app Vento Pass.</p>
+        </Link>
       </div>
     </div>
   );
