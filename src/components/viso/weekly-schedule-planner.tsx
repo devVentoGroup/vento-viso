@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type PlannerEmployee = {
   id: string;
@@ -285,6 +285,10 @@ export function WeeklySchedulePlanner({
   type Selection = null | SlotSelection | ShiftSelection;
 
   const [selection, setSelection] = useState<Selection>(null);
+  type DragPoint = { dayIso: string; slotIndex: number };
+  const [dragStart, setDragStart] = useState<DragPoint | null>(null);
+  const [dragCurrent, setDragCurrent] = useState<DragPoint | null>(null);
+  const justDraggedRef = useRef(false);
 
   const employeeById = useMemo(
     () => new Map(employees.map((employee) => [employee.id, employee])),
@@ -328,6 +332,68 @@ export function WeeklySchedulePlanner({
       showTimeAdjust: false,
     });
   };
+
+  const selectSlotRange = useCallback(
+    (dayIso: string, startSlotIndex: number, endSlotIndex: number) => {
+      const lo = Math.min(startSlotIndex, endSlotIndex);
+      const hi = Math.max(startSlotIndex, endSlotIndex);
+      const startTime = formatSlotLabel(lo);
+      const endTime =
+        lo === hi
+          ? addMinutes(startTime, 60)
+          : addMinutes(formatSlotLabel(hi), SLOT_MINUTES);
+      setSelection({
+        type: "slot",
+        dayIso,
+        startTime,
+        endTime,
+        employeeId: null,
+        showTimeAdjust: false,
+      });
+    },
+    [],
+  );
+
+  const handleSlotMouseDown = useCallback((dayIso: string, slotIndex: number) => {
+    justDraggedRef.current = false;
+    setDragStart({ dayIso, slotIndex });
+    setDragCurrent({ dayIso, slotIndex });
+  }, []);
+
+  const handleSlotMouseEnter = useCallback((dayIso: string, slotIndex: number) => {
+    setDragCurrent((prev) => {
+      if (!prev) return null;
+      if (dayIso !== prev.dayIso) return prev;
+      return { dayIso, slotIndex };
+    });
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    if (dragStart && dragCurrent && dragStart.dayIso === dragCurrent.dayIso) {
+      justDraggedRef.current = true;
+      selectSlotRange(dragStart.dayIso, dragStart.slotIndex, dragCurrent.slotIndex);
+    }
+    setDragStart(null);
+    setDragCurrent(null);
+  }, [dragStart, dragCurrent, selectSlotRange]);
+
+  useEffect(() => {
+    if (!dragStart) return;
+    const onMouseUp = () => handleDragEnd();
+    document.addEventListener("mouseup", onMouseUp);
+    return () => document.removeEventListener("mouseup", onMouseUp);
+  }, [dragStart, handleDragEnd]);
+
+  const isSlotInDragRange = useCallback(
+    (dayIso: string, slotIndex: number) => {
+      if (!dragStart || !dragCurrent || dragStart.dayIso !== dragCurrent.dayIso || dragStart.dayIso !== dayIso)
+        return false;
+      const lo = Math.min(dragStart.slotIndex, dragCurrent.slotIndex);
+      const hi = Math.max(dragStart.slotIndex, dragCurrent.slotIndex);
+      return slotIndex >= lo && slotIndex <= hi;
+    },
+    [dragStart, dragCurrent],
+  );
 
   const clearSelection = () => setSelection(null);
 
@@ -431,16 +497,35 @@ export function WeeklySchedulePlanner({
                       className="relative border-r border-[var(--ui-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,245,255,0.9))] last:border-r-0"
                       style={{ height: DAY_HEIGHT }}
                     >
-                      {Array.from({ length: SLOT_COUNT }).map((_, slotIndex) => (
-                        <button
-                          key={`${day.iso}-${slotIndex}`}
-                          type="button"
-                          onClick={() => selectSlot(day.iso, slotIndex)}
-                          className="absolute left-0 right-0 border-b border-dashed border-[rgba(27,16,51,0.08)] text-left transition hover:bg-[rgba(168,85,247,0.08)]"
-                          style={{ top: slotIndex * SLOT_HEIGHT, height: SLOT_HEIGHT }}
-                          title={`Asignar turno ${day.shortLabel} ${formatSlotLabel(slotIndex)}`}
-                        />
-                      ))}
+                      {Array.from({ length: SLOT_COUNT }).map((_, slotIndex) => {
+                        const inRange = isSlotInDragRange(day.iso, slotIndex);
+                        return (
+                          <button
+                            key={`${day.iso}-${slotIndex}`}
+                            type="button"
+                            onMouseDown={() => handleSlotMouseDown(day.iso, slotIndex)}
+                            onMouseEnter={() => handleSlotMouseEnter(day.iso, slotIndex)}
+                            onClick={() => {
+                              if (justDraggedRef.current) {
+                                justDraggedRef.current = false;
+                                return;
+                              }
+                              selectSlot(day.iso, slotIndex);
+                            }}
+                            className={`absolute left-0 right-0 border-b border-dashed text-left transition select-none ${
+                              inRange
+                                ? "bg-[var(--ui-brand-soft)] border-[var(--ui-brand)]"
+                                : "border-[rgba(27,16,51,0.08)] hover:bg-[rgba(168,85,247,0.08)]"
+                            }`}
+                            style={{ top: slotIndex * SLOT_HEIGHT, height: SLOT_HEIGHT }}
+                            title={
+                              inRange
+                                ? "Suelta para asignar este bloque"
+                                : `Arrastra o haz clic para asignar · ${day.shortLabel} ${formatSlotLabel(slotIndex)}`
+                            }
+                          />
+                        );
+                      })}
 
                       {dayShifts.map((shift) => {
                         const employee = employeeById.get(shift.employee_id);
@@ -491,7 +576,7 @@ export function WeeklySchedulePlanner({
         {selection === null && (
           <div className="ui-panel flex flex-col items-center justify-center gap-4 py-12 text-center">
             <p className="max-w-xs text-[var(--ui-muted)]">
-              Haz clic en un hueco del horario para asignar un turno. El panel irá mostrando solo lo que necesitas.
+              Haz clic en un hueco o <strong>arrastra</strong> sobre varios para marcar un bloque de horas; suelta y asigna la persona.
             </p>
           </div>
         )}
