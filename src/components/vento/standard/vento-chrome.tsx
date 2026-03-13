@@ -71,6 +71,12 @@ const NAV_GROUPS: NavGroup[] = [
         icon: "users",
       },
       {
+        href: "/staff/schedule",
+        label: "Horarios",
+        description: "Planner semanal",
+        icon: "calendar",
+      },
+      {
         href: "/pass-users",
         label: "Usuarios Pass",
         description: "Clientes y lealtad",
@@ -109,7 +115,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-type IconName = "dashboard" | "users" | "store" | "sparkles" | "package" | "menu" | "fileText";
+type IconName = "dashboard" | "users" | "calendar" | "store" | "sparkles" | "package" | "menu" | "fileText";
 
 function Icon({ name }: { name?: IconName }) {
   const common = "none";
@@ -130,6 +136,20 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M4 18c0-3 3-5 6-5" />
           <path d="M20 18c0-3-3-5-6-5" />
           <circle cx="8" cy="9" r="3" />
+        </svg>
+      );
+    case "calendar":
+      return (
+        <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
+          <rect x="3" y="5" width="18" height="16" rx="2" />
+          <path d="M16 3v4" />
+          <path d="M8 3v4" />
+          <path d="M3 10h18" />
+          <path d="M8 14h.01" />
+          <path d="M12 14h.01" />
+          <path d="M16 14h.01" />
+          <path d="M8 18h.01" />
+          <path d="M12 18h.01" />
         </svg>
       );
     case "store":

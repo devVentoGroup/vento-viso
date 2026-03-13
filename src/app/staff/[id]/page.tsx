@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { requireAppAccess } from "@/lib/auth/guard";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -58,8 +58,11 @@ type ShiftRow = {
   shift_date: string;
   start_time: string;
   end_time: string;
+  break_minutes: number | null;
+  notes: string | null;
   status: string;
   site_id: string;
+  published_at?: string | null;
   site?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
 };
 
@@ -92,18 +95,14 @@ function formatDateTime(value: string | null | undefined) {
   }
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return "-";
-  try {
-    return new Intl.DateTimeFormat("es-CO", { dateStyle: "medium" }).format(new Date(value));
-  } catch {
-    return value;
-  }
+function asNumber(value: FormDataEntryValue | null, fallback = 0) {
+  if (typeof value !== "string" || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 async function updateEmployee(formData: FormData) {
   "use server";
-  const supabase = await createClient();
   const id = asText(formData.get("id"));
   const fullName = asText(formData.get("full_name"));
   const alias = asText(formData.get("alias"));
@@ -114,6 +113,12 @@ async function updateEmployee(formData: FormData) {
   if (!id || !fullName || !role || !siteId) {
     redirect(`/staff/${id}?error=${encodeURIComponent("Faltan campos obligatorios.")}`);
   }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${id}`,
+  });
+  const supabase = createAdminClient();
 
   const { error } = await supabase
     .from("employees")
@@ -137,9 +142,14 @@ async function updateEmployee(formData: FormData) {
 
 async function deleteEmployee(formData: FormData) {
   "use server";
-  const supabase = await createClient();
   const id = asText(formData.get("id"));
   if (!id) redirect("/staff?error=" + encodeURIComponent("Empleado invalido."));
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${id}`,
+  });
+  const supabase = createAdminClient();
 
   const { error } = await supabase.from("employees").delete().eq("id", id);
   if (error) {
@@ -152,7 +162,6 @@ async function deleteEmployee(formData: FormData) {
 
 async function addEmployeeSite(formData: FormData) {
   "use server";
-  const supabase = await createClient();
   const employeeId = asText(formData.get("employee_id"));
   const siteId = asText(formData.get("site_id"));
   const makePrimary = asBool(formData.get("is_primary"));
@@ -160,6 +169,12 @@ async function addEmployeeSite(formData: FormData) {
   if (!employeeId || !siteId) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent("Selecciona una sede.")}`);
   }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
 
   if (makePrimary) {
     await supabase
@@ -185,13 +200,18 @@ async function addEmployeeSite(formData: FormData) {
 
 async function setPrimarySite(formData: FormData) {
   "use server";
-  const supabase = await createClient();
   const employeeId = asText(formData.get("employee_id"));
   const siteId = asText(formData.get("site_id"));
 
   if (!employeeId || !siteId) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent("Sede invalida.")}`);
   }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
 
   await supabase
     .from("employee_sites")
@@ -214,10 +234,15 @@ async function setPrimarySite(formData: FormData) {
 
 async function toggleEmployeeSite(formData: FormData) {
   "use server";
-  const supabase = await createClient();
   const employeeId = asText(formData.get("employee_id"));
   const siteId = asText(formData.get("site_id"));
   const nextActive = asBool(formData.get("is_active"));
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
 
   const { error } = await supabase
     .from("employee_sites")
@@ -235,9 +260,14 @@ async function toggleEmployeeSite(formData: FormData) {
 
 async function removeEmployeeSite(formData: FormData) {
   "use server";
-  const supabase = await createClient();
   const employeeId = asText(formData.get("employee_id"));
   const siteId = asText(formData.get("site_id"));
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
 
   const { error } = await supabase
     .from("employee_sites")
@@ -253,6 +283,119 @@ async function removeEmployeeSite(formData: FormData) {
   redirect(`/staff/${employeeId}?ok=site_removed`);
 }
 
+async function createEmployeeShift(formData: FormData) {
+  "use server";
+  const employeeId = asText(formData.get("employee_id"));
+  const siteId = asText(formData.get("site_id"));
+  const shiftDate = asText(formData.get("shift_date"));
+  const startTime = asText(formData.get("start_time"));
+  const endTime = asText(formData.get("end_time"));
+
+  if (!employeeId || !siteId || !shiftDate || !startTime || !endTime) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Completa fecha, sede y horario del turno.")}`);
+  }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
+
+  const payload = {
+    employee_id: employeeId,
+    site_id: siteId,
+    shift_date: shiftDate,
+    start_time: startTime,
+    end_time: endTime,
+    break_minutes: Math.max(0, asNumber(formData.get("break_minutes"), 0)),
+    status: asText(formData.get("status")) || "scheduled",
+    notes: asText(formData.get("notes")) || null,
+    published_at: null,
+    published_by: null,
+  };
+
+  const { error } = await supabase.from("employee_shifts").insert(payload);
+
+  if (error) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/staff/${employeeId}`);
+  redirect(`/staff/${employeeId}?ok=shift_created`);
+}
+
+async function updateEmployeeShift(formData: FormData) {
+  "use server";
+  const employeeId = asText(formData.get("employee_id"));
+  const shiftId = asText(formData.get("shift_id"));
+  const siteId = asText(formData.get("site_id"));
+  const shiftDate = asText(formData.get("shift_date"));
+  const startTime = asText(formData.get("start_time"));
+  const endTime = asText(formData.get("end_time"));
+
+  if (!employeeId || !shiftId || !siteId || !shiftDate || !startTime || !endTime) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Faltan datos para actualizar el turno.")}`);
+  }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
+
+  const { error } = await supabase
+    .from("employee_shifts")
+    .update({
+      site_id: siteId,
+      shift_date: shiftDate,
+      start_time: startTime,
+      end_time: endTime,
+      break_minutes: Math.max(0, asNumber(formData.get("break_minutes"), 0)),
+      status: asText(formData.get("status")) || "scheduled",
+      notes: asText(formData.get("notes")) || null,
+      published_at: null,
+      published_by: null,
+    })
+    .eq("id", shiftId)
+    .eq("employee_id", employeeId);
+
+  if (error) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/staff/${employeeId}`);
+  redirect(`/staff/${employeeId}?ok=shift_updated`);
+}
+
+async function deleteEmployeeShift(formData: FormData) {
+  "use server";
+  const employeeId = asText(formData.get("employee_id"));
+  const shiftId = asText(formData.get("shift_id"));
+
+  if (!employeeId || !shiftId) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Turno invalido.")}`);
+  }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
+
+  const { error } = await supabase
+    .from("employee_shifts")
+    .delete()
+    .eq("id", shiftId)
+    .eq("employee_id", employeeId);
+
+  if (error) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/staff/${employeeId}`);
+  redirect(`/staff/${employeeId}?ok=shift_deleted`);
+}
+
 export default async function StaffDetailPage({
   params,
   searchParams,
@@ -265,10 +408,11 @@ export default async function StaffDetailPage({
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
   const { id } = await params;
 
-  const { supabase } = await requireAppAccess({
+  await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${id}`,
   });
+  const supabase = createAdminClient();
 
   const [{ data: employee }, { data: sites }, { data: roles }, { data: employeeSites }, { data: attendanceStatus }, { data: attendanceLogs }, { data: shifts }] = await Promise.all([
     supabase
@@ -303,11 +447,11 @@ export default async function StaffDetailPage({
       .limit(20),
     supabase
       .from("employee_shifts")
-      .select("id,shift_date,start_time,end_time,status,site_id,site:sites(id,name,code)")
+      .select("id,shift_date,start_time,end_time,break_minutes,notes,status,site_id,published_at,site:sites(id,name,code)")
       .eq("employee_id", id)
-      .gte("shift_date", new Date().toISOString().slice(0, 10))
       .order("shift_date", { ascending: true })
-      .limit(15),
+      .order("start_time", { ascending: true })
+      .limit(40),
   ]);
 
   if (!employee) {
@@ -328,7 +472,7 @@ export default async function StaffDetailPage({
     <div className="space-y-6">
       <PageHeader
         title="Editar trabajador"
-        subtitle="Actualiza datos, roles, sedes y revisa asistencia/turnos."
+        subtitle="Actualiza datos, roles, sedes y administra asistencia y horarios."
         actions={
           <Link href="/staff" className="ui-btn ui-btn--ghost">
             Volver
@@ -518,7 +662,57 @@ export default async function StaffDetailPage({
       </div>
 
       <div className="ui-panel space-y-4">
-        <div className="ui-h3">Proximos turnos</div>
+        <div className="ui-h3">Editor de horarios</div>
+        <form action={createEmployeeShift} className="grid gap-3 lg:grid-cols-6">
+          <input type="hidden" name="employee_id" value={emp.id} />
+          <label className="space-y-2">
+            <span className="ui-label">Fecha</span>
+            <input name="shift_date" type="date" className="ui-input" required />
+          </label>
+          <label className="space-y-2">
+            <span className="ui-label">Inicio</span>
+            <input name="start_time" type="time" className="ui-input" required />
+          </label>
+          <label className="space-y-2">
+            <span className="ui-label">Fin</span>
+            <input name="end_time" type="time" className="ui-input" required />
+          </label>
+          <label className="space-y-2">
+            <span className="ui-label">Descanso (min)</span>
+            <input name="break_minutes" type="number" min="0" className="ui-input" defaultValue={0} />
+          </label>
+          <label className="space-y-2">
+            <span className="ui-label">Estado</span>
+            <select name="status" className="ui-input" defaultValue="scheduled">
+              <option value="scheduled">Programado</option>
+              <option value="confirmed">Confirmado</option>
+              <option value="completed">Completado</option>
+              <option value="cancelled">Cancelado</option>
+              <option value="no_show">No asistio</option>
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="ui-label">Sede</span>
+            <select name="site_id" className="ui-input" defaultValue={emp.site_id ?? ""} required>
+              <option value="">Selecciona una sede</option>
+              {siteRows.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name ?? site.code ?? site.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-2 lg:col-span-5">
+            <span className="ui-label">Notas</span>
+            <input name="notes" className="ui-input" placeholder="Observaciones del turno, reemplazo, cobertura, etc." />
+          </label>
+          <div className="flex items-end">
+            <button type="submit" className="ui-btn ui-btn--brand w-full">
+              Crear turno
+            </button>
+          </div>
+        </form>
+
         {shiftRows.length === 0 ? (
           <div className="ui-empty">No hay turnos programados para este trabajador.</div>
         ) : (
@@ -528,19 +722,97 @@ export default async function StaffDetailPage({
                 <TableHeaderCell>Fecha</TableHeaderCell>
                 <TableHeaderCell>Horario</TableHeaderCell>
                 <TableHeaderCell>Sede</TableHeaderCell>
+                <TableHeaderCell>Descanso</TableHeaderCell>
                 <TableHeaderCell>Estado</TableHeaderCell>
+                <TableHeaderCell>Notas</TableHeaderCell>
+                <TableHeaderCell></TableHeaderCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {shiftRows.map((shift) => {
                 const site = Array.isArray(shift.site) ? shift.site[0] ?? null : shift.site ?? null;
+                const formId = `shift-form-${shift.id}`;
                 return (
                   <TableRow key={shift.id}>
-                    <TableCell>{formatDate(shift.shift_date)}</TableCell>
-                    <TableCell>{`${shift.start_time} - ${shift.end_time}`}</TableCell>
-                    <TableCell>{site?.name ?? site?.code ?? shift.site_id}</TableCell>
-                    <TableCell>
-                      <span className="ui-chip">{shift.status}</span>
+                    <TableCell className="align-top">
+                      <input
+                        form={formId}
+                        name="shift_date"
+                        type="date"
+                        className="ui-input min-w-[150px]"
+                        defaultValue={shift.shift_date}
+                        required
+                      />
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <div className="flex gap-2">
+                        <input
+                          form={formId}
+                          name="start_time"
+                          type="time"
+                          className="ui-input min-w-[116px]"
+                          defaultValue={shift.start_time.slice(0, 5)}
+                          required
+                        />
+                        <input
+                          form={formId}
+                          name="end_time"
+                          type="time"
+                          className="ui-input min-w-[116px]"
+                          defaultValue={shift.end_time.slice(0, 5)}
+                          required
+                        />
+                      </div>
+                    </TableCell>
+                    <TableCell className="align-top">
+                        <select form={formId} name="site_id" className="ui-input min-w-[180px]" defaultValue={shift.site_id} required>
+                          {siteRows.map((siteRow) => (
+                            <option key={siteRow.id} value={siteRow.id}>
+                              {siteRow.name ?? siteRow.code ?? siteRow.id}
+                            </option>
+                          ))}
+                        </select>
+                      <div className="ui-caption mt-2">{site?.name ?? site?.code ?? shift.site_id}</div>
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <input
+                        form={formId}
+                        name="break_minutes"
+                        type="number"
+                        min="0"
+                        className="ui-input min-w-[110px]"
+                        defaultValue={shift.break_minutes ?? 0}
+                      />
+                    </TableCell>
+                    <TableCell className="align-top">
+                        <select form={formId} name="status" className="ui-input min-w-[150px]" defaultValue={shift.status}>
+                          <option value="scheduled">Programado</option>
+                          <option value="confirmed">Confirmado</option>
+                          <option value="completed">Completado</option>
+                          <option value="cancelled">Cancelado</option>
+                          <option value="no_show">No asistio</option>
+                        </select>
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <input form={formId} name="notes" className="ui-input min-w-[220px]" defaultValue={shift.notes ?? ""} />
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <div className="flex flex-col gap-2">
+                        <form id={formId} action={updateEmployeeShift} className="hidden">
+                          <input type="hidden" name="employee_id" value={emp.id} />
+                          <input type="hidden" name="shift_id" value={shift.id} />
+                        </form>
+                        <button type="submit" form={formId} className="ui-btn ui-btn--ghost ui-btn--sm">
+                          Guardar
+                        </button>
+                        <form action={deleteEmployeeShift}>
+                          <input type="hidden" name="employee_id" value={emp.id} />
+                          <input type="hidden" name="shift_id" value={shift.id} />
+                          <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+                            Eliminar
+                          </button>
+                        </form>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

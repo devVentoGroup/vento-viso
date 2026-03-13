@@ -3,6 +3,7 @@
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { requireAppAccess } from "@/lib/auth/guard";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -36,15 +37,16 @@ export default async function PassUsersPage({
   const okMsg = sp.ok ? safeDecode(sp.ok) : "";
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
 
-  const { supabase } = await requireAppAccess({
+  await requireAppAccess({
     appId: "viso",
     returnTo: "/pass-users",
   });
 
+  const supabase = createAdminClient();
+
   let query = supabase
     .from("users")
     .select("id,full_name,email,phone,loyalty_points,is_active,created_at")
-    .eq("is_client", true)
     .order("created_at", { ascending: false })
     .limit(200);
 

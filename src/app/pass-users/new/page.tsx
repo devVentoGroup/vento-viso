@@ -2,7 +2,7 @@
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,11 @@ function asNumber(value: FormDataEntryValue | null) {
 
 async function createUser(formData: FormData) {
   "use server";
-  const supabase = await createClient();
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: "/pass-users/new",
+  });
+  const supabase = createAdminClient();
 
   const fullName = asText(formData.get("full_name"));
   const email = asText(formData.get("email"));

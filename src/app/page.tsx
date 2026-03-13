@@ -2,12 +2,12 @@ import Link from "next/link";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
 async function countRows(
-  supabase: { from: Awaited<ReturnType<typeof createClient>>["from"] },
+  supabase: { from: ReturnType<typeof createAdminClient>["from"] },
   table: string,
   filter?: { column: string; value: string | boolean }
 ) {
@@ -20,15 +20,16 @@ async function countRows(
 }
 
 export default async function VisoHomePage() {
-  const { supabase } = await requireAppAccess({
+  await requireAppAccess({
     appId: "viso",
     returnTo: "/",
   });
+  const supabase = createAdminClient();
 
   const [employeeCount, passUserCount, businessCount, productCount] =
     await Promise.all([
       countRows(supabase, "employees"),
-      countRows(supabase, "users", { column: "is_client", value: true }),
+      countRows(supabase, "users"),
       countRows(supabase.schema("pass"), "pass_satellites"),
       countRows(supabase.schema("pass"), "loyalty_rewards"),
     ]);

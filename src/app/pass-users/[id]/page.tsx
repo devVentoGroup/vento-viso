@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -49,12 +49,17 @@ function safeDecode(value: string | null | undefined) {
 
 async function updateUser(formData: FormData) {
   "use server";
-  const supabase = await createClient();
   const id = asText(formData.get("id"));
 
   if (!id) {
     redirect("/pass-users?error=" + encodeURIComponent("Usuario invalido."));
   }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/pass-users/${id}`,
+  });
+  const supabase = createAdminClient();
 
   const payload = {
     full_name: asText(formData.get("full_name")) || null,
@@ -83,12 +88,17 @@ async function updateUser(formData: FormData) {
 
 async function deleteUser(formData: FormData) {
   "use server";
-  const supabase = await createClient();
   const id = asText(formData.get("id"));
 
   if (!id) {
     redirect("/pass-users?error=" + encodeURIComponent("Usuario invalido."));
   }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/pass-users/${id}`,
+  });
+  const supabase = createAdminClient();
 
   const { error } = await supabase.from("users").delete().eq("id", id);
 
@@ -112,10 +122,11 @@ export default async function PassUserDetailPage({
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
   const { id } = await params;
 
-  const { supabase } = await requireAppAccess({
+  await requireAppAccess({
     appId: "viso",
     returnTo: `/pass-users/${id}`,
   });
+  const supabase = createAdminClient();
 
   const { data: user } = await supabase
     .from("users")

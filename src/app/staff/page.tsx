@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { requireAppAccess } from "@/lib/auth/guard";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -56,10 +57,12 @@ function attendanceLabel(status: AttendanceStatusRow | undefined) {
 }
 
 export default async function StaffPage() {
-  const { supabase } = await requireAppAccess({
+  await requireAppAccess({
     appId: "viso",
     returnTo: "/staff",
   });
+
+  const supabase = createAdminClient();
 
   const { data } = await supabase
     .from("employees")
@@ -106,9 +109,14 @@ export default async function StaffPage() {
         title="Trabajadores"
         subtitle="Gestiona empleados, sedes asignadas, estado y asistencia reciente."
         actions={
-          <Link href="/staff/new" className="ui-btn ui-btn--brand">
-            Invitar trabajador
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/staff/schedule" className="ui-btn ui-btn--ghost">
+              Horario semanal
+            </Link>
+            <Link href="/staff/new" className="ui-btn ui-btn--brand">
+              Invitar trabajador
+            </Link>
+          </div>
         }
       />
 
