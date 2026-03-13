@@ -102,16 +102,16 @@ function getMinutesTone(totalMinutes: number) {
 function getStatusClass(status: string) {
   switch (status) {
     case "confirmed":
-      return "border-emerald-300 bg-emerald-100 text-emerald-800";
+      return "ui-shift--confirmed";
     case "completed":
-      return "border-sky-300 bg-sky-100 text-sky-800";
+      return "ui-shift--completed";
     case "cancelled":
-      return "border-rose-300 bg-rose-100 text-rose-800";
+      return "ui-shift--cancelled";
     case "no_show":
-      return "border-amber-300 bg-amber-100 text-amber-900";
+      return "ui-shift--no_show";
     case "scheduled":
     default:
-      return "border-violet-300 bg-violet-100 text-violet-900";
+      return "ui-shift--scheduled";
   }
 }
 
@@ -395,6 +395,17 @@ export function WeeklySchedulePlanner({
     [dragStart, dragCurrent],
   );
 
+  const isSlotInSelectionRange = useCallback(
+    (dayIso: string, slotIndex: number) => {
+      if (selection?.type !== "slot" || selection.dayIso !== dayIso) return false;
+      const startSlot = Math.floor(timeToMinutes(selection.startTime) / SLOT_MINUTES);
+      const endMinutes = timeToMinutes(selection.endTime);
+      const endSlot = Math.ceil(endMinutes / SLOT_MINUTES) - 1;
+      return slotIndex >= startSlot && slotIndex <= endSlot;
+    },
+    [selection],
+  );
+
   const clearSelection = () => setSelection(null);
 
   const pickEmployeeForSlot = (employeeId: string) => {
@@ -499,6 +510,8 @@ export function WeeklySchedulePlanner({
                     >
                       {Array.from({ length: SLOT_COUNT }).map((_, slotIndex) => {
                         const inRange = isSlotInDragRange(day.iso, slotIndex);
+                        const inSelection = isSlotInSelectionRange(day.iso, slotIndex);
+                        const highlighted = inRange || inSelection;
                         return (
                           <button
                             key={`${day.iso}-${slotIndex}`}
@@ -513,7 +526,7 @@ export function WeeklySchedulePlanner({
                               selectSlot(day.iso, slotIndex);
                             }}
                             className={`absolute left-0 right-0 border-b border-dashed text-left transition select-none ${
-                              inRange
+                              highlighted
                                 ? "bg-[var(--ui-brand-soft)] border-[var(--ui-brand)]"
                                 : "border-[rgba(27,16,51,0.08)] hover:bg-[rgba(168,85,247,0.08)]"
                             }`}
@@ -521,7 +534,9 @@ export function WeeklySchedulePlanner({
                             title={
                               inRange
                                 ? "Suelta para asignar este bloque"
-                                : `Arrastra o haz clic para asignar · ${day.shortLabel} ${formatSlotLabel(slotIndex)}`
+                                : inSelection
+                                  ? "Bloque seleccionado — elige trabajador a la derecha"
+                                  : `Arrastra o haz clic para asignar · ${day.shortLabel} ${formatSlotLabel(slotIndex)}`
                             }
                           />
                         );
@@ -539,7 +554,7 @@ export function WeeklySchedulePlanner({
                             key={shift.id}
                             type="button"
                             onClick={() => selectShift(shift)}
-                            className={`absolute rounded-2xl border px-3 py-2 text-left shadow-[var(--ui-shadow-soft)] transition hover:scale-[1.01] ${getStatusClass(shift.status)}`}
+                            className={`absolute rounded-2xl border-2 px-3 py-2 text-left shadow-[var(--ui-shadow-soft)] transition hover:scale-[1.01] ${getStatusClass(shift.status)}`}
                             style={{
                               top,
                               height,
