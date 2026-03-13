@@ -66,7 +66,7 @@ export default async function StaffPage() {
 
   const { data, error: employeesError } = await supabase
     .from("employees")
-    .select("id,full_name,alias,role,is_active,site_id,site:sites(id,name,code)")
+    .select("id,full_name,alias,role,is_active,site_id,site:sites!employees_site_id_fkey(id,name,code)")
     .order("full_name", { ascending: true });
 
   if (employeesError) {
@@ -98,7 +98,7 @@ export default async function StaffPage() {
     const [{ data: employeeSites }, { data: attendanceRows }] = await Promise.all([
       supabase
         .from("employee_sites")
-        .select("employee_id,site_id,is_primary,is_active,site:sites(id,name,code)")
+        .select("employee_id,site_id,is_primary,is_active,site:sites!employee_sites_site_id_fkey(id,name,code)")
         .in("employee_id", employeeIds)
         .order("is_primary", { ascending: false }),
       supabase
