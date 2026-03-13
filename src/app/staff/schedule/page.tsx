@@ -503,13 +503,13 @@ export default async function StaffSchedulePage({
     <div className="space-y-6">
       <PageHeader
         title="Horario semanal"
-        subtitle="Planner operativo para asignar turnos de lunes a domingo con bloques visuales por hora."
+        subtitle="Elige la semana, haz clic en un hueco del horario o en «Añadir turno» para asignar."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Link href="/staff" className="ui-btn ui-btn--ghost">
               Ver trabajadores
             </Link>
-            <Link href="/staff/new" className="ui-btn ui-btn--brand">
+            <Link href="/staff/new" className="ui-btn ui-btn--ghost">
               Invitar trabajador
             </Link>
           </div>

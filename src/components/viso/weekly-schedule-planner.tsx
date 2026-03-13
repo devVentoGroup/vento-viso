@@ -34,18 +34,6 @@ type PlannerTotals = {
   monthMinutes: number;
 };
 
-type DraftShift = {
-  id: string | null;
-  employee_id: string;
-  shift_date: string;
-  start_time: string;
-  end_time: string;
-  break_minutes: number;
-  status: string;
-  notes: string;
-  site_id: string;
-};
-
 type WeeklySchedulePlannerProps = {
   employees: PlannerEmployee[];
   shifts: PlannerShift[];
@@ -127,26 +115,106 @@ function getStatusClass(status: string) {
   }
 }
 
-function buildEmptyDraft(
-  employees: PlannerEmployee[],
-  days: PlannerDay[],
-  siteId: string,
-): DraftShift {
-  return {
-    id: null,
-    employee_id: employees[0]?.id ?? "",
-    shift_date: days[0]?.iso ?? "",
-    start_time: "08:00",
-    end_time: "17:00",
-    break_minutes: 60,
-    status: "scheduled",
-    notes: "",
-    site_id: siteId,
-  };
-}
-
 function getEmployeeLabel(employee: PlannerEmployee) {
   return employee.full_name ?? employee.alias ?? employee.id;
+}
+
+function ShiftEditInline({
+  shift,
+  employees,
+  days,
+  returnTo,
+  saveAction,
+  deleteAction,
+  getEmployeeLabel,
+  onCancel,
+}: {
+  shift: PlannerShift;
+  employees: PlannerEmployee[];
+  days: PlannerDay[];
+  returnTo: string;
+  saveAction: (formData: FormData) => Promise<void>;
+  deleteAction: (formData: FormData) => Promise<void>;
+  getEmployeeLabel: (e: PlannerEmployee) => string;
+  onCancel: () => void;
+}) {
+  const [employeeId, setEmployeeId] = useState(shift.employee_id);
+  const [shiftDate, setShiftDate] = useState(shift.shift_date);
+  const [startTime, setStartTime] = useState(shift.start_time.slice(0, 5));
+  const [endTime, setEndTime] = useState(shift.end_time.slice(0, 5));
+
+  return (
+    <>
+      <form action={saveAction} className="space-y-3">
+        <input type="hidden" name="shift_id" value={shift.id} />
+        <input type="hidden" name="return_to" value={returnTo} />
+        <input type="hidden" name="site_id" value={shift.site_id} />
+        <input type="hidden" name="break_minutes" value={shift.break_minutes ?? 0} />
+        <input type="hidden" name="status" value={shift.status} />
+        <input type="hidden" name="notes" value={shift.notes ?? ""} />
+        <label className="block">
+          <span className="ui-caption">Quién</span>
+          <select
+            name="employee_id"
+            className="ui-input mt-1 w-full"
+            value={employeeId}
+            onChange={(e) => setEmployeeId(e.target.value)}
+          >
+            {employees.map((emp) => (
+              <option key={emp.id} value={emp.id}>{getEmployeeLabel(emp)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="ui-caption">Día</span>
+          <select
+            name="shift_date"
+            className="ui-input mt-1 w-full"
+            value={shiftDate}
+            onChange={(e) => setShiftDate(e.target.value)}
+          >
+            {days.map((d) => (
+              <option key={d.iso} value={d.iso}>{d.label} — {d.shortLabel}</option>
+            ))}
+          </select>
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="ui-caption">Inicio</span>
+            <input
+              name="start_time"
+              type="time"
+              className="ui-input mt-1 w-full"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="ui-caption">Fin</span>
+            <input
+              name="end_time"
+              type="time"
+              className="ui-input mt-1 w-full"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="submit" className="ui-btn ui-btn--brand">Guardar</button>
+          <button type="button" onClick={onCancel} className="ui-btn ui-btn--ghost">Cancelar</button>
+        </div>
+      </form>
+      <form action={deleteAction}>
+        <input type="hidden" name="shift_id" value={shift.id} />
+        <input type="hidden" name="employee_id" value={shift.employee_id} />
+        <input type="hidden" name="return_to" value={returnTo} />
+        <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm w-full text-[var(--ui-danger)]">
+          Eliminar turno
+        </button>
+      </form>
+    </>
+  );
 }
 
 type ShiftLayout = PlannerShift & {
@@ -205,7 +273,18 @@ export function WeeklySchedulePlanner({
   copyPreviousWeekAction,
   publishWeekAction,
 }: WeeklySchedulePlannerProps) {
-  const [draft, setDraft] = useState<DraftShift>(() => buildEmptyDraft(employees, days, siteId));
+  type SlotSelection = {
+    type: "slot";
+    dayIso: string;
+    startTime: string;
+    endTime: string;
+    employeeId: string | null;
+    showTimeAdjust: boolean;
+  };
+  type ShiftSelection = { type: "shift"; shift: PlannerShift; editing: boolean };
+  type Selection = null | SlotSelection | ShiftSelection;
+
+  const [selection, setSelection] = useState<Selection>(null);
 
   const employeeById = useMemo(
     () => new Map(employees.map((employee) => [employee.id, employee])),
@@ -231,118 +310,65 @@ export function WeeklySchedulePlanner({
     return map;
   }, [shifts]);
 
-  const draftMinutes = useMemo(() => {
-    const gross = timeToMinutes(draft.end_time) - timeToMinutes(draft.start_time);
-    return Math.max(0, gross - Math.max(0, draft.break_minutes));
-  }, [draft.break_minutes, draft.end_time, draft.start_time]);
-
-  const draftWeekStartIso = days[0]?.iso ?? "";
-  const draftWeekEndIso = days[days.length - 1]?.iso ?? "";
-  const draftMonthKey = draft.shift_date ? draft.shift_date.slice(0, 7) : "";
-  const draftFortnightKey = useMemo(() => {
-    const draftDay = draft.shift_date ? new Date(`${draft.shift_date}T12:00:00`) : null;
-    if (!draftDay) return "";
-    return `${draft.shift_date.slice(0, 7)}-${draftDay.getDate() <= 15 ? "1" : "2"}`;
-  }, [draft.shift_date]);
-
-  const draftImpactByEmployee = useMemo(() => {
-    const result = new Map<string, { weekMinutes: number; fortnightMinutes: number; monthMinutes: number }>();
-    if (!draft.employee_id || !draft.shift_date || draftMinutes <= 0) return result;
-
-    const previousShift = draft.id ? shifts.find((shift) => shift.id === draft.id) ?? null : null;
-    if (previousShift?.employee_id) {
-      const prevDelta = getShiftMinutes(previousShift);
-      const prevShiftDay = new Date(`${previousShift.shift_date}T12:00:00`);
-      const prevFortnightKey = `${previousShift.shift_date.slice(0, 7)}-${prevShiftDay.getDate() <= 15 ? "1" : "2"}`;
-      result.set(previousShift.employee_id, {
-        weekMinutes:
-          previousShift.shift_date >= draftWeekStartIso && previousShift.shift_date <= draftWeekEndIso
-            ? -prevDelta
-            : 0,
-        fortnightMinutes: prevFortnightKey === draftFortnightKey ? -prevDelta : 0,
-        monthMinutes: previousShift.shift_date.slice(0, 7) === draftMonthKey ? -prevDelta : 0,
-      });
-    }
-
-    const current = result.get(draft.employee_id) ?? {
-      weekMinutes: 0,
-      fortnightMinutes: 0,
-      monthMinutes: 0,
-    };
-    if (draft.shift_date >= draftWeekStartIso && draft.shift_date <= draftWeekEndIso) {
-      current.weekMinutes += draftMinutes;
-    }
-    if (draftFortnightKey) {
-      current.fortnightMinutes += draftMinutes;
-    }
-    if (draftMonthKey) {
-      current.monthMinutes += draftMinutes;
-    }
-    result.set(draft.employee_id, current);
-    return result;
-  }, [
-    draft.employee_id,
-    draft.id,
-    draft.shift_date,
-    draftFortnightKey,
-    draftMinutes,
-    draftMonthKey,
-    draftWeekEndIso,
-    draftWeekStartIso,
-    shifts,
-  ]);
-
-  const selectedEmployee = employeeById.get(draft.employee_id) ?? null;
+  const draftCount = shifts.filter((s) => !s.published_at).length;
 
   const selectShift = (shift: PlannerShift) => {
-    setDraft({
-      id: shift.id,
-      employee_id: shift.employee_id,
-      shift_date: shift.shift_date,
-      start_time: shift.start_time.slice(0, 5),
-      end_time: shift.end_time.slice(0, 5),
-      break_minutes: shift.break_minutes ?? 0,
-      status: shift.status,
-      notes: shift.notes ?? "",
-      site_id: shift.site_id,
-    });
+    setSelection({ type: "shift", shift, editing: false });
   };
 
   const selectSlot = (dayIso: string, slotIndex: number) => {
     const startTime = formatSlotLabel(slotIndex);
     const endTime = addMinutes(startTime, 60);
-    setDraft((prev) => ({
-      ...prev,
-      id: null,
-      shift_date: dayIso,
-      site_id: siteId,
-      employee_id: prev.employee_id || employees[0]?.id || "",
-      start_time: startTime,
-      end_time: endTime,
-    }));
+    setSelection({
+      type: "slot",
+      dayIso,
+      startTime,
+      endTime,
+      employeeId: null,
+      showTimeAdjust: false,
+    });
   };
 
-  const resetDraft = () => {
-    setDraft(buildEmptyDraft(employees, days, siteId));
+  const clearSelection = () => setSelection(null);
+
+  const pickEmployeeForSlot = (employeeId: string) => {
+    if (selection?.type !== "slot") return;
+    setSelection({ ...selection, employeeId });
   };
+
+  const setSlotTimeAdjust = (updates: { dayIso?: string; startTime?: string; endTime?: string }) => {
+    if (selection?.type !== "slot") return;
+    setSelection({
+      ...selection,
+      ...updates,
+      showTimeAdjust: true,
+    });
+  };
+
+  const startEditingShift = () => {
+    if (selection?.type !== "shift") return;
+    setSelection({ ...selection, editing: true });
+  };
+
+  const getDayLabel = (iso: string) => days.find((d) => d.iso === iso)?.shortLabel ?? iso;
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
       <div className="space-y-4">
-        <div className="ui-panel ui-panel--halo space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="ui-h3">Planner semanal</div>
-              <p className="mt-2 ui-body-muted">
-                Vista tipo horario: columnas por dia, bloques por hora y asignacion rapida desde el
-                panel lateral.
-              </p>
-            </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3">
+          <p className="text-sm text-[var(--ui-muted)]">
+            <span className="font-medium text-[var(--ui-text)]">{employees.length}</span> trabajadores
+            {" · "}
+            <span className="font-medium text-[var(--ui-text)]">{shifts.length}</span> turnos
+            {" · "}
+            <span className="font-medium text-[var(--ui-text)]">{draftCount}</span> borradores
+          </p>
+          <div className="flex flex-wrap gap-2">
             <form action={copyPreviousWeekAction}>
               <input type="hidden" name="site_id" value={siteId} />
               <input type="hidden" name="week_start" value={days[0]?.iso ?? ""} />
               <input type="hidden" name="return_to" value={returnTo} />
-              <button type="submit" className="ui-btn ui-btn--ghost">
+              <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
                 Copiar semana anterior
               </button>
             </form>
@@ -350,28 +376,10 @@ export function WeeklySchedulePlanner({
               <input type="hidden" name="site_id" value={siteId} />
               <input type="hidden" name="week_start" value={days[0]?.iso ?? ""} />
               <input type="hidden" name="return_to" value={returnTo} />
-              <button type="submit" className="ui-btn ui-btn--brand">
+              <button type="submit" className="ui-btn ui-btn--brand ui-btn--sm">
                 Publicar horarios
               </button>
             </form>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="ui-panel-soft">
-              <div className="ui-caption">Trabajadores visibles</div>
-              <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">{employees.length}</div>
-            </div>
-            <div className="ui-panel-soft">
-              <div className="ui-caption">Turnos cargados</div>
-              <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">{shifts.length}</div>
-            </div>
-            <div className="ui-panel-soft">
-              <div className="ui-caption">Borradores</div>
-              <div className="mt-2 text-base font-semibold text-[var(--ui-text)]">
-                {shifts.filter((shift) => !shift.published_at).length}
-              </div>
-              <div className="mt-1 ui-caption">Pendientes por publicar</div>
-            </div>
           </div>
         </div>
 
@@ -479,298 +487,180 @@ export function WeeklySchedulePlanner({
         </div>
       </div>
 
-      <div className="space-y-4">
-        <div className="ui-panel space-y-4 xl:sticky xl:top-24">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="ui-h3">{draft.id ? "Editar turno" : "Crear turno"}</div>
-              <p className="mt-2 ui-body-muted">
-                {selectedEmployee
-                  ? `Asignando a ${getEmployeeLabel(selectedEmployee)}`
-                  : "Selecciona trabajador y bloque horario."}
-              </p>
-            </div>
-            <button type="button" onClick={resetDraft} className="ui-btn ui-btn--ghost ui-btn--sm">
-              Limpiar
-            </button>
+      <div className="space-y-4 xl:sticky xl:top-24">
+        {selection === null && (
+          <div className="ui-panel flex flex-col items-center justify-center gap-4 py-12 text-center">
+            <p className="max-w-xs text-[var(--ui-muted)]">
+              Haz clic en un hueco del horario para asignar un turno. El panel irá mostrando solo lo que necesitas.
+            </p>
           </div>
+        )}
 
-          <form action={saveAction} className="space-y-3">
-            <input type="hidden" name="shift_id" value={draft.id ?? ""} />
-            <input type="hidden" name="return_to" value={returnTo} />
-            <input type="hidden" name="site_id" value={draft.site_id} />
-
-            <label className="space-y-2">
-              <span className="ui-label">Trabajador</span>
-              <select
-                name="employee_id"
-                className="ui-input"
-                value={draft.employee_id}
-                onChange={(event) =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    employee_id: event.target.value,
-                  }))
-                }
-                required
-              >
-                <option value="">Selecciona trabajador</option>
-                {employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {getEmployeeLabel(employee)} {employee.role ? `· ${employee.role}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-2">
-                <span className="ui-label">Fecha</span>
-                <select
-                  name="shift_date"
-                  className="ui-input"
-                  value={draft.shift_date}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      shift_date: event.target.value,
-                    }))
-                  }
-                  required
-                >
-                  {days.map((day) => (
-                    <option key={day.iso} value={day.iso}>
-                      {day.label} · {day.shortLabel}
-                    </option>
+        {selection?.type === "slot" && (
+          <div className="ui-panel space-y-4">
+            {!selection.employeeId ? (
+              <>
+                <p className="text-sm font-medium text-[var(--ui-text)]">
+                  {getDayLabel(selection.dayIso)} · {selection.startTime.slice(0, 5)}–{selection.endTime.slice(0, 5)}
+                </p>
+                <p className="ui-caption">¿Quién trabaja este turno?</p>
+                <div className="max-h-64 space-y-1 overflow-auto pr-1 ui-scrollbar-subtle">
+                  {employees.map((emp) => (
+                    <button
+                      key={emp.id}
+                      type="button"
+                      onClick={() => pickEmployeeForSlot(emp.id)}
+                      className="w-full rounded-xl px-3 py-2.5 text-left text-sm text-[var(--ui-text)] transition hover:bg-[var(--ui-brand-soft)] hover:text-[var(--ui-brand-600)]"
+                    >
+                      {getEmployeeLabel(emp)}
+                      {emp.role ? (
+                        <span className="ml-2 text-[var(--ui-muted)]">· {emp.role}</span>
+                      ) : null}
+                    </button>
                   ))}
-                </select>
-              </label>
-
-              <label className="space-y-2">
-                <span className="ui-label">Estado</span>
-                <select
-                  name="status"
-                  className="ui-input"
-                  value={draft.status}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      status: event.target.value,
-                    }))
-                  }
-                >
-                  <option value="scheduled">Programado</option>
-                  <option value="confirmed">Confirmado</option>
-                  <option value="completed">Completado</option>
-                  <option value="cancelled">Cancelado</option>
-                  <option value="no_show">No asistio</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-2">
-                <span className="ui-label">Inicio</span>
-                <input
-                  name="start_time"
-                  type="time"
-                  className="ui-input"
-                  value={draft.start_time}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      start_time: event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </label>
-
-              <label className="space-y-2">
-                <span className="ui-label">Fin</span>
-                <input
-                  name="end_time"
-                  type="time"
-                  className="ui-input"
-                  value={draft.end_time}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      end_time: event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </label>
-            </div>
-
-            <label className="space-y-2">
-              <span className="ui-label">Descanso (min)</span>
-              <input
-                name="break_minutes"
-                type="number"
-                min="0"
-                className="ui-input"
-                value={draft.break_minutes}
-                onChange={(event) =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    break_minutes: Number(event.target.value || 0),
-                  }))
-                }
-              />
-            </label>
-
-            <label className="space-y-2">
-              <span className="ui-label">Notas</span>
-              <input
-                name="notes"
-                className="ui-input"
-                value={draft.notes}
-                onChange={(event) =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    notes: event.target.value,
-                  }))
-                }
-                placeholder="Cobertura, reemplazo, apertura, cierre..."
-              />
-            </label>
-
-            <div className="flex flex-wrap gap-2">
-              <button type="submit" className="ui-btn ui-btn--brand">
-                {draft.id ? "Guardar turno" : "Crear turno"}
-              </button>
-
-              {draft.id ? (
+                </div>
+                <button type="button" onClick={clearSelection} className="ui-btn ui-btn--ghost ui-btn--sm w-full">
+                  Cancelar
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-medium text-[var(--ui-text)]">
+                  {getEmployeeLabel(employeeById.get(selection.employeeId) ?? { id: selection.employeeId, full_name: null, alias: null, role: null })}
+                </p>
+                {!selection.showTimeAdjust ? (
+                  <>
+                    <p className="ui-body-muted">
+                      {getDayLabel(selection.dayIso)} · {selection.startTime.slice(0, 5)} a {selection.endTime.slice(0, 5)}
+                    </p>
+                    <form action={saveAction}>
+                      <input type="hidden" name="shift_id" value="" />
+                      <input type="hidden" name="return_to" value={returnTo} />
+                      <input type="hidden" name="site_id" value={siteId} />
+                      <input type="hidden" name="employee_id" value={selection.employeeId} />
+                      <input type="hidden" name="shift_date" value={selection.dayIso} />
+                      <input type="hidden" name="start_time" value={selection.startTime} />
+                      <input type="hidden" name="end_time" value={selection.endTime} />
+                      <input type="hidden" name="break_minutes" value="0" />
+                      <input type="hidden" name="status" value="scheduled" />
+                      <input type="hidden" name="notes" value="" />
+                      <div className="flex flex-wrap gap-2">
+                        <button type="submit" className="ui-btn ui-btn--brand">
+                          Guardar turno
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSlotTimeAdjust({})}
+                          className="ui-btn ui-btn--ghost"
+                        >
+                          Ajustar horario
+                        </button>
+                      </div>
+                    </form>
+                  </>
+                ) : (
+                  <form action={saveAction} className="space-y-3">
+                    <input type="hidden" name="shift_id" value="" />
+                    <input type="hidden" name="return_to" value={returnTo} />
+                    <input type="hidden" name="site_id" value={siteId} />
+                    <input type="hidden" name="employee_id" value={selection.employeeId} />
+                    <input type="hidden" name="break_minutes" value="0" />
+                    <input type="hidden" name="status" value="scheduled" />
+                    <input type="hidden" name="notes" value="" />
+                    <label className="block">
+                      <span className="ui-caption">Día</span>
+                      <select
+                        name="shift_date"
+                        className="ui-input mt-1 w-full"
+                        value={selection.dayIso}
+                        onChange={(e) => setSlotTimeAdjust({ dayIso: e.target.value })}
+                      >
+                        {days.map((d) => (
+                          <option key={d.iso} value={d.iso}>{d.label} — {d.shortLabel}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block">
+                        <span className="ui-caption">Inicio</span>
+                        <input
+                          name="start_time"
+                          type="time"
+                          className="ui-input mt-1 w-full"
+                          value={selection.startTime}
+                          onChange={(e) => setSlotTimeAdjust({ startTime: e.target.value })}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="ui-caption">Fin</span>
+                        <input
+                          name="end_time"
+                          type="time"
+                          className="ui-input mt-1 w-full"
+                          value={selection.endTime}
+                          onChange={(e) => setSlotTimeAdjust({ endTime: e.target.value })}
+                        />
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="submit" className="ui-btn ui-btn--brand">Guardar turno</button>
+                      <button type="button" onClick={clearSelection} className="ui-btn ui-btn--ghost">Cancelar</button>
+                    </div>
+                  </form>
+                )}
                 <button
                   type="button"
-                  className="ui-btn ui-btn--ghost"
-                  onClick={resetDraft}
+                  onClick={() => setSelection((s) => s?.type === "slot" ? { ...s, employeeId: null, showTimeAdjust: false } : s)}
+                  className="ui-btn ui-btn--ghost ui-btn--sm w-full text-[var(--ui-muted)]"
                 >
-                  Crear nuevo
+                  Cambiar persona
                 </button>
-              ) : null}
-            </div>
-          </form>
-
-          <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-            <div className="ui-caption">Impacto del turno actual</div>
-            <div className="mt-2 text-sm font-semibold text-[var(--ui-text)]">
-              {draftMinutes > 0 ? formatMinutes(draftMinutes) : "Ajusta el horario para ver impacto"}
-            </div>
-            {selectedEmployee ? (
-              <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                {(() => {
-                  const base = totalsByEmployee[selectedEmployee.id] ?? {
-                    weekMinutes: 0,
-                    fortnightMinutes: 0,
-                    monthMinutes: 0,
-                  };
-                  const delta = draftImpactByEmployee.get(selectedEmployee.id) ?? {
-                    weekMinutes: 0,
-                    fortnightMinutes: 0,
-                    monthMinutes: 0,
-                  };
-                  const items = [
-                    { label: "Semana", total: base.weekMinutes + delta.weekMinutes },
-                    { label: "Quincena", total: base.fortnightMinutes + delta.fortnightMinutes },
-                    { label: "Mes", total: base.monthMinutes + delta.monthMinutes },
-                  ];
-                  return items.map((item) => (
-                    <div key={item.label} className="rounded-2xl bg-[var(--ui-surface)] p-3">
-                      <div className="ui-caption">{item.label}</div>
-                      <div className="mt-1 text-sm font-semibold text-[var(--ui-text)]">
-                        {formatMinutes(item.total)}
-                      </div>
-                    </div>
-                  ));
-                })()}
-              </div>
-            ) : null}
-          </div>
-
-          {draft.id ? (
-            <form action={deleteAction}>
-              <input type="hidden" name="shift_id" value={draft.id} />
-              <input type="hidden" name="employee_id" value={draft.employee_id} />
-              <input type="hidden" name="return_to" value={returnTo} />
-              <button type="submit" className="ui-btn ui-btn--danger w-full">
-                Eliminar turno
-              </button>
-            </form>
-          ) : null}
-        </div>
-
-        <div className="ui-panel space-y-3">
-          <div className="ui-h3">Equipo de la sede</div>
-          <div className="max-h-[460px] space-y-2 overflow-auto pr-1 ui-scrollbar-subtle">
-            {employees.length === 0 ? (
-              <div className="ui-empty">No hay trabajadores activos asociados a esta sede.</div>
-            ) : (
-              employees.map((employee) => {
-                const assignedCount = shiftsByEmployee.get(employee.id)?.length ?? 0;
-                const isSelected = draft.employee_id === employee.id;
-                const baseTotals = totalsByEmployee[employee.id] ?? {
-                  weekMinutes: 0,
-                  fortnightMinutes: 0,
-                  monthMinutes: 0,
-                };
-                const deltaTotals = draftImpactByEmployee.get(employee.id) ?? {
-                  weekMinutes: 0,
-                  fortnightMinutes: 0,
-                  monthMinutes: 0,
-                };
-                const projectedWeek = baseTotals.weekMinutes + deltaTotals.weekMinutes;
-                const projectedFortnight = baseTotals.fortnightMinutes + deltaTotals.fortnightMinutes;
-                const projectedMonth = baseTotals.monthMinutes + deltaTotals.monthMinutes;
-                return (
-                  <button
-                    key={employee.id}
-                    type="button"
-                    onClick={() =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        employee_id: employee.id,
-                      }))
-                    }
-                    className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
-                      isSelected
-                        ? "border-violet-400 bg-violet-100 text-violet-900"
-                        : "border-[var(--ui-border)] bg-[var(--ui-surface)] text-[var(--ui-text)] hover:bg-[var(--ui-surface-2)]"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-semibold">{getEmployeeLabel(employee)}</div>
-                        <div className="ui-caption">{employee.role ?? "Sin rol"}</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <span className={`ui-chip ${getMinutesTone(projectedWeek)}`}>
-                            Sem: {formatMinutes(projectedWeek)}
-                          </span>
-                          <span className={`ui-chip ${getMinutesTone(projectedFortnight)}`}>
-                            Quin: {formatMinutes(projectedFortnight)}
-                          </span>
-                          <span className={`ui-chip ${getMinutesTone(projectedMonth)}`}>
-                            Mes: {formatMinutes(projectedMonth)}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <span className="ui-chip">{assignedCount} turno(s)</span>
-                        {(deltaTotals.weekMinutes !== 0 ||
-                          deltaTotals.fortnightMinutes !== 0 ||
-                          deltaTotals.monthMinutes !== 0) ? (
-                          <span className="ui-chip ui-chip--brand">impacto</span>
-                        ) : null}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })
+              </>
             )}
           </div>
-        </div>
+        )}
+
+        {selection?.type === "shift" && (
+          <div className="ui-panel space-y-4">
+            {!selection.editing ? (
+              <>
+                <p className="text-sm font-medium text-[var(--ui-text)]">
+                  {getEmployeeLabel(employeeById.get(selection.shift.employee_id) ?? { id: selection.shift.employee_id, full_name: null, alias: null, role: null })}
+                </p>
+                <p className="ui-body-muted">
+                  {getDayLabel(selection.shift.shift_date)} · {selection.shift.start_time.slice(0, 5)}–{selection.shift.end_time.slice(0, 5)}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={startEditingShift} className="ui-btn ui-btn--ghost">
+                    Editar
+                  </button>
+                  <form action={deleteAction}>
+                    <input type="hidden" name="shift_id" value={selection.shift.id} />
+                    <input type="hidden" name="employee_id" value={selection.shift.employee_id} />
+                    <input type="hidden" name="return_to" value={returnTo} />
+                    <button type="submit" className="ui-btn ui-btn--ghost text-[var(--ui-danger)]">
+                      Eliminar
+                    </button>
+                  </form>
+                </div>
+                <button type="button" onClick={clearSelection} className="ui-btn ui-btn--ghost ui-btn--sm w-full">
+                  Cerrar
+                </button>
+              </>
+            ) : (
+              <ShiftEditInline
+                shift={selection.shift}
+                employees={employees}
+                days={days}
+                returnTo={returnTo}
+                saveAction={saveAction}
+                deleteAction={deleteAction}
+                getEmployeeLabel={getEmployeeLabel}
+                onCancel={() => setSelection({ ...selection, editing: false })}
+              />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

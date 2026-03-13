@@ -64,10 +64,29 @@ export default async function StaffPage() {
 
   const supabase = createAdminClient();
 
-  const { data } = await supabase
+  const { data, error: employeesError } = await supabase
     .from("employees")
     .select("id,full_name,alias,role,is_active,site_id,site:sites(id,name,code)")
     .order("full_name", { ascending: true });
+
+  if (employeesError) {
+    console.error("Staff list query error:", employeesError);
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Trabajadores"
+          subtitle="Gestiona empleados, sedes asignadas, estado y asistencia reciente."
+        />
+        <div className="ui-panel border-[var(--ui-danger)] bg-[var(--ui-danger-soft)]">
+          <p className="font-medium text-[var(--ui-danger)]">Error al cargar la lista de trabajadores</p>
+          <p className="mt-1 text-sm text-[var(--ui-muted)]">
+            Revisa que la tabla <code className="rounded bg-black/10 px-1">employees</code> exista y que el proyecto tenga las variables de Supabase correctas. Detalle en consola del servidor.
+          </p>
+          <p className="mt-2 text-xs text-[var(--ui-muted)]">{employeesError.message}</p>
+        </div>
+      </div>
+    );
+  }
 
   const employees = (data ?? []) as EmployeeRow[];
   const employeeIds = employees.map((employee) => employee.id);
@@ -122,7 +141,15 @@ export default async function StaffPage() {
 
       <div className="ui-panel">
         {employees.length === 0 ? (
-          <div className="ui-empty">No hay trabajadores registrados.</div>
+          <div className="ui-empty flex flex-col items-center gap-4 py-12">
+            <p className="text-[var(--ui-muted)]">Aún no hay trabajadores registrados.</p>
+            <p className="text-center text-sm text-[var(--ui-muted)]">
+              Usa el botón de arriba para invitar al primer trabajador por correo; recibirá un enlace para completar su perfil y asignarse a una sede.
+            </p>
+            <Link href="/staff/new" className="ui-btn ui-btn--brand">
+              Invitar trabajador
+            </Link>
+          </div>
         ) : (
           <Table>
             <TableHead>
