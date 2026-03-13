@@ -505,7 +505,7 @@ export function WeeklySchedulePlanner({
                   return (
                     <div
                       key={day.iso}
-                      className="relative border-r border-[var(--ui-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,245,255,0.9))] last:border-r-0"
+                      className="relative border-r border-[var(--ui-border)] bg-[var(--ui-surface)] last:border-r-0"
                       style={{ height: DAY_HEIGHT }}
                     >
                       {Array.from({ length: SLOT_COUNT }).map((_, slotIndex) => {
@@ -528,7 +528,7 @@ export function WeeklySchedulePlanner({
                             className={`absolute left-0 right-0 border-b border-dashed text-left transition select-none ${
                               highlighted
                                 ? "bg-[var(--ui-brand-soft)] border-[var(--ui-brand)]"
-                                : "border-[rgba(27,16,51,0.08)] hover:bg-[rgba(168,85,247,0.08)]"
+                                : "border-[rgba(15,23,42,0.06)] hover:bg-[var(--ui-brand-soft)]"
                             }`}
                             style={{ top: slotIndex * SLOT_HEIGHT, height: SLOT_HEIGHT }}
                             title={

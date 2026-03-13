@@ -277,7 +277,7 @@ export function VentoChrome({
             </button>
           </div>
 
-          <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
+          <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 shadow-[var(--ui-shadow-soft)]">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
               Sede activa
             </div>
@@ -335,7 +335,7 @@ export function VentoChrome({
             </div>
           </header>
 
-          <main className="min-w-0 flex-1 px-6 py-8">{children}</main>
+          <main className="ui-main min-w-0 flex-1 px-6 py-8 sm:px-8 sm:py-10">{children}</main>
         </div>
       </div>
     </div>
