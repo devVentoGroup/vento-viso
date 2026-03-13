@@ -18,6 +18,15 @@
   --ui-brand-600: #5B21B6;
   --ui-brand-700: #4C1D95;
   --ui-brand-soft: rgba(124, 58, 237, 0.1);
+  /* Acentos de detalle (no fondo): más color premium */
+  --ui-accent-teal: #0D9488;
+  --ui-accent-teal-soft: rgba(13, 148, 136, 0.12);
+  --ui-accent-amber: #D97706;
+  --ui-accent-amber-soft: rgba(217, 119, 6, 0.12);
+  --ui-accent-blue: #2563EB;
+  --ui-accent-blue-soft: rgba(37, 99, 235, 0.12);
+  --ui-accent-rose: #DB2777;
+  --ui-accent-rose-soft: rgba(219, 39, 119, 0.1);
   --ui-success: #16A34A;
   --ui-success-soft: rgba(22, 163, 74, 0.12);
   --ui-danger: #DC2626;
@@ -272,6 +281,63 @@ body {
   border-color: rgba(124, 58, 237, 0.12);
 }
 
+/* Card con barra de acento (detalle de color) */
+.ui-card--accent-brand {
+  border-left: 4px solid var(--ui-brand);
+  padding-left: 20px;
+}
+.ui-card--accent-teal {
+  border-left: 4px solid var(--ui-accent-teal);
+  padding-left: 20px;
+}
+.ui-card--accent-amber {
+  border-left: 4px solid var(--ui-accent-amber);
+  padding-left: 20px;
+}
+.ui-card--accent-blue {
+  border-left: 4px solid var(--ui-accent-blue);
+  padding-left: 20px;
+}
+.ui-card--accent-rose {
+  border-left: 4px solid var(--ui-accent-rose);
+  padding-left: 20px;
+}
+
+/* Panel-soft con acento (acciones rápidas) */
+.ui-panel-soft--accent-brand { border-left: 4px solid var(--ui-brand); padding-left: 20px; }
+.ui-panel-soft--accent-teal { border-left: 4px solid var(--ui-accent-teal); padding-left: 20px; }
+.ui-panel-soft--accent-amber { border-left: 4px solid var(--ui-accent-amber); padding-left: 20px; }
+.ui-panel-soft--accent-blue { border-left: 4px solid var(--ui-accent-blue); padding-left: 20px; }
+.ui-panel-soft--accent-rose { border-left: 4px solid var(--ui-accent-rose); padding-left: 20px; }
+
+/* Panel con solo barra de acento (sin cambiar padding) */
+.ui-panel--accent-brand { border-left: 4px solid var(--ui-brand); }
+.ui-panel--accent-teal { border-left: 4px solid var(--ui-accent-teal); }
+.ui-panel--accent-amber { border-left: 4px solid var(--ui-accent-amber); }
+.ui-panel--accent-blue { border-left: 4px solid var(--ui-accent-blue); }
+
+/* Título de sección con punto de color */
+.ui-section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-muted);
+}
+.ui-section-label::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ui-brand);
+}
+.ui-section-label--teal::before { background: var(--ui-accent-teal); }
+.ui-section-label--amber::before { background: var(--ui-accent-amber); }
+.ui-section-label--blue::before { background: var(--ui-accent-blue); }
+
 .ui-chip {
   display: inline-flex;
   align-items: center;
@@ -292,9 +358,29 @@ body {
 }
 
 .ui-chip--success {
-  background: rgba(22, 163, 74, 0.12);
+  background: var(--ui-success-soft);
   color: #15803D;
   border-color: rgba(22, 163, 74, 0.25);
+}
+.ui-chip--teal {
+  background: var(--ui-accent-teal-soft);
+  color: var(--ui-accent-teal);
+  border-color: rgba(13, 148, 136, 0.25);
+}
+.ui-chip--amber {
+  background: var(--ui-accent-amber-soft);
+  color: var(--ui-accent-amber);
+  border-color: rgba(217, 119, 6, 0.25);
+}
+.ui-chip--blue {
+  background: var(--ui-accent-blue-soft);
+  color: var(--ui-accent-blue);
+  border-color: rgba(37, 99, 235, 0.25);
+}
+.ui-chip--rose {
+  background: var(--ui-accent-rose-soft);
+  color: var(--ui-accent-rose);
+  border-color: rgba(219, 39, 119, 0.25);
 }
 
 .ui-chip--warn {
@@ -340,6 +426,10 @@ body {
   letter-spacing: -0.01em;
   color: var(--ui-text);
 }
+.ui-title--accent-brand { color: var(--ui-brand-600); }
+.ui-title--accent-teal { color: var(--ui-accent-teal); }
+.ui-title--accent-amber { color: var(--ui-accent-amber); }
+.ui-title--accent-blue { color: var(--ui-accent-blue); }
 
 .ui-subtitle {
   margin-top: 0.25rem;
@@ -353,6 +443,11 @@ body {
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--ui-text);
+}
+.ui-h1-accent {
+  border-bottom: 3px solid var(--ui-brand);
+  padding-bottom: 6px;
+  display: inline-block;
 }
 
 .ui-h2 {
@@ -553,6 +648,9 @@ body {
   border-bottom: 1px solid var(--ui-border);
   padding-bottom: 12px;
   padding-right: 16px;
+}
+.ui-table--accent thead tr {
+  border-top: 3px solid var(--ui-brand);
 }
 
 .ui-td {

@@ -139,7 +139,7 @@ export default async function StaffPage() {
         }
       />
 
-      <div className="ui-panel">
+      <div className="ui-panel ui-panel--accent-brand">
         {employees.length === 0 ? (
           <div className="ui-empty flex flex-col items-center gap-4 py-12">
             <p className="text-[var(--ui-muted)]">Aún no hay trabajadores registrados.</p>
@@ -151,7 +151,7 @@ export default async function StaffPage() {
             </Link>
           </div>
         ) : (
-          <Table>
+          <Table className="ui-table--accent">
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Nombre</TableHeaderCell>

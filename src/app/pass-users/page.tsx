@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
@@ -63,13 +63,19 @@ export default async function PassUsersPage({
   }
 
   const { data } = await query;
-  const users = (data ?? []) as UserRow[];
+  const allUsers = (data ?? []) as UserRow[];
+
+  // Solo clientes bien registrados: tienen nombre, correo y celular
+  const hasName = (u: UserRow) => (u.full_name?.trim() ?? "").length > 0 && !/^Deleted User\s/i.test(u.full_name ?? "");
+  const hasEmail = (u: UserRow) => (u.email?.trim() ?? "").length > 0;
+  const hasPhone = (u: UserRow) => (u.phone?.trim() ?? "").length > 0;
+  const users = allUsers.filter((u) => hasName(u) && hasEmail(u) && hasPhone(u));
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Usuarios Vento Pass"
-        subtitle="Clientes, puntos y estado de la cuenta."
+        title="Clientes Vento Pass"
+        subtitle="Solo usuarios con registro completo: nombre, correo y celular."
         actions={
           <Link href="/pass-users/new" className="ui-btn ui-btn--brand">
             Crear usuario
@@ -80,7 +86,11 @@ export default async function PassUsersPage({
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
-      <div className="ui-panel space-y-4">
+      <div className="ui-panel ui-panel--accent-teal space-y-4">
+        <p className="ui-caption">
+          Se muestran solo clientes con registro completo: nombre, correo y celular.
+          {users.length > 0 ? ` ${users.length} cliente${users.length !== 1 ? "s" : ""} encontrado${users.length !== 1 ? "s" : ""}.` : ""}
+        </p>
         <form className="flex flex-wrap gap-3" action="/pass-users" method="get">
           <input
             name="q"
@@ -99,9 +109,13 @@ export default async function PassUsersPage({
         </form>
 
         {users.length === 0 ? (
-          <div className="ui-empty">No hay usuarios registrados.</div>
+          <div className="ui-empty">
+            {allUsers.length === 0
+              ? "No hay usuarios en la base de datos."
+              : "No hay clientes con registro completo (nombre, correo y celular). Ajusta los filtros o revisa los datos en la lista completa."}
+          </div>
         ) : (
-          <Table>
+          <Table className="ui-table--accent">
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Nombre</TableHeaderCell>

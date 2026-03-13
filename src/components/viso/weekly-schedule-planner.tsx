@@ -51,7 +51,15 @@ const SLOT_MINUTES = 30;
 const MINUTES_PER_DAY = 24 * 60;
 const SLOT_COUNT = MINUTES_PER_DAY / SLOT_MINUTES;
 const SLOT_HEIGHT = 26;
-const DAY_HEIGHT = SLOT_COUNT * SLOT_HEIGHT;
+// Rango visible por defecto: 5:00–23:00 (solo horario operativo)
+const VISIBLE_START_HOUR = 5;
+const VISIBLE_END_HOUR = 23;
+const VISIBLE_SLOT_START = (VISIBLE_START_HOUR * 60) / SLOT_MINUTES; // 10
+const VISIBLE_SLOT_END = (VISIBLE_END_HOUR * 60) / SLOT_MINUTES; // 46
+const VISIBLE_SLOT_COUNT = VISIBLE_SLOT_END - VISIBLE_SLOT_START + 1; // 37
+const VISIBLE_START_MINUTES = VISIBLE_START_HOUR * 60;
+const VISIBLE_END_MINUTES = VISIBLE_END_HOUR * 60;
+const DAY_HEIGHT = VISIBLE_SLOT_COUNT * SLOT_HEIGHT;
 
 function timeToMinutes(value: string) {
   const [hours, minutes] = value.slice(0, 5).split(":").map((part) => Number(part));
@@ -487,17 +495,24 @@ export function WeeklySchedulePlanner({
                 style={{ minHeight: DAY_HEIGHT }}
               >
                 <div className="relative border-r border-[var(--ui-border)] bg-[var(--ui-surface)]">
-                  {Array.from({ length: SLOT_COUNT }).map((_, slotIndex) => (
-                    <div
-                      key={`time-${slotIndex}`}
-                      className="absolute left-0 right-0 border-b border-dashed border-[rgba(27,16,51,0.08)] px-2"
-                      style={{ top: slotIndex * SLOT_HEIGHT, height: SLOT_HEIGHT }}
-                    >
-                      {slotIndex % 2 === 0 ? (
-                        <span className="ui-caption relative -top-2 block">{formatSlotLabel(slotIndex)}</span>
-                      ) : null}
-                    </div>
-                  ))}
+                  {Array.from({ length: VISIBLE_SLOT_COUNT }, (_, i) => VISIBLE_SLOT_START + i).map((slotIndex) => {
+                    const isHourLine = slotIndex % 2 === 1;
+                    return (
+                      <div
+                        key={`time-${slotIndex}`}
+                        className={`absolute left-0 right-0 border-b border-dashed px-2 ${
+                          isHourLine
+                            ? "border-[var(--ui-border)]"
+                            : "border-[rgba(15,23,42,0.08)]"
+                        }`}
+                        style={{ top: (slotIndex - VISIBLE_SLOT_START) * SLOT_HEIGHT, height: SLOT_HEIGHT }}
+                      >
+                        {slotIndex % 2 === 0 ? (
+                          <span className="ui-caption relative -top-2 block">{formatSlotLabel(slotIndex)}</span>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {days.map((day) => {
@@ -508,10 +523,16 @@ export function WeeklySchedulePlanner({
                       className="relative border-r border-[var(--ui-border)] bg-[var(--ui-surface)] last:border-r-0"
                       style={{ height: DAY_HEIGHT }}
                     >
-                      {Array.from({ length: SLOT_COUNT }).map((_, slotIndex) => {
+                      {Array.from({ length: VISIBLE_SLOT_COUNT }, (_, i) => VISIBLE_SLOT_START + i).map((slotIndex) => {
                         const inRange = isSlotInDragRange(day.iso, slotIndex);
                         const inSelection = isSlotInSelectionRange(day.iso, slotIndex);
                         const highlighted = inRange || inSelection;
+                        const isHourLine = slotIndex % 2 === 1;
+                        const borderClass = highlighted
+                          ? "border-[var(--ui-brand)]"
+                          : isHourLine
+                            ? "border-[var(--ui-border)]"
+                            : "border-[rgba(15,23,42,0.08)]";
                         return (
                           <button
                             key={`${day.iso}-${slotIndex}`}
@@ -526,11 +547,9 @@ export function WeeklySchedulePlanner({
                               selectSlot(day.iso, slotIndex);
                             }}
                             className={`absolute left-0 right-0 border-b border-dashed text-left transition select-none ${
-                              highlighted
-                                ? "bg-[var(--ui-brand-soft)] border-[var(--ui-brand)]"
-                                : "border-[rgba(15,23,42,0.06)] hover:bg-[var(--ui-brand-soft)]"
-                            }`}
-                            style={{ top: slotIndex * SLOT_HEIGHT, height: SLOT_HEIGHT }}
+                              highlighted ? "bg-[var(--ui-brand-soft)] " : "hover:bg-[var(--ui-brand-soft)] "
+                            }${borderClass}`}
+                            style={{ top: (slotIndex - VISIBLE_SLOT_START) * SLOT_HEIGHT, height: SLOT_HEIGHT }}
                             title={
                               inRange
                                 ? "Suelta para asignar este bloque"
@@ -546,8 +565,11 @@ export function WeeklySchedulePlanner({
                         const employee = employeeById.get(shift.employee_id);
                         const startMinutes = timeToMinutes(shift.start_time);
                         const endMinutes = timeToMinutes(shift.end_time);
-                        const top = (startMinutes / SLOT_MINUTES) * SLOT_HEIGHT;
-                        const height = Math.max(((endMinutes - startMinutes) / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT);
+                        const visibleStart = Math.max(startMinutes, VISIBLE_START_MINUTES);
+                        const visibleEnd = Math.min(endMinutes, VISIBLE_END_MINUTES);
+                        if (visibleStart >= visibleEnd) return null;
+                        const top = ((visibleStart - VISIBLE_START_MINUTES) / SLOT_MINUTES) * SLOT_HEIGHT;
+                        const height = Math.max(((visibleEnd - visibleStart) / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT);
                         const laneWidth = 100 / shift.laneCount;
                         return (
                           <button
