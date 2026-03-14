@@ -94,8 +94,13 @@ export default async function StaffPage() {
   let linksByEmployee = new Map<string, EmployeeSiteLink[]>();
   let attendanceByEmployee = new Map<string, AttendanceStatusRow>();
 
+  let walletEligibilityByEmployee = new Map<
+    string,
+    { contract_active: boolean; documents_complete: boolean; wallet_eligible: boolean; wallet_status: string }
+  >();
+
   if (employeeIds.length > 0) {
-    const [{ data: employeeSites }, { data: attendanceRows }] = await Promise.all([
+    const [{ data: employeeSites }, { data: attendanceRows }, eligibilityRes] = await Promise.all([
       supabase
         .from("employee_sites")
         .select("employee_id,site_id,is_primary,is_active,site:sites!employee_sites_site_id_fkey(id,name,code)")
@@ -105,6 +110,7 @@ export default async function StaffPage() {
         .from("employee_attendance_status")
         .select("employee_id,current_status,last_action_at,last_site_id")
         .in("employee_id", employeeIds),
+      supabase.rpc("employee_wallet_eligibility"),
     ]);
 
     linksByEmployee = (employeeSites ?? []).reduce((map, row) => {
@@ -120,6 +126,15 @@ export default async function StaffPage() {
       map.set(status.employee_id, status);
       return map;
     }, new Map<string, AttendanceStatusRow>());
+
+    (eligibilityRes?.data ?? []).forEach((row: { employee_id: string; contract_active: boolean; documents_complete: boolean; wallet_eligible: boolean; wallet_status: string }) => {
+      walletEligibilityByEmployee.set(row.employee_id, {
+        contract_active: row.contract_active,
+        documents_complete: row.documents_complete,
+        wallet_eligible: row.wallet_eligible,
+        wallet_status: row.wallet_status ?? "eligible",
+      });
+    });
   }
 
   return (
@@ -157,6 +172,7 @@ export default async function StaffPage() {
                 <TableHeaderCell>Nombre</TableHeaderCell>
                 <TableHeaderCell>Rol</TableHeaderCell>
                 <TableHeaderCell>Sedes</TableHeaderCell>
+                <TableHeaderCell>Contrato / Carnet</TableHeaderCell>
                 <TableHeaderCell>Asistencia</TableHeaderCell>
                 <TableHeaderCell>Estado</TableHeaderCell>
                 <TableHeaderCell></TableHeaderCell>
@@ -180,6 +196,7 @@ export default async function StaffPage() {
 
                 const attendance = attendanceByEmployee.get(employee.id);
                 const attendanceChip = attendanceLabel(attendance);
+                const wallet = walletEligibilityByEmployee.get(employee.id);
 
                 return (
                   <TableRow key={employee.id}>
@@ -195,6 +212,23 @@ export default async function StaffPage() {
                           ? `${siteNames.length} sede(s): ${siteNames.slice(0, 2).join(", ")}${siteNames.length > 2 ? "..." : ""}`
                           : "Sin sedes asignadas"}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {wallet ? (
+                        <div className="flex flex-wrap gap-1">
+                          <span className={`ui-chip ${wallet.contract_active ? "ui-chip--success" : ""}`} title="Contrato activo">
+                            {wallet.contract_active ? "Contrato OK" : "Sin contrato"}
+                          </span>
+                          <span className={`ui-chip ${wallet.documents_complete ? "ui-chip--success" : ""}`} title="Documentos completos">
+                            {wallet.documents_complete ? "Docs OK" : "Falta docs"}
+                          </span>
+                          <span className={`ui-chip ${wallet.wallet_eligible ? "ui-chip--brand" : ""}`} title="Carnet wallet">
+                            {wallet.wallet_status === "issued" ? "Emitido" : wallet.wallet_eligible ? "Elegible" : wallet.wallet_status}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="ui-caption">-</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <span className={`ui-chip ${attendanceChip.tone}`}>{attendanceChip.label}</span>

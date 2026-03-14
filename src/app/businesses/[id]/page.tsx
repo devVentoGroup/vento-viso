@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { BusinessForm } from "@/components/viso/business-form";
+import { RequiredDocumentRulesPanel } from "@/components/viso/required-document-rules-panel";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createClient } from "@/lib/supabase/server";
@@ -182,6 +183,46 @@ async function deleteBusiness(formData: FormData) {
   redirect("/businesses?ok=" + encodeURIComponent("Negocio eliminado."));
 }
 
+async function addRequiredDocumentRule(formData: FormData) {
+  "use server";
+  const siteId = asText(formData.get("site_id"));
+  const documentTypeId = asText(formData.get("document_type_id"));
+  const role = asText(formData.get("role")) || null;
+  const businessId = asText(formData.get("business_id"));
+  if (!siteId || !documentTypeId) {
+    redirect(businessId ? `/businesses/${businessId}?error=` + encodeURIComponent("Faltan sede o tipo de documento.") : "/businesses?error=" + encodeURIComponent("Faltan sede o tipo de documento."));
+  }
+  await requireAppAccess({ appId: "viso", returnTo: businessId ? `/businesses/${businessId}` : "/businesses" });
+  const supabase = await createClient();
+  const { error } = await supabase.from("required_document_rules").insert({
+    site_id: siteId,
+    role,
+    document_type_id: documentTypeId,
+    is_required: true,
+    active: true,
+    display_order: 999,
+  });
+  if (error) {
+    redirect(businessId ? `/businesses/${businessId}?error=` + encodeURIComponent(error.message) : "/businesses?error=" + encodeURIComponent(error.message));
+  }
+  revalidatePath("/businesses");
+  revalidatePath(businessId ? `/businesses/${businessId}` : "/businesses");
+  redirect(businessId ? `/businesses/${businessId}?ok=` + encodeURIComponent("Regla de documento requerido añadida.") : "/businesses?ok=" + encodeURIComponent("Regla añadida."));
+}
+
+async function deleteRequiredDocumentRule(formData: FormData) {
+  "use server";
+  const id = asText(formData.get("id"));
+  const businessId = asText(formData.get("business_id"));
+  if (!id) return;
+  await requireAppAccess({ appId: "viso", returnTo: businessId ? `/businesses/${businessId}` : "/businesses" });
+  const supabase = await createClient();
+  await supabase.from("required_document_rules").delete().eq("id", id);
+  revalidatePath("/businesses");
+  revalidatePath(businessId ? `/businesses/${businessId}` : "/businesses");
+  redirect(businessId ? `/businesses/${businessId}?ok=` + encodeURIComponent("Regla eliminada.") : "/businesses?ok=" + encodeURIComponent("Regla eliminada."));
+}
+
 function safeDecode(value: string | null | undefined) {
   if (!value) return "";
   try {
@@ -239,6 +280,25 @@ export default async function BusinessDetailPage({
 
   const site = (siteData ?? null) as SiteRow | null;
 
+  let documentTypes: { id: string; name: string | null; system_key: string | null; scope?: string | null }[] = [];
+  let requiredRules: { id: string; site_id: string | null; role: string | null; document_type_id: string; is_required: boolean; active: boolean; display_order: number; document_type: { id: string; name: string | null } | null }[] = [];
+  try {
+    const [typesRes, rulesRes] = await Promise.all([
+      supabase.from("document_types").select("id, name, system_key, scope").eq("is_active", true).order("display_order").order("name"),
+      business.site_id
+        ? supabase
+            .from("required_document_rules")
+            .select("id, site_id, role, document_type_id, is_required, active, display_order, document_type:document_types(id, name)")
+            .or(`site_id.eq.${business.site_id},site_id.is.null`)
+            .order("display_order")
+        : { data: [] as typeof requiredRules, error: null },
+    ]);
+    if (typesRes.data) documentTypes = typesRes.data as typeof documentTypes;
+    if (rulesRes.data) requiredRules = rulesRes.data as typeof requiredRules;
+  } catch {
+    // Tablas pueden no existir si migraciones no aplicadas
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -295,6 +355,16 @@ export default async function BusinessDetailPage({
           site_is_public: Boolean(site?.is_public),
           site_is_active: Boolean(site?.is_active),
         }}
+      />
+
+      <RequiredDocumentRulesPanel
+        businessId={business.id}
+        siteId={business.site_id}
+        siteName={site?.name ?? null}
+        documentTypes={documentTypes}
+        rules={requiredRules}
+        addAction={addRequiredDocumentRule}
+        deleteAction={deleteRequiredDocumentRule}
       />
 
       <div className="ui-panel-soft flex flex-wrap items-center justify-between gap-3">

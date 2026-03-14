@@ -376,6 +376,7 @@ export function WeeklySchedulePlanner({
   const [copyDayPanelOpen, setCopyDayPanelOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
+  const [selectionModeGroup, setSelectionModeGroup] = useState<PlannerShiftGroup | null>(null);
   const [bulkEmployeeIds, setBulkEmployeeIds] = useState<string[]>([]);
 
   const employeeById = useMemo(
@@ -589,6 +590,7 @@ export function WeeklySchedulePlanner({
     setSelectionMode((prev) => {
       if (prev) {
         setSelectedShiftIds([]);
+        setSelectionModeGroup(null);
         setBulkEmployeeIds([]);
       }
       return !prev;
@@ -609,6 +611,10 @@ export function WeeklySchedulePlanner({
       }
       return [...new Set([...prev, ...groupShiftIds])];
     });
+  };
+
+  const openSelectionModeGroup = (group: PlannerShiftGroup) => {
+    setSelectionModeGroup((prev) => (prev?.id === group.id ? null : group));
   };
 
   const toggleBulkEmployee = (employeeId: string) => {
@@ -765,6 +771,7 @@ export function WeeklySchedulePlanner({
                         const height = Math.max(((visibleEnd - visibleStart) / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT);
                         const laneWidth = 100 / group.laneCount;
                         const allSelected = group.shifts.every((shift) => selectedShiftIds.includes(shift.id));
+                        const someSelected = group.shifts.some((shift) => selectedShiftIds.includes(shift.id));
                         const firstShift = group.shifts[0];
                         const isGrouped = group.shifts.length > 1;
                         return (
@@ -773,13 +780,17 @@ export function WeeklySchedulePlanner({
                             type="button"
                             onClick={() => {
                               if (selectionMode) {
+                                if (group.shifts.length > 1) {
+                                  openSelectionModeGroup(group);
+                                  return;
+                                }
                                 toggleGroupSelection(group);
                                 return;
                               }
                               selectGroup(group);
                             }}
                             className={`absolute rounded-2xl border-2 px-3 py-2 text-left shadow-[var(--ui-shadow-soft)] transition hover:scale-[1.01] ${getStatusClass(firstShift?.status ?? "scheduled")} ${
-                              allSelected ? "ring-2 ring-[var(--ui-brand)] ring-offset-2" : ""
+                              allSelected || someSelected ? "ring-2 ring-[var(--ui-brand)] ring-offset-2" : ""
                             }`}
                             style={{
                               top,
@@ -839,12 +850,76 @@ export function WeeklySchedulePlanner({
                 Selección múltiple
               </p>
               <p className="ui-caption text-[var(--ui-muted)]">
-                Haz clic en varios bloques para seleccionarlos y eliminarlos de una sola vez.
+                Haz clic en bloques individuales para seleccionarlos. Si un bloque tiene varios trabajadores, se abre el detalle para que marques solo los que quieras.
               </p>
             </div>
             <p className="text-sm text-[var(--ui-muted)]">
-              <span className="font-semibold text-[var(--ui-text)]">{selectedShiftIds.length}</span> bloques seleccionados
+              <span className="font-semibold text-[var(--ui-text)]">{selectedShiftIds.length}</span> turnos seleccionados
             </p>
+            {selectionModeGroup ? (
+              <div className="space-y-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--ui-text)]">
+                      {getDayLabel(selectionModeGroup.shift_date)} ·{" "}
+                      {formatRange(selectionModeGroup.start_time, selectionModeGroup.end_time)}
+                    </p>
+                    <p className="ui-caption text-[var(--ui-muted)]">
+                      Selecciona uno o varios trabajadores de este horario.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectionModeGroup(null)}
+                    className="text-xs font-medium text-[var(--ui-muted)] transition hover:text-[var(--ui-text)]"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {selectionModeGroup.shifts.map((shift) => {
+                    const employee = employeeById.get(shift.employee_id) ?? {
+                      id: shift.employee_id,
+                      full_name: null,
+                      alias: null,
+                      role: null,
+                    };
+                    const checked = selectedShiftIds.includes(shift.id);
+                    return (
+                      <label
+                        key={shift.id}
+                        className={`flex cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm transition ${
+                          checked
+                            ? "bg-[var(--ui-brand-soft)] text-[var(--ui-brand-600)]"
+                            : "text-[var(--ui-text)] hover:bg-[var(--ui-brand-soft)]"
+                        }`}
+                      >
+                        <span>
+                          {getEmployeeLabel(employee)}
+                          {employee.role ? (
+                            <span className="ml-2 text-[var(--ui-muted)]">· {employee.role}</span>
+                          ) : null}
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleShiftSelection(shift.id)}
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => toggleGroupSelection(selectionModeGroup)}
+                  className="ui-btn ui-btn--ghost ui-btn--sm w-full"
+                >
+                  {selectionModeGroup.shifts.every((shift) => selectedShiftIds.includes(shift.id))
+                    ? "Quitar este bloque de la selección"
+                    : "Seleccionar todo este bloque"}
+                </button>
+              </div>
+            ) : null}
             <div className="space-y-2">
               <p className="text-sm font-semibold text-[var(--ui-text)]">
                 Agregar trabajadores

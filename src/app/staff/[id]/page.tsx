@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
+import { StaffWalletDocsPanel } from "@/components/viso/staff-wallet-docs-panel";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -414,7 +415,16 @@ export default async function StaffDetailPage({
   });
   const supabase = createAdminClient();
 
-  const [{ data: employee }, { data: sites }, { data: roles }, { data: employeeSites }, { data: attendanceStatus }, { data: attendanceLogs }, { data: shifts }] = await Promise.all([
+  const [
+    { data: employee },
+    { data: sites },
+    { data: roles },
+    { data: employeeSites },
+    { data: attendanceStatus },
+    { data: attendanceLogs },
+    { data: shifts },
+    ...restResults
+  ] = await Promise.all([
     supabase
       .from("employees")
       .select("id,full_name,alias,role,is_active,site_id")
@@ -452,6 +462,13 @@ export default async function StaffDetailPage({
       .order("shift_date", { ascending: true })
       .order("start_time", { ascending: true })
       .limit(40),
+    supabase
+      .from("documents")
+      .select("id,title,status,issue_date,expiry_date,document_type:document_types(id,name)")
+      .eq("target_employee_id", id)
+      .order("updated_at", { ascending: false }),
+    supabase.rpc("employee_wallet_eligibility", { p_employee_id: id }).maybeSingle(),
+    supabase.from("employee_wallet_cards").select("id,status,serial_number,last_issued_at,last_revoked_at,revocation_reason").eq("employee_id", id).maybeSingle(),
   ]);
 
   if (!employee) {
@@ -468,6 +485,46 @@ export default async function StaffDetailPage({
 
   const attendanceLabel = attendance?.current_status === "check_in" ? "En turno" : attendance?.current_status === "check_out" ? "Fuera de turno" : "Sin registros";
 
+  const docsResult = restResults[0] as { data?: unknown[] | null } | undefined;
+  const eligibilityResult = restResults[1] as { data?: unknown } | undefined;
+  const walletCardResult = restResults[2] as { data?: unknown } | undefined;
+  const staffDocs = (docsResult?.data ?? []) as { id: string; title: string | null; status: string; issue_date: string | null; expiry_date: string | null; document_type: { id: string; name: string | null } | { id: string; name: string | null }[] | null }[];
+  const staffDocsNormalized = staffDocs.map((d) => ({
+    ...d,
+    document_type: Array.isArray(d.document_type) ? d.document_type[0] ?? null : d.document_type,
+  }));
+  const eligibility = (eligibilityResult?.data ?? null) as {
+    employee_id: string;
+    contract_active: boolean;
+    contract_document_id: string | null;
+    contract_start_date: string | null;
+    contract_end_date: string | null;
+    documents_complete: boolean;
+    missing_required_document_type_ids: string[] | null;
+    wallet_eligible: boolean;
+    wallet_status: string;
+  } | null;
+  const walletCard = (walletCardResult?.data ?? null) as {
+    id: string;
+    status: string;
+    serial_number: string | null;
+    last_issued_at: string | null;
+    last_revoked_at: string | null;
+    revocation_reason: string | null;
+  } | null;
+  const documentTypeNamesById: Record<string, string> = {};
+  staffDocsNormalized.forEach((d) => {
+    const dt = d.document_type;
+    if (dt && typeof dt === "object" && "id" in dt && "name" in dt) {
+      documentTypeNamesById[dt.id] = dt.name ?? dt.id;
+    }
+  });
+  if (eligibility?.missing_required_document_type_ids) {
+    eligibility.missing_required_document_type_ids.forEach((uuid) => {
+      if (!documentTypeNamesById[uuid]) documentTypeNamesById[uuid] = uuid;
+    });
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -482,6 +539,15 @@ export default async function StaffDetailPage({
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">Listo: {okMsg}</div> : null}
+
+      <StaffWalletDocsPanel
+        employeeId={emp.id}
+        employeeName={emp.full_name}
+        documents={staffDocsNormalized}
+        eligibility={eligibility}
+        walletCard={walletCard}
+        documentTypeNamesById={documentTypeNamesById}
+      />
 
       <div className="ui-panel space-y-6">
         <form action={updateEmployee} className="grid gap-4 sm:grid-cols-2">
