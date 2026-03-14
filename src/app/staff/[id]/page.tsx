@@ -578,7 +578,7 @@ export default async function StaffDetailPage({
       .order("updated_at", { ascending: false }),
     supabase.rpc("employee_wallet_eligibility", { p_employee_id: id }).maybeSingle(),
     supabase.from("employee_wallet_cards").select("id,status,serial_number,last_issued_at,last_revoked_at,revocation_reason").eq("employee_id", id).maybeSingle(),
-    supabase.from("document_types").select("id,name,requires_expiry,validity_months").order("name", { ascending: true }),
+    supabase.from("document_types").select("id,name,requires_expiry,validity_months").eq("is_active", true).order("name", { ascending: true }),
   ]);
 
   if (!employee) {

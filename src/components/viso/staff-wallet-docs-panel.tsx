@@ -131,7 +131,7 @@ function UploadDocumentForm({
         />
       </div>
       <div className="flex gap-2">
-        <button type="submit" className="ui-btn ui-btn--primary">
+        <button type="submit" className="ui-btn ui-btn--brand">
           Subir
         </button>
         <button type="button" onClick={onCancel} className="ui-btn ui-btn--ghost">
@@ -165,7 +165,14 @@ export function StaffWalletDocsPanel({
         <div className="mb-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
           <p className="ui-caption mb-3">Sube documentos desde aquí o desde ANIMA. Para contrato laboral elige tipo &quot;Contrato laboral&quot; e indica fechas de vigencia.</p>
           {!showUpload ? (
-            <button type="button" onClick={() => setShowUpload(true)} className="ui-btn ui-btn--primary">
+            <button
+              type="button"
+              onClick={() => setShowUpload(true)}
+              className="ui-btn ui-btn--brand inline-flex items-center gap-2"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
               Subir documento
             </button>
           ) : (
