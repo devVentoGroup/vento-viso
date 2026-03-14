@@ -67,7 +67,7 @@ async function createProduct(formData: FormData) {
     redirect("/products/new?error=" + encodeURIComponent(metadataError));
   }
 
-  const { error } = await supabase.schema("pass").from("loyalty_rewards").insert({
+  const { error } = await supabase.from("loyalty_rewards").insert({
     code,
     name,
     description: description || null,

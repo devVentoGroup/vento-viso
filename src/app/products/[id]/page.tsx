@@ -82,7 +82,7 @@ async function updateProduct(formData: FormData) {
   }
 
   const { error } = await supabase
-    .schema("pass").from("loyalty_rewards")
+    .from("loyalty_rewards")
     .update({
       code,
       name,
@@ -111,7 +111,7 @@ async function disableProduct(formData: FormData) {
     redirect("/products?error=" + encodeURIComponent("Producto invalido."));
   }
 
-  const { error } = await supabase.schema("pass").from("loyalty_rewards").update({ is_active: false }).eq("id", id);
+  const { error } = await supabase.from("loyalty_rewards").update({ is_active: false }).eq("id", id);
   if (error) {
     redirect(`/products/${id}?error=${encodeURIComponent(error.message)}`);
   }
@@ -129,7 +129,7 @@ async function deleteProduct(formData: FormData) {
     redirect("/products?error=" + encodeURIComponent("Producto invalido."));
   }
 
-  const { error } = await supabase.schema("pass").from("loyalty_rewards").delete().eq("id", id);
+  const { error } = await supabase.from("loyalty_rewards").delete().eq("id", id);
   if (error) {
     redirect(`/products/${id}?error=${encodeURIComponent(error.message)}`);
   }
@@ -166,7 +166,7 @@ export default async function ProductDetailPage({
 
   const [{ data: product }, { data: sites }] = await Promise.all([
     supabase
-      .schema("pass").from("loyalty_rewards")
+      .from("loyalty_rewards")
       .select("id,code,name,description,points_cost,is_active,site_id,metadata")
       .eq("id", id)
       .maybeSingle(),

@@ -12,8 +12,14 @@ type RewardRow = {
   name: string;
   points_cost: number;
   is_active: boolean;
+  site_id: string | null;
   metadata: Record<string, unknown> | null;
-  site?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
+};
+
+type SiteRow = {
+  id: string;
+  name: string | null;
+  code: string | null;
 };
 
 function safeDecode(value: string | null | undefined) {
@@ -39,12 +45,20 @@ export default async function ProductsPage({
     returnTo: "/products",
   });
 
-  const { data } = await supabase
-    .schema("pass").from("loyalty_rewards")
-    .select("id,code,name,points_cost,is_active,metadata,site:sites(id,name,code)")
+  const { data, error } = await supabase
+    .from("loyalty_rewards")
+    .select("id,code,name,points_cost,is_active,metadata,site_id")
     .order("name", { ascending: true });
 
   const rows = (data ?? []) as RewardRow[];
+  const siteIds = rows.map((row) => row.site_id).filter(Boolean) as string[];
+  const { data: sitesData, error: sitesError } = siteIds.length
+    ? await supabase.from("sites").select("id,name,code").in("id", siteIds)
+    : { data: [], error: null };
+  const sitesById = new Map(
+    ((sitesData ?? []) as SiteRow[]).map((site) => [site.id, site]),
+  );
+  const effectiveError = errorMsg || error?.message || sitesError?.message || "";
 
   return (
     <div className="space-y-6">
@@ -58,7 +72,7 @@ export default async function ProductsPage({
         }
       />
 
-      {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
+      {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
       <div className="ui-panel">
@@ -78,7 +92,7 @@ export default async function ProductsPage({
             </TableHead>
             <TableBody>
               {rows.map((row) => {
-                const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site ?? null;
+                const site = row.site_id ? sitesById.get(row.site_id) ?? null : null;
                 const category =
                   row.metadata && typeof row.metadata === "object" && typeof row.metadata.category === "string"
                     ? row.metadata.category

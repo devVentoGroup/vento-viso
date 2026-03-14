@@ -11,7 +11,14 @@ type SatelliteRow = {
   code: string | null;
   name: string | null;
   is_active: boolean | null;
-  site?: { id: string; name: string | null; code: string | null; is_public: boolean | null } | { id: string; name: string | null; code: string | null; is_public: boolean | null }[] | null;
+  site_id?: string | null;
+};
+
+type SiteRow = {
+  id: string;
+  name: string | null;
+  code: string | null;
+  is_public: boolean | null;
 };
 
 function safeDecode(value: string | null | undefined) {
@@ -37,12 +44,20 @@ export default async function BusinessesPage({
     returnTo: "/businesses",
   });
 
-  const { data } = await supabase
-    .schema("pass").from("pass_satellites")
-    .select("id,code,name,is_active,site:sites(id,name,code,is_public)")
+  const { data, error } = await supabase
+    .from("pass_satellites")
+    .select("id,code,name,is_active,site_id")
     .order("sort_order", { ascending: true });
 
   const rows = (data ?? []) as SatelliteRow[];
+  const siteIds = rows.map((row) => row.site_id).filter(Boolean) as string[];
+  const { data: sitesData, error: sitesError } = siteIds.length
+    ? await supabase.from("sites").select("id,name,code,is_public").in("id", siteIds)
+    : { data: [], error: null };
+  const sitesById = new Map(
+    ((sitesData ?? []) as SiteRow[]).map((site) => [site.id, site]),
+  );
+  const effectiveError = errorMsg || error?.message || sitesError?.message || "";
 
   return (
     <div className="space-y-6">
@@ -56,7 +71,7 @@ export default async function BusinessesPage({
         }
       />
 
-      {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
+      {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
       <div className="ui-panel">
@@ -76,7 +91,7 @@ export default async function BusinessesPage({
             </TableHead>
             <TableBody>
               {rows.map((row) => {
-                const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site ?? null;
+                const site = row.site_id ? sitesById.get(row.site_id) ?? null : null;
                 return (
                   <TableRow key={row.id}>
                     <TableCell>{row.code ?? "-"}</TableCell>
