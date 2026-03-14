@@ -49,6 +49,8 @@ type StaffWalletDocsPanelProps = {
   documentTypeNamesById: Record<string, string>;
   documentTypes: DocumentTypeOption[];
   uploadDocumentAction: (formData: FormData) => Promise<void>;
+  canEditDocuments?: boolean;
+  updateDocumentAction?: (formData: FormData) => Promise<void>;
 };
 
 function formatDate(s: string | null) {
@@ -142,6 +144,16 @@ function UploadDocumentForm({
   );
 }
 
+function toDateInputValue(s: string | null) {
+  if (!s) return "";
+  try {
+    const d = new Date(s);
+    return d.toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
+}
+
 export function StaffWalletDocsPanel({
   employeeId,
   employeeName,
@@ -151,10 +163,14 @@ export function StaffWalletDocsPanel({
   documentTypeNamesById,
   documentTypes,
   uploadDocumentAction,
+  canEditDocuments = false,
+  updateDocumentAction,
 }: StaffWalletDocsPanelProps) {
   const missingNames = (eligibility?.missing_required_document_type_ids ?? []).map((id) => documentTypeNamesById[id] ?? id);
   const [showUpload, setShowUpload] = useState(false);
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const editingDoc = editingDocId ? documents.find((d) => d.id === editingDocId) : null;
 
   return (
     <div className="ui-panel ui-panel--accent-brand space-y-6">
@@ -188,30 +204,98 @@ export function StaffWalletDocsPanel({
         {documents.length === 0 ? (
           <p className="ui-caption">Sin documentos cargados.</p>
         ) : (
-          <Table className="ui-table--accent">
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>Tipo / Título</TableHeaderCell>
-                <TableHeaderCell>Estado</TableHeaderCell>
-                <TableHeaderCell>Expedición</TableHeaderCell>
-                <TableHeaderCell>Vencimiento</TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {documents.map((d) => (
-                <TableRow key={d.id}>
-                  <TableCell>{d.document_type?.name ?? d.title ?? d.id}</TableCell>
-                  <TableCell>
-                    <span className={`ui-chip ${d.status === "approved" ? "ui-chip--success" : d.status === "rejected" ? "ui-chip--danger" : ""}`}>
-                      {d.status === "approved" ? "Aprobado" : d.status === "rejected" ? "Rechazado" : "Pendiente"}
-                    </span>
-                  </TableCell>
-                  <TableCell>{formatDate(d.issue_date)}</TableCell>
-                  <TableCell>{formatDate(d.expiry_date)}</TableCell>
+          <>
+            <Table className="ui-table--accent">
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Tipo / Título</TableHeaderCell>
+                  <TableHeaderCell>Estado</TableHeaderCell>
+                  <TableHeaderCell>Expedición</TableHeaderCell>
+                  <TableHeaderCell>Vencimiento</TableHeaderCell>
+                  {canEditDocuments && <TableHeaderCell>Acciones</TableHeaderCell>}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHead>
+              <TableBody>
+                {documents.map((d) => (
+                  <TableRow key={d.id}>
+                    <TableCell>{d.document_type?.name ?? d.title ?? d.id}</TableCell>
+                    <TableCell>
+                      <span className={`ui-chip ${d.status === "approved" ? "ui-chip--success" : d.status === "rejected" ? "ui-chip--danger" : ""}`}>
+                        {d.status === "approved" ? "Aprobado" : d.status === "rejected" ? "Rechazado" : "Pendiente"}
+                      </span>
+                    </TableCell>
+                    <TableCell>{formatDate(d.issue_date)}</TableCell>
+                    <TableCell>{formatDate(d.expiry_date)}</TableCell>
+                    {canEditDocuments && (
+                      <TableCell>
+                        <button
+                          type="button"
+                          onClick={() => setEditingDocId(d.id)}
+                          className="ui-btn ui-btn--ghost text-sm"
+                        >
+                          Editar fechas
+                        </button>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {canEditDocuments && updateDocumentAction && editingDoc && (
+              <div className="mt-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                <h4 className="ui-label mb-3">Editar documento: {editingDoc.document_type?.name ?? editingDoc.title ?? editingDoc.id}</h4>
+                <form action={updateDocumentAction} method="post" className="grid gap-3 sm:grid-cols-2">
+                  <input type="hidden" name="document_id" value={editingDoc.id} />
+                  <input type="hidden" name="employee_id" value={employeeId} />
+                  <div>
+                    <label htmlFor="edit-issue_date" className="ui-label block mb-1">
+                      Fecha de expedición
+                    </label>
+                    <input
+                      id="edit-issue_date"
+                      type="date"
+                      name="issue_date"
+                      className="ui-input w-full"
+                      defaultValue={toDateInputValue(editingDoc.issue_date)}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="edit-expiry_date" className="ui-label block mb-1">
+                      Fecha de vencimiento
+                    </label>
+                    <input
+                      id="edit-expiry_date"
+                      type="date"
+                      name="expiry_date"
+                      className="ui-input w-full"
+                      defaultValue={toDateInputValue(editingDoc.expiry_date)}
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label htmlFor="edit-title" className="ui-label block mb-1">
+                      Título (opcional)
+                    </label>
+                    <input
+                      id="edit-title"
+                      type="text"
+                      name="title"
+                      className="ui-input w-full"
+                      defaultValue={editingDoc.title ?? ""}
+                      placeholder="Ej. Contrato laboral"
+                    />
+                  </div>
+                  <div className="flex gap-2 sm:col-span-2">
+                    <button type="submit" className="ui-btn ui-btn--brand">
+                      Guardar cambios
+                    </button>
+                    <button type="button" onClick={() => setEditingDocId(null)} className="ui-btn ui-btn--ghost">
+                      Cancelar
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -228,6 +312,15 @@ export function StaffWalletDocsPanel({
           <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
             <span className="ui-chip">Sin contrato vigente</span>
             <p className="ui-caption mt-1">Se requiere un documento de tipo Contrato laboral con vigencia que incluya la fecha actual.</p>
+            {documents.some(
+              (d) =>
+                d.status === "approved" &&
+                d.document_type?.name?.toLowerCase().includes("contrato laboral")
+            ) && (
+              <p className="mt-2 text-sm text-[var(--ui-muted)]">
+                Tienes un contrato aprobado: para que figure como vigente, la <strong>fecha de expedición</strong> debe ser hoy o una fecha pasada, y la de vencimiento hoy o futura. Revisa las fechas del documento en la lista de arriba.
+              </p>
+            )}
           </div>
         )}
       </div>

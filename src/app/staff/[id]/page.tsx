@@ -383,6 +383,51 @@ async function uploadStaffDocument(formData: FormData) {
   redirect(`/staff/${employeeId}?ok=document_uploaded`);
 }
 
+async function updateStaffDocument(formData: FormData) {
+  "use server";
+  const documentId = asText(formData.get("document_id"));
+  const employeeId = asText(formData.get("employee_id"));
+  const issueDateRaw = formData.get("issue_date");
+  const expiryDateRaw = formData.get("expiry_date");
+  const titleRaw = formData.get("title");
+  const issueDate = typeof issueDateRaw === "string" ? issueDateRaw.trim() || null : null;
+  const expiryDate = typeof expiryDateRaw === "string" ? expiryDateRaw.trim() || null : null;
+  const title = typeof titleRaw === "string" ? titleRaw.trim() || null : null;
+
+  if (!documentId || !employeeId) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Faltan documento o empleado.")}`);
+  }
+
+  const { user } = await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
+
+  const { data: me } = await supabase.from("employees").select("role").eq("id", user.id).maybeSingle();
+  const allowedRoles = ["propietario", "gerente_general", "gerente"];
+  if (!me?.role || !allowedRoles.includes(me.role)) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Sin permiso para editar documentos.")}`);
+  }
+
+  const updates: { issue_date?: string | null; expiry_date?: string | null; title?: string | null } = {};
+  if (issueDate !== undefined) updates.issue_date = issueDate;
+  if (expiryDate !== undefined) updates.expiry_date = expiryDate;
+  if (title !== undefined) updates.title = title;
+
+  const { error } = await supabase
+    .from("documents")
+    .update(updates)
+    .eq("id", documentId)
+    .eq("target_employee_id", employeeId);
+
+  if (error) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al actualizar: " + error.message)}`);
+  }
+  revalidatePath(`/staff/${employeeId}`);
+  redirect(`/staff/${employeeId}?ok=document_updated`);
+}
+
 async function createEmployeeShift(formData: FormData) {
   "use server";
   const employeeId = asText(formData.get("employee_id"));
@@ -508,17 +553,19 @@ export default async function StaffDetailPage({
   const okMsg =
     okRaw === "document_uploaded"
       ? "Documento subido correctamente."
-      : okRaw === "shift_created"
-        ? "Turno creado."
-        : okRaw === "shift_updated"
-          ? "Turno actualizado."
-          : okRaw === "shift_deleted"
-            ? "Turno eliminado."
-            : okRaw;
+      : okRaw === "document_updated"
+        ? "Documento actualizado."
+        : okRaw === "shift_created"
+          ? "Turno creado."
+          : okRaw === "shift_updated"
+            ? "Turno actualizado."
+            : okRaw === "shift_deleted"
+              ? "Turno eliminado."
+              : okRaw;
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
   const { id } = await params;
 
-  await requireAppAccess({
+  const { user } = await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${id}`,
   });
@@ -584,6 +631,15 @@ export default async function StaffDetailPage({
   if (!employee) {
     redirect("/staff?error=" + encodeURIComponent("Empleado no encontrado."));
   }
+
+  const { data: currentEmployee } = await supabase
+    .from("employees")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+  const canEditDocuments =
+    !!currentEmployee?.role &&
+    ["propietario", "gerente_general", "gerente"].includes(currentEmployee.role);
 
   const siteRows = (sites ?? []) as SiteRow[];
   const roleRows = (roles ?? []) as RoleRow[];
@@ -661,6 +717,8 @@ export default async function StaffDetailPage({
         documentTypeNamesById={documentTypeNamesById}
         documentTypes={documentTypesForSelect}
         uploadDocumentAction={uploadStaffDocument}
+        canEditDocuments={canEditDocuments}
+        updateDocumentAction={updateStaffDocument}
       />
 
       <div className="ui-panel space-y-6">
