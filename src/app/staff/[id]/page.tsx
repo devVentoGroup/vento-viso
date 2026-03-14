@@ -284,6 +284,105 @@ async function removeEmployeeSite(formData: FormData) {
   redirect(`/staff/${employeeId}?ok=site_removed`);
 }
 
+async function uploadStaffDocument(formData: FormData) {
+  "use server";
+  const employeeId = asText(formData.get("employee_id"));
+  const documentTypeId = asText(formData.get("document_type_id"));
+  const issueDate = asText(formData.get("issue_date"));
+  const expiryDate = asText(formData.get("expiry_date"));
+  const file = formData.get("file") as File | null;
+
+  if (!employeeId || !documentTypeId) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Faltan empleado o tipo de documento.")}`);
+  }
+  if (!file || !(file instanceof File) || file.size === 0) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Selecciona un archivo PDF.")}`);
+  }
+  const mime = file.type ?? "application/pdf";
+  if (!mime.toLowerCase().includes("pdf")) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Solo se permiten archivos PDF.")}`);
+  }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
+
+  const { data: docType } = await supabase
+    .from("document_types")
+    .select("id,name,requires_expiry,validity_months")
+    .eq("id", documentTypeId)
+    .maybeSingle();
+
+  if (!docType) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Tipo de documento no encontrado.")}`);
+  }
+
+  let issueDateValue: string | null = null;
+  let expiryDateValue: string | null = null;
+  if (docType.requires_expiry) {
+    if (!issueDate) {
+      redirect(`/staff/${employeeId}?error=${encodeURIComponent("Indica la fecha de expedición.")}`);
+    }
+    let expiry: string | null = expiryDate || null;
+    if (!expiry && docType.validity_months != null) {
+      const d = new Date(issueDate);
+      d.setMonth(d.getMonth() + Number(docType.validity_months));
+      expiry = d.toISOString().slice(0, 10);
+    }
+    if (!expiry) {
+      redirect(`/staff/${employeeId}?error=${encodeURIComponent("Indica la fecha de vencimiento.")}`);
+    }
+    issueDateValue = issueDate;
+    expiryDateValue = expiry;
+  }
+
+  const safeName = (file.name ?? "documento.pdf").replace(/\s+/g, "_");
+  const storagePath = `viso/${employeeId}/${Date.now()}_${safeName}`;
+
+  const arrayBuffer = await file.arrayBuffer();
+
+  const { error: uploadError } = await supabase.storage
+    .from("documents")
+    .upload(storagePath, arrayBuffer, {
+      contentType: mime,
+      cacheControl: "3600",
+      upsert: false,
+    });
+
+  if (uploadError) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al subir el archivo: " + uploadError.message)}`);
+  }
+
+  const insertPayload = {
+    scope: "employee",
+    owner_employee_id: employeeId,
+    target_employee_id: employeeId,
+    site_id: null,
+    title: docType.name ?? "Documento",
+    description: null,
+    storage_path: storagePath,
+    file_name: file.name ?? "documento.pdf",
+    file_size_bytes: file.size,
+    file_mime: mime,
+    document_type_id: documentTypeId,
+    issue_date: issueDateValue,
+    expiry_date: expiryDateValue,
+    status: "approved",
+  };
+
+  const { error: insertError } = await supabase.from("documents").insert(insertPayload);
+
+  if (insertError) {
+    await supabase.storage.from("documents").remove([storagePath]);
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al registrar el documento: " + insertError.message)}`);
+  }
+
+  revalidatePath(`/staff/${employeeId}`);
+  redirect(`/staff/${employeeId}?ok=document_uploaded`);
+}
+
 async function createEmployeeShift(formData: FormData) {
   "use server";
   const employeeId = asText(formData.get("employee_id"));
@@ -405,7 +504,17 @@ export default async function StaffDetailPage({
   searchParams?: Promise<{ ok?: string; error?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
-  const okMsg = sp.ok ? safeDecode(sp.ok) : "";
+  const okRaw = sp.ok ? safeDecode(sp.ok) : "";
+  const okMsg =
+    okRaw === "document_uploaded"
+      ? "Documento subido correctamente."
+      : okRaw === "shift_created"
+        ? "Turno creado."
+        : okRaw === "shift_updated"
+          ? "Turno actualizado."
+          : okRaw === "shift_deleted"
+            ? "Turno eliminado."
+            : okRaw;
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
   const { id } = await params;
 
@@ -469,6 +578,7 @@ export default async function StaffDetailPage({
       .order("updated_at", { ascending: false }),
     supabase.rpc("employee_wallet_eligibility", { p_employee_id: id }).maybeSingle(),
     supabase.from("employee_wallet_cards").select("id,status,serial_number,last_issued_at,last_revoked_at,revocation_reason").eq("employee_id", id).maybeSingle(),
+    supabase.from("document_types").select("id,name,requires_expiry,validity_months").order("name", { ascending: true }),
   ]);
 
   if (!employee) {
@@ -488,6 +598,8 @@ export default async function StaffDetailPage({
   const docsResult = restResults[0] as { data?: unknown[] | null } | undefined;
   const eligibilityResult = restResults[1] as { data?: unknown } | undefined;
   const walletCardResult = restResults[2] as { data?: unknown } | undefined;
+  const documentTypesResult = restResults[3] as { data?: { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null }[] | null } | undefined;
+  const documentTypesForSelect = (documentTypesResult?.data ?? []) as { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null }[];
   const staffDocs = (docsResult?.data ?? []) as { id: string; title: string | null; status: string; issue_date: string | null; expiry_date: string | null; document_type: { id: string; name: string | null } | { id: string; name: string | null }[] | null }[];
   const staffDocsNormalized = staffDocs.map((d) => ({
     ...d,
@@ -547,6 +659,8 @@ export default async function StaffDetailPage({
         eligibility={eligibility}
         walletCard={walletCard}
         documentTypeNamesById={documentTypeNamesById}
+        documentTypes={documentTypesForSelect}
+        uploadDocumentAction={uploadStaffDocument}
       />
 
       <div className="ui-panel space-y-6">

@@ -70,6 +70,7 @@ export function RequiredDocumentRulesPanel({
     setIsSubmitting(true);
     const formData = new FormData();
     formData.set("business_id", businessId);
+    if (!businessId && siteId) formData.set("site_id", siteId);
     formData.set("id", ruleId);
     await deleteAction(formData);
     setIsSubmitting(false);

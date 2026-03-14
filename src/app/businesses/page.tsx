@@ -65,9 +65,14 @@ export default async function BusinessesPage({
         title="Negocios"
         subtitle="Sedes y configuracion de Vento Pass."
         actions={
-          <Link href="/businesses/new" className="ui-btn ui-btn--brand">
-            Crear negocio
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/sites" className="ui-btn ui-btn--ghost">
+              Sedes (documentos requeridos)
+            </Link>
+            <Link href="/businesses/new" className="ui-btn ui-btn--brand">
+              Crear negocio
+            </Link>
+          </div>
         }
       />
 

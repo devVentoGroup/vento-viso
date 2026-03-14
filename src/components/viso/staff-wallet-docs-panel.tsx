@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 
 export type DocRow = {
@@ -32,6 +33,13 @@ export type WalletCardRow = {
   revocation_reason: string | null;
 } | null;
 
+export type DocumentTypeOption = {
+  id: string;
+  name: string | null;
+  requires_expiry: boolean | null;
+  validity_months: number | null;
+};
+
 type StaffWalletDocsPanelProps = {
   employeeId: string;
   employeeName: string | null;
@@ -39,6 +47,8 @@ type StaffWalletDocsPanelProps = {
   eligibility: EligibilityRow | null;
   walletCard: WalletCardRow;
   documentTypeNamesById: Record<string, string>;
+  documentTypes: DocumentTypeOption[];
+  uploadDocumentAction: (formData: FormData) => Promise<never>;
 };
 
 function formatDate(s: string | null) {
@@ -50,6 +60,88 @@ function formatDate(s: string | null) {
   }
 }
 
+function UploadDocumentForm({
+  employeeId,
+  documentTypes,
+  uploadDocumentAction,
+  fileInputRef,
+  onCancel,
+}: {
+  employeeId: string;
+  documentTypes: DocumentTypeOption[];
+  uploadDocumentAction: (formData: FormData) => Promise<never>;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  onCancel: () => void;
+}) {
+  const [selectedTypeId, setSelectedTypeId] = useState<string>("");
+  const selectedType = documentTypes.find((dt) => dt.id === selectedTypeId);
+  const needsExpiry = selectedType?.requires_expiry === true;
+
+  return (
+    <form action={uploadDocumentAction} method="post" encType="multipart/form-data" className="space-y-4">
+      <input type="hidden" name="employee_id" value={employeeId} />
+      <div>
+        <label htmlFor="doc-type" className="ui-label block mb-1">
+          Tipo de documento
+        </label>
+        <select
+          id="doc-type"
+          name="document_type_id"
+          className="ui-input w-full"
+          value={selectedTypeId}
+          onChange={(e) => setSelectedTypeId(e.target.value)}
+          required
+        >
+          <option value="">Selecciona un tipo</option>
+          {documentTypes.map((dt) => (
+            <option key={dt.id} value={dt.id}>
+              {dt.name ?? dt.id}
+            </option>
+          ))}
+        </select>
+      </div>
+      {needsExpiry && (
+        <>
+          <div>
+            <label htmlFor="issue_date" className="ui-label block mb-1">
+              Fecha de expedición
+            </label>
+            <input id="issue_date" type="date" name="issue_date" className="ui-input w-full" required={needsExpiry} />
+          </div>
+          <div>
+            <label htmlFor="expiry_date" className="ui-label block mb-1">
+              Fecha de vencimiento
+            </label>
+            <input id="expiry_date" type="date" name="expiry_date" className="ui-input w-full" required={needsExpiry} />
+          </div>
+        </>
+      )}
+      <div>
+        <label htmlFor="file" className="ui-label block mb-1">
+          Archivo PDF
+        </label>
+        <input
+          ref={fileInputRef}
+          id="file"
+          type="file"
+          name="file"
+          accept=".pdf,application/pdf"
+          className="ui-input w-full"
+          required
+        />
+      </div>
+      <div className="flex gap-2">
+        <button type="submit" className="ui-btn ui-btn--primary">
+          Subir
+        </button>
+        <button type="button" onClick={onCancel} className="ui-btn ui-btn--ghost">
+          Cancelar
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function StaffWalletDocsPanel({
   employeeId,
   employeeName,
@@ -57,8 +149,12 @@ export function StaffWalletDocsPanel({
   eligibility,
   walletCard,
   documentTypeNamesById,
+  documentTypes,
+  uploadDocumentAction,
 }: StaffWalletDocsPanelProps) {
   const missingNames = (eligibility?.missing_required_document_type_ids ?? []).map((id) => documentTypeNamesById[id] ?? id);
+  const [showUpload, setShowUpload] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="ui-panel ui-panel--accent-brand space-y-6">
@@ -66,8 +162,24 @@ export function StaffWalletDocsPanel({
 
       <div>
         <h4 className="ui-label mb-2">Documentos del trabajador</h4>
+        <div className="mb-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+          <p className="ui-caption mb-3">Sube documentos desde aquí o desde ANIMA. Para contrato laboral elige tipo &quot;Contrato laboral&quot; e indica fechas de vigencia.</p>
+          {!showUpload ? (
+            <button type="button" onClick={() => setShowUpload(true)} className="ui-btn ui-btn--primary">
+              Subir documento
+            </button>
+          ) : (
+            <UploadDocumentForm
+              employeeId={employeeId}
+              documentTypes={documentTypes}
+              uploadDocumentAction={uploadDocumentAction}
+              fileInputRef={fileInputRef}
+              onCancel={() => setShowUpload(false)}
+            />
+          )}
+        </div>
         {documents.length === 0 ? (
-          <p className="ui-caption">Sin documentos cargados. Los documentos se pueden subir desde ANIMA o desde esta ficha (próximamente).</p>
+          <p className="ui-caption">Sin documentos cargados.</p>
         ) : (
           <Table className="ui-table--accent">
             <TableHead>
