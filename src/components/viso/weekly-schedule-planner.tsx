@@ -49,6 +49,7 @@ type WeeklySchedulePlannerProps = {
   saveAction: (formData: FormData) => Promise<void>;
   deleteAction: (formData: FormData) => Promise<void>;
   deleteManyAction: (formData: FormData) => Promise<void>;
+  assignManyAction: (formData: FormData) => Promise<void>;
   copyPreviousWeekAction: (formData: FormData) => Promise<void>;
   copyDayToOtherDaysAction: (formData: FormData) => Promise<void>;
   publishWeekAction: (formData: FormData) => Promise<void>;
@@ -345,6 +346,7 @@ export function WeeklySchedulePlanner({
   saveAction,
   deleteAction,
   deleteManyAction,
+  assignManyAction,
   copyPreviousWeekAction,
   copyDayToOtherDaysAction,
   publishWeekAction,
@@ -374,6 +376,7 @@ export function WeeklySchedulePlanner({
   const [copyDayPanelOpen, setCopyDayPanelOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
+  const [bulkEmployeeIds, setBulkEmployeeIds] = useState<string[]>([]);
 
   const employeeById = useMemo(
     () => new Map(employees.map((employee) => [employee.id, employee])),
@@ -586,6 +589,7 @@ export function WeeklySchedulePlanner({
     setSelectionMode((prev) => {
       if (prev) {
         setSelectedShiftIds([]);
+        setBulkEmployeeIds([]);
       }
       return !prev;
     });
@@ -605,6 +609,12 @@ export function WeeklySchedulePlanner({
       }
       return [...new Set([...prev, ...groupShiftIds])];
     });
+  };
+
+  const toggleBulkEmployee = (employeeId: string) => {
+    setBulkEmployeeIds((prev) =>
+      prev.includes(employeeId) ? prev.filter((id) => id !== employeeId) : [...prev, employeeId],
+    );
   };
 
   return (
@@ -835,6 +845,57 @@ export function WeeklySchedulePlanner({
             <p className="text-sm text-[var(--ui-muted)]">
               <span className="font-semibold text-[var(--ui-text)]">{selectedShiftIds.length}</span> bloques seleccionados
             </p>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-[var(--ui-text)]">
+                Agregar trabajadores
+              </p>
+              <p className="ui-caption text-[var(--ui-muted)]">
+                Copia estos bloques a otros trabajadores manteniendo día y horario.
+              </p>
+              <div className="max-h-48 space-y-1 overflow-auto pr-1 ui-scrollbar-subtle">
+                {employees.map((employee) => {
+                  const checked = bulkEmployeeIds.includes(employee.id);
+                  return (
+                    <label
+                      key={employee.id}
+                      className={`flex cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm transition ${
+                        checked
+                          ? "bg-[var(--ui-brand-soft)] text-[var(--ui-brand-600)]"
+                          : "text-[var(--ui-text)] hover:bg-[var(--ui-brand-soft)]"
+                      }`}
+                    >
+                      <span>
+                        {getEmployeeLabel(employee)}
+                        {employee.role ? (
+                          <span className="ml-2 text-[var(--ui-muted)]">· {employee.role}</span>
+                        ) : null}
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleBulkEmployee(employee.id)}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+              <form action={assignManyAction} className="space-y-2">
+                <input type="hidden" name="return_to" value={returnTo} />
+                {selectedShiftIds.map((shiftId) => (
+                  <input key={shiftId} type="hidden" name="shift_ids" value={shiftId} />
+                ))}
+                {bulkEmployeeIds.map((employeeId) => (
+                  <input key={employeeId} type="hidden" name="employee_ids" value={employeeId} />
+                ))}
+                <button
+                  type="submit"
+                  disabled={selectedShiftIds.length === 0 || bulkEmployeeIds.length === 0}
+                  className="ui-btn ui-btn--brand ui-btn--sm w-full disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Agregar trabajadores seleccionados
+                </button>
+              </form>
+            </div>
             <form action={deleteManyAction} className="space-y-2">
               <input type="hidden" name="return_to" value={returnTo} />
               {selectedShiftIds.map((shiftId) => (

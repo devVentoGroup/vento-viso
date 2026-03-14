@@ -360,6 +360,137 @@ async function deleteManyShiftAction(formData: FormData) {
   redirect(`${returnTo}&ok=${encodeURIComponent("turnos_eliminados")}`);
 }
 
+async function assignManyShiftAction(formData: FormData) {
+  "use server";
+  const sourceShiftIds = formData
+    .getAll("shift_ids")
+    .map((value) => asText(value))
+    .filter(Boolean);
+  const targetEmployeeIds = [...new Set(
+    formData
+      .getAll("employee_ids")
+      .map((value) => asText(value))
+      .filter(Boolean),
+  )];
+  const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo,
+  });
+  const supabase = createAdminClient();
+
+  if (sourceShiftIds.length === 0 || targetEmployeeIds.length === 0) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Selecciona bloques y trabajadores para aplicar la edición masiva.")}`);
+  }
+
+  const { data: sourceShifts, error: sourceError } = await supabase
+    .from("employee_shifts")
+    .select("id,employee_id,shift_date,start_time,end_time,break_minutes,status,notes,site_id,published_at")
+    .in("id", sourceShiftIds);
+
+  if (sourceError) {
+    redirect(`${returnTo}&error=${encodeURIComponent(sourceError.message)}`);
+  }
+
+  const shiftRows = (sourceShifts ?? []) as ShiftRow[];
+  if (shiftRows.length === 0) {
+    redirect(`${returnTo}&error=${encodeURIComponent("No se encontraron los bloques seleccionados.")}`);
+  }
+
+  const requestedRanges = shiftRows.map((shift) => ({
+    shift_date: shift.shift_date,
+    start_time: shift.start_time,
+    end_time: shift.end_time,
+  }));
+  const requestedDates = [...new Set(requestedRanges.map((item) => item.shift_date))];
+
+  const { data: existingShifts, error: existingError } = await supabase
+    .from("employee_shifts")
+    .select("employee_id,shift_date,start_time,end_time")
+    .in("employee_id", targetEmployeeIds)
+    .in("shift_date", requestedDates);
+
+  if (existingError) {
+    redirect(`${returnTo}&error=${encodeURIComponent(existingError.message)}`);
+  }
+
+  const overlaps = (existingShifts ?? []).filter((existing) =>
+    requestedRanges.some(
+      (range) =>
+        range.shift_date === existing.shift_date &&
+        range.start_time < existing.end_time &&
+        existing.start_time < range.end_time,
+    ),
+  );
+
+  if (overlaps.length > 0) {
+    const conflictingIds = [...new Set(overlaps.map((shift) => shift.employee_id))];
+    const { data: conflictEmployees } = await supabase
+      .from("employees")
+      .select("id,full_name,alias")
+      .in("id", conflictingIds);
+    const conflictNames = new Map(
+      (conflictEmployees ?? []).map((employee) => [
+        employee.id,
+        employee.full_name ?? employee.alias ?? employee.id,
+      ]),
+    );
+    const summary = conflictingIds
+      .map((id) => {
+        const conflict = overlaps.find((shift) => shift.employee_id === id);
+        if (!conflict) return conflictNames.get(id) ?? id;
+        return `${conflictNames.get(id) ?? id} (${conflict.shift_date} ${conflict.start_time.slice(0, 5)} - ${conflict.end_time.slice(0, 5)})`;
+      })
+      .join(", ");
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(
+        `Algunos trabajadores destino ya tienen un turno que se solapa: ${summary}.`,
+      )}`,
+    );
+  }
+
+  const existingExact = new Set(
+    (existingShifts ?? []).map(
+      (shift) => `${shift.employee_id}|${shift.shift_date}|${shift.start_time}|${shift.end_time}`,
+    ),
+  );
+
+  const payload = targetEmployeeIds.flatMap((employeeId) =>
+    shiftRows
+      .filter((shift) => shift.employee_id !== employeeId)
+      .filter(
+        (shift) =>
+          !existingExact.has(`${employeeId}|${shift.shift_date}|${shift.start_time}|${shift.end_time}`),
+      )
+      .map((shift) => ({
+        employee_id: employeeId,
+        site_id: shift.site_id,
+        shift_date: shift.shift_date,
+        start_time: shift.start_time,
+        end_time: shift.end_time,
+        break_minutes: shift.break_minutes ?? 0,
+        status: shift.status || "scheduled",
+        notes: shift.notes ?? null,
+        published_at: null,
+        published_by: null,
+      })),
+  );
+
+  if (payload.length === 0) {
+    redirect(`${returnTo}&error=${encodeURIComponent("No hubo nuevos turnos por crear para los trabajadores seleccionados.")}`);
+  }
+
+  const { error } = await supabase.from("employee_shifts").insert(payload);
+  if (error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/staff");
+  revalidatePath("/staff/schedule");
+  redirect(`${returnTo}&ok=${encodeURIComponent("turnos_asignados_masivo")}`);
+}
+
 async function copyPreviousWeekAction(formData: FormData) {
   "use server";
   const siteId = asText(formData.get("site_id"));
@@ -632,6 +763,8 @@ function getOkMessage(code: string) {
       return "Turno eliminado.";
     case "turnos_eliminados":
       return "Bloques eliminados correctamente.";
+    case "turnos_asignados_masivo":
+      return "Bloques copiados a los trabajadores seleccionados.";
     case "sin_borradores_por_publicar":
       return "No había borradores por publicar en esta semana.";
     case "semana_publicada":
@@ -889,6 +1022,7 @@ export default async function StaffSchedulePage({
           saveAction={saveShiftAction}
           deleteAction={deleteShiftAction}
           deleteManyAction={deleteManyShiftAction}
+          assignManyAction={assignManyShiftAction}
           copyPreviousWeekAction={copyPreviousWeekAction}
           copyDayToOtherDaysAction={copyDayToOtherDaysAction}
           publishWeekAction={publishWeekAction}
