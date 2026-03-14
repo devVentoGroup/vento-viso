@@ -43,6 +43,7 @@ type WeeklySchedulePlannerProps = {
   totalsByEmployee: Record<string, PlannerTotals>;
   saveAction: (formData: FormData) => Promise<void>;
   deleteAction: (formData: FormData) => Promise<void>;
+  deleteManyAction: (formData: FormData) => Promise<void>;
   copyPreviousWeekAction: (formData: FormData) => Promise<void>;
   copyDayToOtherDaysAction: (formData: FormData) => Promise<void>;
   publishWeekAction: (formData: FormData) => Promise<void>;
@@ -279,6 +280,7 @@ export function WeeklySchedulePlanner({
   totalsByEmployee,
   saveAction,
   deleteAction,
+  deleteManyAction,
   copyPreviousWeekAction,
   copyDayToOtherDaysAction,
   publishWeekAction,
@@ -301,6 +303,8 @@ export function WeeklySchedulePlanner({
   const justDraggedRef = useRef(false);
   const [copySourceDayIso, setCopySourceDayIso] = useState<string>("");
   const [copyDayPanelOpen, setCopyDayPanelOpen] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
 
   const employeeById = useMemo(
     () => new Map(employees.map((employee) => [employee.id, employee])),
@@ -488,6 +492,20 @@ export function WeeklySchedulePlanner({
   };
 
   const getDayLabel = (iso: string) => days.find((d) => d.iso === iso)?.shortLabel ?? iso;
+  const toggleSelectionMode = () => {
+    setSelection(null);
+    setSelectionMode((prev) => {
+      if (prev) {
+        setSelectedShiftIds([]);
+      }
+      return !prev;
+    });
+  };
+  const toggleShiftSelection = (shiftId: string) => {
+    setSelectedShiftIds((prev) =>
+      prev.includes(shiftId) ? prev.filter((id) => id !== shiftId) : [...prev, shiftId],
+    );
+  };
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -501,6 +519,13 @@ export function WeeklySchedulePlanner({
             <span className="font-medium text-[var(--ui-text)]">{draftCount}</span> borradores
           </p>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={toggleSelectionMode}
+              className="ui-btn ui-btn--ghost ui-btn--sm"
+            >
+              {selectionMode ? "Cancelar selección" : "Seleccionar varios"}
+            </button>
             <form action={copyPreviousWeekAction}>
               <input type="hidden" name="site_id" value={siteId} />
               <input type="hidden" name="week_start" value={days[0]?.iso ?? ""} />
@@ -589,9 +614,16 @@ export function WeeklySchedulePlanner({
                           <button
                             key={`${day.iso}-${slotIndex}`}
                             type="button"
-                            onMouseDown={() => handleSlotMouseDown(day.iso, slotIndex)}
-                            onMouseEnter={() => handleSlotMouseEnter(day.iso, slotIndex)}
+                            onMouseDown={() => {
+                              if (selectionMode) return;
+                              handleSlotMouseDown(day.iso, slotIndex);
+                            }}
+                            onMouseEnter={() => {
+                              if (selectionMode) return;
+                              handleSlotMouseEnter(day.iso, slotIndex);
+                            }}
                             onClick={() => {
+                              if (selectionMode) return;
                               if (justDraggedRef.current) {
                                 justDraggedRef.current = false;
                                 return;
@@ -623,12 +655,21 @@ export function WeeklySchedulePlanner({
                         const top = ((visibleStart - VISIBLE_START_MINUTES) / SLOT_MINUTES) * SLOT_HEIGHT;
                         const height = Math.max(((visibleEnd - visibleStart) / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT);
                         const laneWidth = 100 / shift.laneCount;
+                        const isShiftSelected = selectedShiftIds.includes(shift.id);
                         return (
                           <button
                             key={shift.id}
                             type="button"
-                            onClick={() => selectShift(shift)}
-                            className={`absolute rounded-2xl border-2 px-3 py-2 text-left shadow-[var(--ui-shadow-soft)] transition hover:scale-[1.01] ${getStatusClass(shift.status)}`}
+                            onClick={() => {
+                              if (selectionMode) {
+                                toggleShiftSelection(shift.id);
+                                return;
+                              }
+                              selectShift(shift);
+                            }}
+                            className={`absolute rounded-2xl border-2 px-3 py-2 text-left shadow-[var(--ui-shadow-soft)] transition hover:scale-[1.01] ${getStatusClass(shift.status)} ${
+                              isShiftSelected ? "ring-2 ring-[var(--ui-brand)] ring-offset-2" : ""
+                            }`}
                             style={{
                               top,
                               height,
@@ -662,6 +703,38 @@ export function WeeklySchedulePlanner({
       </div>
 
       <div className="space-y-4 xl:sticky xl:top-24">
+        {selectionMode ? (
+          <div className="ui-panel space-y-4">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-[var(--ui-text)]">
+                Selección múltiple
+              </p>
+              <p className="ui-caption text-[var(--ui-muted)]">
+                Haz clic en varios bloques para seleccionarlos y eliminarlos de una sola vez.
+              </p>
+            </div>
+            <p className="text-sm text-[var(--ui-muted)]">
+              <span className="font-semibold text-[var(--ui-text)]">{selectedShiftIds.length}</span> bloques seleccionados
+            </p>
+            <form action={deleteManyAction} className="space-y-2">
+              <input type="hidden" name="return_to" value={returnTo} />
+              {selectedShiftIds.map((shiftId) => (
+                <input key={shiftId} type="hidden" name="shift_ids" value={shiftId} />
+              ))}
+              <button
+                type="submit"
+                disabled={selectedShiftIds.length === 0}
+                className="ui-btn ui-btn--ghost ui-btn--sm w-full text-[var(--ui-danger)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Eliminar seleccionados
+              </button>
+            </form>
+            <button type="button" onClick={toggleSelectionMode} className="ui-btn ui-btn--ghost ui-btn--sm w-full">
+              Salir del modo selección
+            </button>
+          </div>
+        ) : null}
+
         {selection === null && (
           <>
             {draftAssignmentsByEmployee.length > 0 ? (

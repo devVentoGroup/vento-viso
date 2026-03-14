@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { WeeklySchedulePlanner } from "@/components/viso/weekly-schedule-planner";
+import { notifyShiftChange } from "@/lib/anima/shift-notify";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -256,6 +257,34 @@ async function deleteShiftAction(formData: FormData) {
   redirect(`${returnTo}&ok=${encodeURIComponent("turno_eliminado")}`);
 }
 
+async function deleteManyShiftAction(formData: FormData) {
+  "use server";
+  const shiftIds = formData
+    .getAll("shift_ids")
+    .map((value) => asText(value))
+    .filter(Boolean);
+  const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo,
+  });
+  const supabase = createAdminClient();
+
+  if (shiftIds.length === 0) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Selecciona al menos un turno para eliminar.")}`);
+  }
+
+  const { error } = await supabase.from("employee_shifts").delete().in("id", shiftIds);
+  if (error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/staff");
+  revalidatePath("/staff/schedule");
+  redirect(`${returnTo}&ok=${encodeURIComponent("turnos_eliminados")}`);
+}
+
 async function copyPreviousWeekAction(formData: FormData) {
   "use server";
   const siteId = asText(formData.get("site_id"));
@@ -448,7 +477,7 @@ async function publishWeekAction(formData: FormData) {
 
   const { data: shifts, error: shiftsError } = await supabase
     .from("employee_shifts")
-    .select("id, employee_id, shift_date, start_time, end_time")
+    .select("id, employee_id, shift_date, start_time, end_time, published_at")
     .eq("site_id", siteId)
     .gte("shift_date", weekStartIso)
     .lte("shift_date", weekEndIso);
@@ -463,10 +492,15 @@ async function publishWeekAction(formData: FormData) {
     shift_date: string;
     start_time: string;
     end_time: string;
+    published_at: string | null;
   }>;
+  const draftRows = shiftRows.filter((row) => !row.published_at);
 
   if (shiftRows.length === 0) {
     redirect(`${returnTo}&error=${encodeURIComponent("No hay turnos en esta semana para publicar.")}`);
+  }
+  if (draftRows.length === 0) {
+    redirect(`${returnTo}&ok=${encodeURIComponent("sin_borradores_por_publicar")}`);
   }
 
   const publishedAt = new Date().toISOString();
@@ -478,11 +512,24 @@ async function publishWeekAction(formData: FormData) {
     })
     .eq("site_id", siteId)
     .gte("shift_date", weekStartIso)
-    .lte("shift_date", weekEndIso);
+    .lte("shift_date", weekEndIso)
+    .is("published_at", null);
 
   if (updateError) {
     redirect(`${returnTo}&error=${encodeURIComponent(updateError.message)}`);
   }
+
+  await notifyShiftChange({
+    employeeIds: draftRows.map((row) => row.employee_id),
+    title: "Tu horario semanal fue publicado",
+    body: `Revisa tus turnos de la semana ${formatWeekLabel(weekStart)} en ANIMA.`,
+    data: {
+      siteId,
+      weekStart: weekStartIso,
+      action: "published_week",
+      source: "viso_schedule_planner",
+    },
+  });
 
   revalidatePath("/staff");
   revalidatePath("/staff/schedule");
@@ -498,13 +545,34 @@ function safeDecode(value: string | null | undefined) {
   }
 }
 
+function getOkMessage(code: string) {
+  switch (code) {
+    case "turno_creado_borrador":
+      return "Turno guardado en borrador. No se enviaron notificaciones.";
+    case "turno_actualizado_borrador":
+      return "Borrador actualizado. No se enviaron notificaciones.";
+    case "turno_eliminado":
+      return "Turno eliminado.";
+    case "turnos_eliminados":
+      return "Bloques eliminados correctamente.";
+    case "sin_borradores_por_publicar":
+      return "No había borradores por publicar en esta semana.";
+    case "semana_publicada":
+      return "Semana publicada y notificada a los trabajadores con turnos en borrador.";
+    case "semana_copiada_borrador":
+      return "Semana anterior copiada en borrador.";
+    default:
+      return code ? code.replace(/_/g, " ") : "";
+  }
+}
+
 export default async function StaffSchedulePage({
   searchParams,
 }: {
   searchParams?: Promise<{ site_id?: string; week?: string; ok?: string; error?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
-  const okMsg = safeDecode(sp.ok);
+  const okMsg = getOkMessage(safeDecode(sp.ok));
   const errorMsg = safeDecode(sp.error);
 
   await requireAppAccess({
@@ -631,8 +699,16 @@ export default async function StaffSchedulePage({
         }
       />
 
-      {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
-      {okMsg ? <div className="ui-alert ui-alert--success">Listo: {okMsg}</div> : null}
+      {errorMsg ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {errorMsg}
+        </div>
+      ) : null}
+      {okMsg ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+          {okMsg}
+        </div>
+      ) : null}
 
       <div className="ui-panel space-y-4">
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_220px_auto]">
@@ -717,6 +793,7 @@ export default async function StaffSchedulePage({
           totalsByEmployee={totalsByEmployee}
           saveAction={saveShiftAction}
           deleteAction={deleteShiftAction}
+        deleteManyAction={deleteManyShiftAction}
           copyPreviousWeekAction={copyPreviousWeekAction}
           copyDayToOtherDaysAction={copyDayToOtherDaysAction}
           publishWeekAction={publishWeekAction}
