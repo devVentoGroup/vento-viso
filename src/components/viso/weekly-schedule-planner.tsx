@@ -319,6 +319,11 @@ function getGroupStatusLabel(group: PlannerShiftGroup) {
   return `${publishedCount} publicados · ${group.shifts.length - publishedCount} borradores`;
 }
 
+function getGroupPublishedClass(group: PlannerShiftGroup) {
+  const allPublished = group.shifts.every((shift) => shift.published_at);
+  return allPublished ? "ui-shift--block-published" : "ui-shift--block-draft";
+}
+
 function summarizeGroupEmployees(
   group: PlannerShiftGroup,
   employeeById: Map<string, PlannerEmployee>,
@@ -808,7 +813,7 @@ export function WeeklySchedulePlanner({
                               }
                               selectGroup(group);
                             }}
-                            className={`absolute rounded-2xl border-2 px-3 py-2 text-left shadow-[var(--ui-shadow-soft)] transition hover:scale-[1.01] ${getStatusClass(firstShift?.status ?? "scheduled")} ${
+                            className={`absolute flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border px-2.5 py-2 text-left shadow-sm transition hover:shadow-md ${getGroupPublishedClass(group)} ${
                               allSelected || someSelected ? "ring-2 ring-[var(--ui-brand)] ring-offset-2" : ""
                             }`}
                             style={{
@@ -819,21 +824,32 @@ export function WeeklySchedulePlanner({
                             }}
                             title={`${formatRange(group.start_time, group.end_time)} · ${group.shifts.length} ${group.shifts.length === 1 ? "trabajador" : "trabajadores"}`}
                           >
-                            <div className="text-[11px] font-semibold uppercase tracking-wide opacity-70">
-                              {formatRange(group.start_time, group.end_time)}
+                            <div className="flex items-center justify-between gap-1.5">
+                              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider opacity-80">
+                                {formatRange(group.start_time, group.end_time)}
+                              </span>
+                              <span
+                                className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                                  group.shifts.every((s) => s.published_at)
+                                    ? "bg-emerald-500/20 text-emerald-800"
+                                    : "bg-amber-500/20 text-amber-800"
+                                }`}
+                              >
+                                {getGroupStatusLabel(group)}
+                              </span>
                             </div>
                             {isGrouped ? (
                               <>
-                                <div className="mt-1 text-sm font-semibold leading-tight">
+                                <div className="mt-1.5 line-clamp-1 text-xs font-semibold leading-tight text-[var(--ui-text)]">
                                   {group.shifts.length} trabajadores
                                 </div>
-                                <div className="mt-1 text-[12px] leading-tight opacity-80">
+                                <div className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-[var(--ui-muted)]">
                                   {summarizeGroupEmployees(group, employeeById)}
                                 </div>
                               </>
                             ) : (
                               <>
-                                <div className="mt-1 text-sm font-semibold leading-tight">
+                                <div className="mt-1.5 line-clamp-2 text-xs font-semibold leading-tight text-[var(--ui-text)]">
                                   {getEmployeeLabel(employeeById.get(firstShift.employee_id) ?? {
                                     id: firstShift.employee_id,
                                     full_name: null,
@@ -841,14 +857,11 @@ export function WeeklySchedulePlanner({
                                     role: null,
                                   })}
                                 </div>
-                                <div className="mt-1 text-[12px] leading-tight opacity-80">
+                                <div className="mt-0.5 text-[11px] leading-tight text-[var(--ui-muted)]">
                                   {employeeById.get(firstShift.employee_id)?.role ?? "Sin rol"}
                                 </div>
                               </>
                             )}
-                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide opacity-70">
-                              {getGroupStatusLabel(group)}
-                            </div>
                           </button>
                         );
                       })}
