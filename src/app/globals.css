@@ -428,9 +428,11 @@ body {
 }
 
 .ui-shift--block-draft {
-  border-color: rgba(245, 158, 11, 0.35);
-  background: linear-gradient(135deg, rgba(255, 251, 235, 0.98) 0%, rgba(254, 243, 199, 0.92) 100%);
+  border-color: rgba(217, 119, 6, 0.55);
+  border-style: solid;
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.98) 0%, rgba(253, 230, 138, 0.92) 100%);
   color: #b45309;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2);
 }
 
 .ui-title {

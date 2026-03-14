@@ -314,9 +314,18 @@ function buildShiftGroups(shifts: PlannerShift[]) {
 
 function getGroupStatusLabel(group: PlannerShiftGroup) {
   const publishedCount = group.shifts.filter((shift) => shift.published_at).length;
+  const draftCount = group.shifts.length - publishedCount;
   if (publishedCount === 0) return "Borrador";
-  if (publishedCount === group.shifts.length) return "Publicado";
-  return `${publishedCount} publicados · ${group.shifts.length - publishedCount} borradores`;
+  if (draftCount === 0) return "Publicado";
+  return `${publishedCount} pub · ${draftCount} borr`;
+}
+
+function getGroupStatusTitle(group: PlannerShiftGroup) {
+  const publishedCount = group.shifts.filter((shift) => shift.published_at).length;
+  const draftCount = group.shifts.length - publishedCount;
+  if (draftCount === 0) return "Todo publicado";
+  if (publishedCount === 0) return "Borrador (no publicado)";
+  return `${publishedCount} publicados, ${draftCount} en borrador`;
 }
 
 function getGroupPublishedClass(group: PlannerShiftGroup) {
@@ -829,10 +838,11 @@ export function WeeklySchedulePlanner({
                                 {formatRange(group.start_time, group.end_time)}
                               </span>
                               <span
-                                className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                                title={getGroupStatusTitle(group)}
+                                className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
                                   group.shifts.every((s) => s.published_at)
                                     ? "bg-emerald-500/20 text-emerald-800"
-                                    : "bg-amber-500/20 text-amber-800"
+                                    : "bg-amber-500/25 text-amber-800 ring-1 ring-amber-400/50"
                                 }`}
                               >
                                 {getGroupStatusLabel(group)}
