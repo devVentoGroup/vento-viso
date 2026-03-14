@@ -48,7 +48,7 @@ type StaffWalletDocsPanelProps = {
   walletCard: WalletCardRow;
   documentTypeNamesById: Record<string, string>;
   documentTypes: DocumentTypeOption[];
-  uploadDocumentAction: (formData: FormData) => Promise<never>;
+  uploadDocumentAction: (formData: FormData) => Promise<void>;
 };
 
 function formatDate(s: string | null) {
@@ -69,7 +69,7 @@ function UploadDocumentForm({
 }: {
   employeeId: string;
   documentTypes: DocumentTypeOption[];
-  uploadDocumentAction: (formData: FormData) => Promise<never>;
+  uploadDocumentAction: (formData: FormData) => Promise<void>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onCancel: () => void;
 }) {

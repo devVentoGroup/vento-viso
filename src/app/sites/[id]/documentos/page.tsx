@@ -134,7 +134,29 @@ export default async function SiteDocumentosPage({
         .order("display_order"),
     ]);
     if (typesRes.data) documentTypes = typesRes.data as typeof documentTypes;
-    if (rulesRes.data) requiredRules = rulesRes.data as typeof requiredRules;
+    if (rulesRes.data) {
+      type RawRule = {
+        id: string;
+        site_id: string | null;
+        role: string | null;
+        document_type_id: string;
+        is_required: boolean;
+        active: boolean;
+        display_order: number;
+        document_type: { id: string; name: string | null } | { id: string; name: string | null }[];
+      };
+      const raw = rulesRes.data as unknown as RawRule[];
+      requiredRules = raw.map((r) => ({
+        id: r.id,
+        site_id: r.site_id,
+        role: r.role,
+        document_type_id: r.document_type_id,
+        is_required: r.is_required,
+        active: r.active,
+        display_order: r.display_order,
+        document_type: Array.isArray(r.document_type) ? r.document_type[0] ?? null : r.document_type ?? null,
+      }));
+    }
   } catch {
     // Tablas pueden no existir
   }
