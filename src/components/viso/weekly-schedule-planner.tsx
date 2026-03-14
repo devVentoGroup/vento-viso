@@ -300,6 +300,7 @@ export function WeeklySchedulePlanner({
   const [dragCurrent, setDragCurrent] = useState<DragPoint | null>(null);
   const justDraggedRef = useRef(false);
   const [copySourceDayIso, setCopySourceDayIso] = useState<string>("");
+  const [copyDayPanelOpen, setCopyDayPanelOpen] = useState(false);
 
   const employeeById = useMemo(
     () => new Map(employees.map((employee) => [employee.id, employee])),
@@ -702,69 +703,83 @@ export function WeeklySchedulePlanner({
 
             {daysWithShifts.length > 0 ? (
               <div className="ui-panel space-y-3">
-                <p className="text-sm font-semibold text-[var(--ui-text)]">
-                  Aplicar día a otros
-                </p>
-                <p className="ui-caption text-[var(--ui-muted)]">
-                  Copia el horario de una persona de un día al resto de días que elijas (misma persona, mismo horario). Ideal para repetir tu horario con descanso en toda la semana.
-                </p>
-                <form action={copyDayToOtherDaysAction} className="space-y-3">
-                  <input type="hidden" name="site_id" value={siteId} />
-                  <input type="hidden" name="return_to" value={returnTo} />
-                  <label className="block">
-                    <span className="ui-caption">Día a copiar</span>
-                    <select
-                      name="source_day"
-                      className="ui-input mt-1 w-full"
-                      value={copySourceDayIso}
-                      onChange={(e) => setCopySourceDayIso(e.target.value)}
-                    >
-                      {daysWithShifts.map((d) => (
-                        <option key={d.iso} value={d.iso}>
-                          {d.label} — {d.shortLabel}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="block">
-                    <span className="ui-caption">Horario de</span>
-                    <select
-                      name="employee_id"
-                      className="ui-input mt-1 w-full"
-                      value={copyEmployeeId}
-                      onChange={(e) => setCopyEmployeeId(e.target.value)}
-                    >
-                      {employeesOnSourceDay.map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {getEmployeeLabel(emp)}
-                          {emp.role ? ` · ${emp.role}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <fieldset className="space-y-2">
-                    <span className="ui-caption block">A estos días</span>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1">
-                      {days.map((d) => (
-                        <label key={d.iso} className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            name="target_days"
-                            value={d.iso}
-                            disabled={d.iso === copySourceDayIso}
-                            className="rounded border-[var(--ui-border)]"
-                          />
-                          <span className={d.iso === copySourceDayIso ? "text-[var(--ui-muted)]" : ""}>
-                            {d.shortLabel}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                  <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm w-full">
-                    Aplicar a los días seleccionados
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-[var(--ui-text)]">
+                      Aplicar día a otros
+                    </p>
+                    <p className="ui-caption text-[var(--ui-muted)]">
+                      Copia el horario de una persona de un día al resto de días que elijas.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCopyDayPanelOpen((prev) => !prev)}
+                    className="ui-btn ui-btn--ghost ui-btn--sm shrink-0"
+                    aria-expanded={copyDayPanelOpen}
+                  >
+                    {copyDayPanelOpen ? "Ocultar" : "Mostrar"}
                   </button>
-                </form>
+                </div>
+                {copyDayPanelOpen ? (
+                  <form action={copyDayToOtherDaysAction} className="space-y-3">
+                    <input type="hidden" name="site_id" value={siteId} />
+                    <input type="hidden" name="return_to" value={returnTo} />
+                    <label className="block">
+                      <span className="ui-caption">Día a copiar</span>
+                      <select
+                        name="source_day"
+                        className="ui-input mt-1 w-full"
+                        value={copySourceDayIso}
+                        onChange={(e) => setCopySourceDayIso(e.target.value)}
+                      >
+                        {daysWithShifts.map((d) => (
+                          <option key={d.iso} value={d.iso}>
+                            {d.label} — {d.shortLabel}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="ui-caption">Horario de</span>
+                      <select
+                        name="employee_id"
+                        className="ui-input mt-1 w-full"
+                        value={copyEmployeeId}
+                        onChange={(e) => setCopyEmployeeId(e.target.value)}
+                      >
+                        {employeesOnSourceDay.map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {getEmployeeLabel(emp)}
+                            {emp.role ? ` · ${emp.role}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <fieldset className="space-y-2">
+                      <span className="ui-caption block">A estos días</span>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        {days.map((d) => (
+                          <label key={d.iso} className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              name="target_days"
+                              value={d.iso}
+                              disabled={d.iso === copySourceDayIso}
+                              className="rounded border-[var(--ui-border)]"
+                            />
+                            <span className={d.iso === copySourceDayIso ? "text-[var(--ui-muted)]" : ""}>
+                              {d.shortLabel}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm w-full">
+                      Aplicar a los días seleccionados
+                    </button>
+                  </form>
+                ) : null}
               </div>
             ) : null}
 

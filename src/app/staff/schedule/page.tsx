@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { WeeklySchedulePlanner } from "@/components/viso/weekly-schedule-planner";
-import { notifyShiftChange } from "@/lib/anima/shift-notify";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -226,29 +225,6 @@ async function saveShiftAction(formData: FormData) {
   if (error) {
     redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
   }
-
-  const dateLabel = new Date(`${shiftDate}T12:00:00`).toLocaleDateString("es-CO", {
-    weekday: "long",
-    day: "numeric",
-    month: "short",
-  });
-  const timeRange = `${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`;
-  const isUpdate = Boolean(shiftId);
-
-  await notifyShiftChange({
-    employeeIds: [employeeId],
-    title: isUpdate ? "Tu turno fue actualizado" : "Tienes un turno nuevo",
-    body: isUpdate
-      ? `${dateLabel} · ${timeRange}. Revisa en ANIMA.`
-      : `${dateLabel} · ${timeRange}. Revisa tus turnos en ANIMA.`,
-    data: {
-      shift_date: shiftDate,
-      start_time: startTime,
-      end_time: endTime,
-      action: isUpdate ? "shift_updated" : "shift_created",
-      source: "viso_schedule_planner",
-    },
-  });
 
   revalidatePath("/staff");
   revalidatePath("/staff/schedule");
@@ -507,18 +483,6 @@ async function publishWeekAction(formData: FormData) {
   if (updateError) {
     redirect(`${returnTo}&error=${encodeURIComponent(updateError.message)}`);
   }
-
-  await notifyShiftChange({
-    employeeIds: shiftRows.map((row) => row.employee_id),
-    title: "Tu horario semanal fue publicado",
-    body: `Revisa tus turnos de la semana ${formatWeekLabel(weekStart)} en ANIMA.`,
-    data: {
-      siteId,
-      weekStart: weekStartIso,
-      action: "published_week",
-      source: "viso_schedule_planner",
-    },
-  });
 
   revalidatePath("/staff");
   revalidatePath("/staff/schedule");
