@@ -44,6 +44,7 @@ type WeeklySchedulePlannerProps = {
   saveAction: (formData: FormData) => Promise<void>;
   deleteAction: (formData: FormData) => Promise<void>;
   copyPreviousWeekAction: (formData: FormData) => Promise<void>;
+  copyDayToOtherDaysAction: (formData: FormData) => Promise<void>;
   publishWeekAction: (formData: FormData) => Promise<void>;
 };
 
@@ -279,6 +280,7 @@ export function WeeklySchedulePlanner({
   saveAction,
   deleteAction,
   copyPreviousWeekAction,
+  copyDayToOtherDaysAction,
   publishWeekAction,
 }: WeeklySchedulePlannerProps) {
   type SlotSelection = {
@@ -297,6 +299,7 @@ export function WeeklySchedulePlanner({
   const [dragStart, setDragStart] = useState<DragPoint | null>(null);
   const [dragCurrent, setDragCurrent] = useState<DragPoint | null>(null);
   const justDraggedRef = useRef(false);
+  const [copySourceDayIso, setCopySourceDayIso] = useState<string>("");
 
   const employeeById = useMemo(
     () => new Map(employees.map((employee) => [employee.id, employee])),
@@ -323,6 +326,54 @@ export function WeeklySchedulePlanner({
   }, [shifts]);
 
   const draftCount = shifts.filter((s) => !s.published_at).length;
+
+  const draftAssignmentsByEmployee = useMemo(() => {
+    const draftShifts = shifts.filter((s) => !s.published_at && s.site_id === siteId);
+    const byEmployee = new Map<string, { employee: PlannerEmployee; shifts: PlannerShift[]; totalMinutes: number }>();
+    for (const shift of draftShifts) {
+      const emp = employeeById.get(shift.employee_id);
+      const existing = byEmployee.get(shift.employee_id);
+      const list = existing ? existing.shifts : [];
+      list.push(shift);
+      const totalMinutes = (existing?.totalMinutes ?? 0) + getShiftMinutes(shift);
+      byEmployee.set(shift.employee_id, {
+        employee: emp ?? { id: shift.employee_id, full_name: null, alias: null, role: null },
+        shifts: list,
+        totalMinutes,
+      });
+    }
+    return Array.from(byEmployee.values()).sort((a, b) =>
+      getEmployeeLabel(a.employee).localeCompare(getEmployeeLabel(b.employee)),
+    );
+  }, [shifts, siteId, employeeById]);
+
+  const daysWithShifts = useMemo(
+    () => days.filter((d) => (shiftsByDay.get(d.iso) ?? []).length > 0),
+    [days, shiftsByDay],
+  );
+
+  const employeesOnSourceDay = useMemo(() => {
+    if (!copySourceDayIso) return [];
+    const dayShifts = shiftsByDay.get(copySourceDayIso) ?? [];
+    const ids = [...new Set(dayShifts.map((s) => s.employee_id))];
+    return ids
+      .map((id) => employeeById.get(id) ?? { id, full_name: null, alias: null, role: null })
+      .sort((a, b) => getEmployeeLabel(a).localeCompare(getEmployeeLabel(b)));
+  }, [copySourceDayIso, shiftsByDay, employeeById]);
+
+  const [copyEmployeeId, setCopyEmployeeId] = useState<string>("");
+
+  useEffect(() => {
+    if (daysWithShifts.length > 0 && !daysWithShifts.some((d) => d.iso === copySourceDayIso)) {
+      setCopySourceDayIso(daysWithShifts[0].iso);
+    }
+  }, [daysWithShifts, copySourceDayIso]);
+
+  useEffect(() => {
+    if (employeesOnSourceDay.length > 0 && !employeesOnSourceDay.some((e) => e.id === copyEmployeeId)) {
+      setCopyEmployeeId(employeesOnSourceDay[0].id);
+    }
+  }, [employeesOnSourceDay, copyEmployeeId]);
 
   const selectShift = (shift: PlannerShift) => {
     setSelection({ type: "shift", shift, editing: false });
@@ -611,11 +662,118 @@ export function WeeklySchedulePlanner({
 
       <div className="space-y-4 xl:sticky xl:top-24">
         {selection === null && (
-          <div className="ui-panel flex flex-col items-center justify-center gap-4 py-12 text-center">
-            <p className="max-w-xs text-[var(--ui-muted)]">
-              Haz clic en un hueco o <strong>arrastra</strong> sobre varios para marcar un bloque de horas; suelta y asigna la persona.
-            </p>
-          </div>
+          <>
+            {draftAssignmentsByEmployee.length > 0 ? (
+              <div className="ui-panel space-y-3">
+                <p className="text-sm font-semibold text-[var(--ui-text)]">
+                  Asignaciones del borrador
+                </p>
+                <p className="ui-caption text-[var(--ui-muted)]">
+                  Trabajadores y horas asignadas en esta sede esta semana (solo borrador).
+                </p>
+                <ul className="max-h-64 space-y-3 overflow-auto pr-1 ui-scrollbar-subtle">
+                  {draftAssignmentsByEmployee.map(({ employee, shifts: empShifts, totalMinutes }) => (
+                    <li
+                      key={employee.id}
+                      className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3"
+                    >
+                      <p className="text-sm font-semibold text-[var(--ui-text)]">
+                        {getEmployeeLabel(employee)}
+                      </p>
+                      {employee.role ? (
+                        <p className="text-xs text-[var(--ui-muted)]">{employee.role}</p>
+                      ) : null}
+                      <ul className="mt-2 space-y-1 text-xs text-[var(--ui-muted)]">
+                        {empShifts.map((s) => (
+                          <li key={s.id}>
+                            {getDayLabel(s.shift_date)} — {formatRange(s.start_time, s.end_time)}
+                            {s.break_minutes ? ` · ${s.break_minutes} min descanso` : null}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-2 text-xs font-semibold text-[var(--ui-text)]">
+                        Total: {formatMinutes(totalMinutes)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {daysWithShifts.length > 0 ? (
+              <div className="ui-panel space-y-3">
+                <p className="text-sm font-semibold text-[var(--ui-text)]">
+                  Aplicar día a otros
+                </p>
+                <p className="ui-caption text-[var(--ui-muted)]">
+                  Copia el horario de una persona de un día al resto de días que elijas (misma persona, mismo horario). Ideal para repetir tu horario con descanso en toda la semana.
+                </p>
+                <form action={copyDayToOtherDaysAction} className="space-y-3">
+                  <input type="hidden" name="site_id" value={siteId} />
+                  <input type="hidden" name="return_to" value={returnTo} />
+                  <label className="block">
+                    <span className="ui-caption">Día a copiar</span>
+                    <select
+                      name="source_day"
+                      className="ui-input mt-1 w-full"
+                      value={copySourceDayIso}
+                      onChange={(e) => setCopySourceDayIso(e.target.value)}
+                    >
+                      {daysWithShifts.map((d) => (
+                        <option key={d.iso} value={d.iso}>
+                          {d.label} — {d.shortLabel}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="ui-caption">Horario de</span>
+                    <select
+                      name="employee_id"
+                      className="ui-input mt-1 w-full"
+                      value={copyEmployeeId}
+                      onChange={(e) => setCopyEmployeeId(e.target.value)}
+                    >
+                      {employeesOnSourceDay.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {getEmployeeLabel(emp)}
+                          {emp.role ? ` · ${emp.role}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <fieldset className="space-y-2">
+                    <span className="ui-caption block">A estos días</span>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      {days.map((d) => (
+                        <label key={d.iso} className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            name="target_days"
+                            value={d.iso}
+                            disabled={d.iso === copySourceDayIso}
+                            className="rounded border-[var(--ui-border)]"
+                          />
+                          <span className={d.iso === copySourceDayIso ? "text-[var(--ui-muted)]" : ""}>
+                            {d.shortLabel}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                  <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm w-full">
+                    Aplicar a los días seleccionados
+                  </button>
+                </form>
+              </div>
+            ) : null}
+
+            <div className="ui-panel flex flex-col items-center justify-center gap-4 py-12 text-center">
+              <p className="max-w-xs text-[var(--ui-muted)]">
+                Haz clic en un hueco o <strong>arrastra</strong> sobre varios para marcar un bloque de horas; suelta y asigna la persona.
+              </p>
+            </div>
+          </>
         )}
 
         {selection?.type === "slot" && (

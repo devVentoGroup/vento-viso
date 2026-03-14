@@ -178,6 +178,33 @@ async function saveShiftAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio.")}`);
   }
 
+  // Validar solapamiento: mismo empleado, misma fecha, rangos que se cruzan
+  let overlapQuery = supabase
+    .from("employee_shifts")
+    .select("id, start_time, end_time")
+    .eq("employee_id", employeeId)
+    .eq("shift_date", shiftDate);
+  if (shiftId) {
+    overlapQuery = overlapQuery.neq("id", shiftId);
+  }
+  const { data: sameDayShifts, error: overlapErr } = await overlapQuery;
+  if (overlapErr) {
+    redirect(`${returnTo}&error=${encodeURIComponent(overlapErr.message)}`);
+  }
+  const overlaps = (sameDayShifts ?? []).filter(
+    (s: { start_time: string; end_time: string }) =>
+      startTime < s.end_time && s.start_time < endTime,
+  );
+  if (overlaps.length > 0) {
+    const other = overlaps[0] as { start_time: string; end_time: string };
+    const otherRange = `${other.start_time.slice(0, 5)} - ${other.end_time.slice(0, 5)}`;
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(
+        `Este empleado ya tiene un turno el mismo día que se solapa (${otherRange}). Ajusta el horario o elige otro empleado.`,
+      )}`,
+    );
+  }
+
   const payload = {
     employee_id: employeeId,
     site_id: siteId,
@@ -199,6 +226,29 @@ async function saveShiftAction(formData: FormData) {
   if (error) {
     redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
   }
+
+  const dateLabel = new Date(`${shiftDate}T12:00:00`).toLocaleDateString("es-CO", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+  });
+  const timeRange = `${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`;
+  const isUpdate = Boolean(shiftId);
+
+  await notifyShiftChange({
+    employeeIds: [employeeId],
+    title: isUpdate ? "Tu turno fue actualizado" : "Tienes un turno nuevo",
+    body: isUpdate
+      ? `${dateLabel} · ${timeRange}. Revisa en ANIMA.`
+      : `${dateLabel} · ${timeRange}. Revisa tus turnos en ANIMA.`,
+    data: {
+      shift_date: shiftDate,
+      start_time: startTime,
+      end_time: endTime,
+      action: isUpdate ? "shift_updated" : "shift_created",
+      source: "viso_schedule_planner",
+    },
+  });
 
   revalidatePath("/staff");
   revalidatePath("/staff/schedule");
@@ -298,6 +348,107 @@ async function copyPreviousWeekAction(formData: FormData) {
   revalidatePath("/staff");
   revalidatePath("/staff/schedule");
   redirect(`${returnTo}&ok=${encodeURIComponent("semana_copiada_borrador")}`);
+}
+
+async function copyDayToOtherDaysAction(formData: FormData) {
+  "use server";
+  const sourceDayIso = asText(formData.get("source_day"));
+  const employeeId = asText(formData.get("employee_id"));
+  const siteId = asText(formData.get("site_id"));
+  const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+  const targetDaysRaw = formData.getAll("target_days");
+  const targetDays = Array.from(targetDaysRaw)
+    .filter(
+      (v): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.trim()),
+    )
+    .filter((iso) => iso !== sourceDayIso);
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo,
+  });
+  const supabase = createAdminClient();
+
+  if (!siteId || !sourceDayIso || !employeeId || targetDays.length === 0) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Elige el día, la persona y al menos un día destino.")}`);
+  }
+
+  let query = supabase
+    .from("employee_shifts")
+    .select("employee_id,site_id,start_time,end_time,break_minutes,status,notes")
+    .eq("site_id", siteId)
+    .eq("shift_date", sourceDayIso)
+    .eq("employee_id", employeeId);
+
+  const { data: sourceShifts, error: fetchError } = await query;
+
+  if (fetchError) {
+    redirect(`${returnTo}&error=${encodeURIComponent(fetchError.message)}`);
+  }
+
+  const rows = (sourceShifts ?? []) as Array<{
+    employee_id: string;
+    site_id: string;
+    start_time: string;
+    end_time: string;
+    break_minutes: number | null;
+    status: string;
+    notes: string | null;
+  }>;
+
+  if (rows.length === 0) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Ese día no tiene turnos de esa persona para copiar.")}`);
+  }
+
+  const toInsert = targetDays.flatMap((shiftDate) =>
+    rows.map((row) => ({
+      employee_id: row.employee_id,
+      site_id: row.site_id,
+      shift_date: shiftDate,
+      start_time: row.start_time,
+      end_time: row.end_time,
+      break_minutes: row.break_minutes,
+      status: row.status,
+      notes: row.notes,
+      published_at: null,
+      published_by: null,
+    })),
+  );
+
+  // Evitar solapamientos: por cada día destino, comprobar que ni los existentes ni los nuevos se crucen
+  for (const shiftDate of targetDays) {
+    const { data: existingRows } = await supabase
+      .from("employee_shifts")
+      .select("start_time, end_time")
+      .eq("employee_id", employeeId)
+      .eq("shift_date", shiftDate);
+    const ranges = [
+      ...((existingRows ?? []) as Array<{ start_time: string; end_time: string }>),
+      ...rows.map((r) => ({ start_time: r.start_time, end_time: r.end_time })),
+    ];
+    for (let i = 0; i < ranges.length; i++) {
+      for (let j = i + 1; j < ranges.length; j++) {
+        const a = ranges[i];
+        const b = ranges[j];
+        if (a.start_time < b.end_time && b.start_time < a.end_time) {
+          redirect(
+            `${returnTo}&error=${encodeURIComponent(
+              `El día ${shiftDate} quedaría con turnos solapados para esa persona (${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} y ${b.start_time.slice(0, 5)}-${b.end_time.slice(0, 5)}). Ajusta o elige otros días.`,
+            )}`,
+          );
+        }
+      }
+    }
+  }
+
+  const { error } = await supabase.from("employee_shifts").insert(toInsert);
+  if (error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/staff");
+  revalidatePath("/staff/schedule");
+  redirect(`${returnTo}&ok=${encodeURIComponent("Día aplicado a los días seleccionados.")}`);
 }
 
 async function publishWeekAction(formData: FormData) {
@@ -526,10 +677,15 @@ export default async function StaffSchedulePage({
             <div className="mt-1 text-lg font-semibold text-[var(--ui-text)]">
               {selectedSite?.name ?? selectedSite?.code ?? "Sin sede"}
             </div>
+            {selectedSiteId ? (
+              <p className="mt-1 text-sm text-[var(--ui-muted)]">
+                Solo se muestran trabajadores y turnos de esta sede. Cambia la sede abajo si necesitas otra.
+              </p>
+            ) : null}
           </div>
 
           <form method="get" className="space-y-2">
-            <label className="ui-label">Sede</label>
+            <label className="ui-label">Cambiar sede</label>
             <div className="flex gap-2">
               <select name="site_id" className="ui-input" defaultValue={selectedSiteId}>
                 {sites.map((site) => (
@@ -576,6 +732,17 @@ export default async function StaffSchedulePage({
         <div className="ui-panel">
           <div className="ui-empty">No hay sedes disponibles para planificar.</div>
         </div>
+      ) : employees.length === 0 ? (
+        <div className="ui-panel">
+          <div className="ui-empty">
+            <p className="font-semibold text-[var(--ui-text)]">
+              No hay trabajadores en {selectedSite?.name ?? selectedSite?.code ?? "esta sede"}.
+            </p>
+            <p className="mt-2 text-sm text-[var(--ui-muted)]">
+              Ve a &quot;Ver trabajadores&quot; o &quot;Invitar trabajador&quot; para asignar gente a la sede y luego planificar turnos aquí.
+            </p>
+          </div>
+        </div>
       ) : (
         <WeeklySchedulePlanner
           employees={employees}
@@ -587,6 +754,7 @@ export default async function StaffSchedulePage({
           saveAction={saveShiftAction}
           deleteAction={deleteShiftAction}
           copyPreviousWeekAction={copyPreviousWeekAction}
+          copyDayToOtherDaysAction={copyDayToOtherDaysAction}
           publishWeekAction={publishWeekAction}
         />
       )}
