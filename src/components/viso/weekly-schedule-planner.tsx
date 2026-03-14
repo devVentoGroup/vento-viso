@@ -40,6 +40,11 @@ type WeeklySchedulePlannerProps = {
   days: PlannerDay[];
   siteId: string;
   returnTo: string;
+  initialSlot?: {
+    dayIso: string;
+    startTime: string;
+    endTime: string;
+  } | null;
   totalsByEmployee: Record<string, PlannerTotals>;
   saveAction: (formData: FormData) => Promise<void>;
   deleteAction: (formData: FormData) => Promise<void>;
@@ -227,24 +232,38 @@ function ShiftEditInline({
   );
 }
 
-type ShiftLayout = PlannerShift & {
+type PlannerShiftGroup = {
+  id: string;
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  site_id: string;
+  shifts: PlannerShift[];
+};
+
+type LayoutItem = {
+  start_time: string;
+  end_time: string;
+};
+
+type ShiftLayout<T extends LayoutItem> = T & {
   lane: number;
   laneCount: number;
 };
 
-function buildDayLayouts(shifts: PlannerShift[]) {
-  const sorted = [...shifts].sort((a, b) => {
+function buildDayLayouts<T extends LayoutItem>(items: T[]) {
+  const sorted = [...items].sort((a, b) => {
     const startDiff = timeToMinutes(a.start_time) - timeToMinutes(b.start_time);
     if (startDiff !== 0) return startDiff;
     return timeToMinutes(a.end_time) - timeToMinutes(b.end_time);
   });
 
   const active: Array<{ lane: number; end: number }> = [];
-  const layouts: ShiftLayout[] = [];
+  const layouts: Array<ShiftLayout<T>> = [];
 
-  for (const shift of sorted) {
-    const start = timeToMinutes(shift.start_time);
-    const end = timeToMinutes(shift.end_time);
+  for (const item of sorted) {
+    const start = timeToMinutes(item.start_time);
+    const end = timeToMinutes(item.end_time);
 
     for (let idx = active.length - 1; idx >= 0; idx -= 1) {
       if (active[idx].end <= start) {
@@ -258,7 +277,7 @@ function buildDayLayouts(shifts: PlannerShift[]) {
 
     active.push({ lane, end });
     layouts.push({
-      ...shift,
+      ...item,
       lane,
       laneCount: active.length,
     });
@@ -271,12 +290,57 @@ function buildDayLayouts(shifts: PlannerShift[]) {
   }));
 }
 
+function buildShiftGroups(shifts: PlannerShift[]) {
+  const groups = new Map<string, PlannerShiftGroup>();
+  for (const shift of shifts) {
+    const key = `${shift.shift_date}|${shift.start_time}|${shift.end_time}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.shifts.push(shift);
+      continue;
+    }
+    groups.set(key, {
+      id: key,
+      shift_date: shift.shift_date,
+      start_time: shift.start_time,
+      end_time: shift.end_time,
+      site_id: shift.site_id,
+      shifts: [shift],
+    });
+  }
+  return [...groups.values()];
+}
+
+function getGroupStatusLabel(group: PlannerShiftGroup) {
+  const publishedCount = group.shifts.filter((shift) => shift.published_at).length;
+  if (publishedCount === 0) return "Borrador";
+  if (publishedCount === group.shifts.length) return "Publicado";
+  return `${publishedCount} publicados · ${group.shifts.length - publishedCount} borradores`;
+}
+
+function summarizeGroupEmployees(
+  group: PlannerShiftGroup,
+  employeeById: Map<string, PlannerEmployee>,
+) {
+  const labels = group.shifts
+    .map((shift) => getEmployeeLabel(employeeById.get(shift.employee_id) ?? {
+      id: shift.employee_id,
+      full_name: null,
+      alias: null,
+      role: null,
+    }))
+    .sort((a, b) => a.localeCompare(b, "es"));
+  if (labels.length <= 2) return labels.join(" · ");
+  return `${labels.slice(0, 2).join(" · ")} +${labels.length - 2}`;
+}
+
 export function WeeklySchedulePlanner({
   employees,
   shifts,
   days,
   siteId,
   returnTo,
+  initialSlot,
   totalsByEmployee,
   saveAction,
   deleteAction,
@@ -290,17 +354,22 @@ export function WeeklySchedulePlanner({
     dayIso: string;
     startTime: string;
     endTime: string;
-    employeeId: string | null;
+    employeeIds: string[];
     showTimeAdjust: boolean;
   };
+  type GroupSelection = {
+    type: "group";
+    group: ShiftLayout<PlannerShiftGroup>;
+  };
   type ShiftSelection = { type: "shift"; shift: PlannerShift; editing: boolean };
-  type Selection = null | SlotSelection | ShiftSelection;
+  type Selection = null | SlotSelection | GroupSelection | ShiftSelection;
 
   const [selection, setSelection] = useState<Selection>(null);
   type DragPoint = { dayIso: string; slotIndex: number };
   const [dragStart, setDragStart] = useState<DragPoint | null>(null);
   const [dragCurrent, setDragCurrent] = useState<DragPoint | null>(null);
   const justDraggedRef = useRef(false);
+  const [initialSlotConsumed, setInitialSlotConsumed] = useState(false);
   const [copySourceDayIso, setCopySourceDayIso] = useState<string>("");
   const [copyDayPanelOpen, setCopyDayPanelOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -311,24 +380,14 @@ export function WeeklySchedulePlanner({
     [employees],
   );
 
-  const shiftsByDay = useMemo(() => {
-    const map = new Map<string, ShiftLayout[]>();
+  const groupedShiftsByDay = useMemo(() => {
+    const map = new Map<string, Array<ShiftLayout<PlannerShiftGroup>>>();
     for (const day of days) {
       const rows = shifts.filter((shift) => shift.shift_date === day.iso);
-      map.set(day.iso, buildDayLayouts(rows));
+      map.set(day.iso, buildDayLayouts(buildShiftGroups(rows)));
     }
     return map;
   }, [days, shifts]);
-
-  const shiftsByEmployee = useMemo(() => {
-    const map = new Map<string, PlannerShift[]>();
-    for (const shift of shifts) {
-      const list = map.get(shift.employee_id) ?? [];
-      list.push(shift);
-      map.set(shift.employee_id, list);
-    }
-    return map;
-  }, [shifts]);
 
   const draftCount = shifts.filter((s) => !s.published_at).length;
 
@@ -353,18 +412,18 @@ export function WeeklySchedulePlanner({
   }, [shifts, siteId, employeeById]);
 
   const daysWithShifts = useMemo(
-    () => days.filter((d) => (shiftsByDay.get(d.iso) ?? []).length > 0),
-    [days, shiftsByDay],
+    () => days.filter((d) => (groupedShiftsByDay.get(d.iso) ?? []).length > 0),
+    [days, groupedShiftsByDay],
   );
 
   const employeesOnSourceDay = useMemo(() => {
     if (!copySourceDayIso) return [];
-    const dayShifts = shiftsByDay.get(copySourceDayIso) ?? [];
-    const ids = [...new Set(dayShifts.map((s) => s.employee_id))];
+    const dayGroups = groupedShiftsByDay.get(copySourceDayIso) ?? [];
+    const ids = [...new Set(dayGroups.flatMap((group) => group.shifts.map((shift) => shift.employee_id)))];
     return ids
       .map((id) => employeeById.get(id) ?? { id, full_name: null, alias: null, role: null })
       .sort((a, b) => getEmployeeLabel(a).localeCompare(getEmployeeLabel(b)));
-  }, [copySourceDayIso, shiftsByDay, employeeById]);
+  }, [copySourceDayIso, groupedShiftsByDay, employeeById]);
 
   const [copyEmployeeId, setCopyEmployeeId] = useState<string>("");
 
@@ -380,8 +439,25 @@ export function WeeklySchedulePlanner({
     }
   }, [employeesOnSourceDay, copyEmployeeId]);
 
+  useEffect(() => {
+    if (!initialSlot || initialSlotConsumed || selectionMode) return;
+    setSelection({
+      type: "slot",
+      dayIso: initialSlot.dayIso,
+      startTime: initialSlot.startTime,
+      endTime: initialSlot.endTime,
+      employeeIds: [],
+      showTimeAdjust: false,
+    });
+    setInitialSlotConsumed(true);
+  }, [initialSlot, initialSlotConsumed, selectionMode]);
+
   const selectShift = (shift: PlannerShift) => {
     setSelection({ type: "shift", shift, editing: false });
+  };
+
+  const selectGroup = (group: ShiftLayout<PlannerShiftGroup>) => {
+    setSelection({ type: "group", group });
   };
 
   const selectSlot = (dayIso: string, slotIndex: number) => {
@@ -392,7 +468,7 @@ export function WeeklySchedulePlanner({
       dayIso,
       startTime,
       endTime,
-      employeeId: null,
+      employeeIds: [],
       showTimeAdjust: false,
     });
   };
@@ -411,7 +487,7 @@ export function WeeklySchedulePlanner({
         dayIso,
         startTime,
         endTime,
-        employeeId: null,
+        employeeIds: [],
         showTimeAdjust: false,
       });
     },
@@ -472,9 +548,14 @@ export function WeeklySchedulePlanner({
 
   const clearSelection = () => setSelection(null);
 
-  const pickEmployeeForSlot = (employeeId: string) => {
+  const toggleEmployeeForSlot = (employeeId: string) => {
     if (selection?.type !== "slot") return;
-    setSelection({ ...selection, employeeId });
+    setSelection({
+      ...selection,
+      employeeIds: selection.employeeIds.includes(employeeId)
+        ? selection.employeeIds.filter((id) => id !== employeeId)
+        : [...selection.employeeIds, employeeId],
+    });
   };
 
   const setSlotTimeAdjust = (updates: { dayIso?: string; startTime?: string; endTime?: string }) => {
@@ -483,6 +564,14 @@ export function WeeklySchedulePlanner({
       ...selection,
       ...updates,
       showTimeAdjust: true,
+    });
+  };
+
+  const toggleSlotTimeAdjust = () => {
+    if (selection?.type !== "slot") return;
+    setSelection({
+      ...selection,
+      showTimeAdjust: !selection.showTimeAdjust,
     });
   };
 
@@ -505,6 +594,17 @@ export function WeeklySchedulePlanner({
     setSelectedShiftIds((prev) =>
       prev.includes(shiftId) ? prev.filter((id) => id !== shiftId) : [...prev, shiftId],
     );
+  };
+
+  const toggleGroupSelection = (group: PlannerShiftGroup) => {
+    const groupShiftIds = group.shifts.map((shift) => shift.id);
+    const allSelected = groupShiftIds.every((id) => selectedShiftIds.includes(id));
+    setSelectedShiftIds((prev) => {
+      if (allSelected) {
+        return prev.filter((id) => !groupShiftIds.includes(id));
+      }
+      return [...new Set([...prev, ...groupShiftIds])];
+    });
   };
 
   return (
@@ -593,7 +693,7 @@ export function WeeklySchedulePlanner({
                 </div>
 
                 {days.map((day) => {
-                  const dayShifts = shiftsByDay.get(day.iso) ?? [];
+                  const dayGroups = groupedShiftsByDay.get(day.iso) ?? [];
                   return (
                     <div
                       key={day.iso}
@@ -645,50 +745,69 @@ export function WeeklySchedulePlanner({
                         );
                       })}
 
-                      {dayShifts.map((shift) => {
-                        const employee = employeeById.get(shift.employee_id);
-                        const startMinutes = timeToMinutes(shift.start_time);
-                        const endMinutes = timeToMinutes(shift.end_time);
+                      {dayGroups.map((group) => {
+                        const startMinutes = timeToMinutes(group.start_time);
+                        const endMinutes = timeToMinutes(group.end_time);
                         const visibleStart = Math.max(startMinutes, VISIBLE_START_MINUTES);
                         const visibleEnd = Math.min(endMinutes, VISIBLE_END_MINUTES);
                         if (visibleStart >= visibleEnd) return null;
                         const top = ((visibleStart - VISIBLE_START_MINUTES) / SLOT_MINUTES) * SLOT_HEIGHT;
                         const height = Math.max(((visibleEnd - visibleStart) / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT);
-                        const laneWidth = 100 / shift.laneCount;
-                        const isShiftSelected = selectedShiftIds.includes(shift.id);
+                        const laneWidth = 100 / group.laneCount;
+                        const allSelected = group.shifts.every((shift) => selectedShiftIds.includes(shift.id));
+                        const firstShift = group.shifts[0];
+                        const isGrouped = group.shifts.length > 1;
                         return (
                           <button
-                            key={shift.id}
+                            key={group.id}
                             type="button"
                             onClick={() => {
                               if (selectionMode) {
-                                toggleShiftSelection(shift.id);
+                                toggleGroupSelection(group);
                                 return;
                               }
-                              selectShift(shift);
+                              selectGroup(group);
                             }}
-                            className={`absolute rounded-2xl border-2 px-3 py-2 text-left shadow-[var(--ui-shadow-soft)] transition hover:scale-[1.01] ${getStatusClass(shift.status)} ${
-                              isShiftSelected ? "ring-2 ring-[var(--ui-brand)] ring-offset-2" : ""
+                            className={`absolute rounded-2xl border-2 px-3 py-2 text-left shadow-[var(--ui-shadow-soft)] transition hover:scale-[1.01] ${getStatusClass(firstShift?.status ?? "scheduled")} ${
+                              allSelected ? "ring-2 ring-[var(--ui-brand)] ring-offset-2" : ""
                             }`}
                             style={{
                               top,
                               height,
-                              left: `calc(${shift.lane * laneWidth}% + 6px)`,
+                              left: `calc(${group.lane * laneWidth}% + 6px)`,
                               width: `calc(${laneWidth}% - 12px)`,
                             }}
-                            title={`${getEmployeeLabel(employee ?? { id: shift.employee_id, full_name: null, alias: null, role: null })} · ${formatRange(shift.start_time, shift.end_time)}`}
+                            title={`${formatRange(group.start_time, group.end_time)} · ${group.shifts.length} ${group.shifts.length === 1 ? "trabajador" : "trabajadores"}`}
                           >
                             <div className="text-[11px] font-semibold uppercase tracking-wide opacity-70">
-                              {formatRange(shift.start_time, shift.end_time)}
+                              {formatRange(group.start_time, group.end_time)}
                             </div>
-                            <div className="mt-1 text-sm font-semibold leading-tight">
-                              {getEmployeeLabel(employee ?? { id: shift.employee_id, full_name: null, alias: null, role: null })}
-                            </div>
-                            <div className="mt-1 text-[12px] leading-tight opacity-80">
-                              {employee?.role ?? "Sin rol"}
-                            </div>
+                            {isGrouped ? (
+                              <>
+                                <div className="mt-1 text-sm font-semibold leading-tight">
+                                  {group.shifts.length} trabajadores
+                                </div>
+                                <div className="mt-1 text-[12px] leading-tight opacity-80">
+                                  {summarizeGroupEmployees(group, employeeById)}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="mt-1 text-sm font-semibold leading-tight">
+                                  {getEmployeeLabel(employeeById.get(firstShift.employee_id) ?? {
+                                    id: firstShift.employee_id,
+                                    full_name: null,
+                                    alias: null,
+                                    role: null,
+                                  })}
+                                </div>
+                                <div className="mt-1 text-[12px] leading-tight opacity-80">
+                                  {employeeById.get(firstShift.employee_id)?.role ?? "Sin rol"}
+                                </div>
+                              </>
+                            )}
                             <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide opacity-70">
-                              {shift.published_at ? "Publicado" : "Borrador"}
+                              {getGroupStatusLabel(group)}
                             </div>
                           </button>
                         );
@@ -866,125 +985,230 @@ export function WeeklySchedulePlanner({
 
         {selection?.type === "slot" && (
           <div className="ui-panel space-y-4">
-            {!selection.employeeId ? (
-              <>
-                <p className="text-sm font-medium text-[var(--ui-text)]">
-                  {getDayLabel(selection.dayIso)} · {selection.startTime.slice(0, 5)}–{selection.endTime.slice(0, 5)}
-                </p>
-                <p className="ui-caption">¿Quién trabaja este turno?</p>
-                <div className="max-h-64 space-y-1 overflow-auto pr-1 ui-scrollbar-subtle">
-                  {employees.map((emp) => (
-                    <button
-                      key={emp.id}
-                      type="button"
-                      onClick={() => pickEmployeeForSlot(emp.id)}
-                      className="w-full rounded-xl px-3 py-2.5 text-left text-sm text-[var(--ui-text)] transition hover:bg-[var(--ui-brand-soft)] hover:text-[var(--ui-brand-600)]"
-                    >
+            <p className="text-sm font-medium text-[var(--ui-text)]">
+              {getDayLabel(selection.dayIso)} · {selection.startTime.slice(0, 5)}–{selection.endTime.slice(0, 5)}
+            </p>
+            <p className="ui-caption">
+              Selecciona uno o varios trabajadores para este bloque horario.
+            </p>
+
+            <div className="max-h-64 space-y-1 overflow-auto pr-1 ui-scrollbar-subtle">
+              {employees.map((emp) => {
+                const checked = selection.employeeIds.includes(emp.id);
+                return (
+                  <label
+                    key={emp.id}
+                    className={`flex cursor-pointer items-center justify-between rounded-xl px-3 py-2.5 text-sm transition ${
+                      checked
+                        ? "bg-[var(--ui-brand-soft)] text-[var(--ui-brand-600)]"
+                        : "text-[var(--ui-text)] hover:bg-[var(--ui-brand-soft)]"
+                    }`}
+                  >
+                    <span>
                       {getEmployeeLabel(emp)}
                       {emp.role ? (
                         <span className="ml-2 text-[var(--ui-muted)]">· {emp.role}</span>
                       ) : null}
-                    </button>
-                  ))}
-                </div>
-                <button type="button" onClick={clearSelection} className="ui-btn ui-btn--ghost ui-btn--sm w-full">
-                  Cancelar
-                </button>
-              </>
-            ) : (
-              <>
-                <p className="text-sm font-medium text-[var(--ui-text)]">
-                  {getEmployeeLabel(employeeById.get(selection.employeeId) ?? { id: selection.employeeId, full_name: null, alias: null, role: null })}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleEmployeeForSlot(emp.id)}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+
+            {selection.employeeIds.length > 0 ? (
+              <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+                  Seleccionados
                 </p>
-                {!selection.showTimeAdjust ? (
-                  <>
-                    <p className="ui-body-muted">
-                      {getDayLabel(selection.dayIso)} · {selection.startTime.slice(0, 5)} a {selection.endTime.slice(0, 5)}
-                    </p>
-                    <form action={saveAction}>
-                      <input type="hidden" name="shift_id" value="" />
-                      <input type="hidden" name="return_to" value={returnTo} />
-                      <input type="hidden" name="site_id" value={siteId} />
-                      <input type="hidden" name="employee_id" value={selection.employeeId} />
-                      <input type="hidden" name="shift_date" value={selection.dayIso} />
-                      <input type="hidden" name="start_time" value={selection.startTime} />
-                      <input type="hidden" name="end_time" value={selection.endTime} />
-                      <input type="hidden" name="break_minutes" value="0" />
-                      <input type="hidden" name="status" value="scheduled" />
-                      <input type="hidden" name="notes" value="" />
-                      <div className="flex flex-wrap gap-2">
-                        <button type="submit" className="ui-btn ui-btn--brand">
-                          Guardar turno
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSlotTimeAdjust({})}
-                          className="ui-btn ui-btn--ghost"
-                        >
-                          Ajustar horario
-                        </button>
-                      </div>
-                    </form>
-                  </>
-                ) : (
-                  <form action={saveAction} className="space-y-3">
-                    <input type="hidden" name="shift_id" value="" />
-                    <input type="hidden" name="return_to" value={returnTo} />
-                    <input type="hidden" name="site_id" value={siteId} />
-                    <input type="hidden" name="employee_id" value={selection.employeeId} />
-                    <input type="hidden" name="break_minutes" value="0" />
-                    <input type="hidden" name="status" value="scheduled" />
-                    <input type="hidden" name="notes" value="" />
+                <p className="mt-1 text-sm text-[var(--ui-text)]">
+                  {selection.employeeIds
+                    .map((id) =>
+                      getEmployeeLabel(employeeById.get(id) ?? {
+                        id,
+                        full_name: null,
+                        alias: null,
+                        role: null,
+                      }),
+                    )
+                    .join(", ")}
+                </p>
+              </div>
+            ) : null}
+
+            <form action={saveAction} className="space-y-3">
+              <input type="hidden" name="shift_id" value="" />
+              <input type="hidden" name="return_to" value={returnTo} />
+              <input type="hidden" name="site_id" value={siteId} />
+              <input type="hidden" name="break_minutes" value="0" />
+              <input type="hidden" name="status" value="scheduled" />
+              <input type="hidden" name="notes" value="" />
+              <input type="hidden" name="slot_day" value={selection.dayIso} />
+              <input type="hidden" name="slot_start" value={selection.startTime} />
+              <input type="hidden" name="slot_end" value={selection.endTime} />
+              {selection.employeeIds.map((employeeId) => (
+                <input key={employeeId} type="hidden" name="employee_ids" value={employeeId} />
+              ))}
+
+              {selection.showTimeAdjust ? (
+                <>
+                  <label className="block">
+                    <span className="ui-caption">Día</span>
+                    <select
+                      name="shift_date"
+                      className="ui-input mt-1 w-full"
+                      value={selection.dayIso}
+                      onChange={(e) => setSlotTimeAdjust({ dayIso: e.target.value })}
+                    >
+                      {days.map((d) => (
+                        <option key={d.iso} value={d.iso}>
+                          {d.label} — {d.shortLabel}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
                     <label className="block">
-                      <span className="ui-caption">Día</span>
-                      <select
-                        name="shift_date"
+                      <span className="ui-caption">Inicio</span>
+                      <input
+                        name="start_time"
+                        type="time"
                         className="ui-input mt-1 w-full"
-                        value={selection.dayIso}
-                        onChange={(e) => setSlotTimeAdjust({ dayIso: e.target.value })}
-                      >
-                        {days.map((d) => (
-                          <option key={d.iso} value={d.iso}>{d.label} — {d.shortLabel}</option>
-                        ))}
-                      </select>
+                        value={selection.startTime}
+                        onChange={(e) => setSlotTimeAdjust({ startTime: e.target.value })}
+                      />
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="block">
-                        <span className="ui-caption">Inicio</span>
-                        <input
-                          name="start_time"
-                          type="time"
-                          className="ui-input mt-1 w-full"
-                          value={selection.startTime}
-                          onChange={(e) => setSlotTimeAdjust({ startTime: e.target.value })}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="ui-caption">Fin</span>
-                        <input
-                          name="end_time"
-                          type="time"
-                          className="ui-input mt-1 w-full"
-                          value={selection.endTime}
-                          onChange={(e) => setSlotTimeAdjust({ endTime: e.target.value })}
-                        />
-                      </label>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="submit" className="ui-btn ui-btn--brand">Guardar turno</button>
-                      <button type="button" onClick={clearSelection} className="ui-btn ui-btn--ghost">Cancelar</button>
-                    </div>
-                  </form>
-                )}
+                    <label className="block">
+                      <span className="ui-caption">Fin</span>
+                      <input
+                        name="end_time"
+                        type="time"
+                        className="ui-input mt-1 w-full"
+                        value={selection.endTime}
+                        onChange={(e) => setSlotTimeAdjust({ endTime: e.target.value })}
+                      />
+                    </label>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <input type="hidden" name="shift_date" value={selection.dayIso} />
+                  <input type="hidden" name="start_time" value={selection.startTime} />
+                  <input type="hidden" name="end_time" value={selection.endTime} />
+                  <p className="ui-body-muted">
+                    {getDayLabel(selection.dayIso)} · {selection.startTime.slice(0, 5)} a {selection.endTime.slice(0, 5)}
+                  </p>
+                </>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  disabled={selection.employeeIds.length === 0}
+                  className="ui-btn ui-btn--brand disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Guardar seleccionados
+                </button>
+                <button
+                  type="submit"
+                  name="keep_slot"
+                  value="1"
+                  disabled={selection.employeeIds.length === 0}
+                  className="ui-btn ui-btn--ghost disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Guardar y seguir
+                </button>
                 <button
                   type="button"
-                  onClick={() => setSelection((s) => s?.type === "slot" ? { ...s, employeeId: null, showTimeAdjust: false } : s)}
-                  className="ui-btn ui-btn--ghost ui-btn--sm w-full text-[var(--ui-muted)]"
+                  onClick={toggleSlotTimeAdjust}
+                  className="ui-btn ui-btn--ghost"
                 >
-                  Cambiar persona
+                  {selection.showTimeAdjust ? "Ocultar ajuste" : "Ajustar horario"}
                 </button>
-              </>
-            )}
+                <button type="button" onClick={clearSelection} className="ui-btn ui-btn--ghost">
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {selection?.type === "group" && (
+          <div className="ui-panel space-y-4">
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-[var(--ui-text)]">
+                {getDayLabel(selection.group.shift_date)} · {selection.group.start_time.slice(0, 5)}–{selection.group.end_time.slice(0, 5)}
+              </p>
+              <p className="ui-caption">
+                {selection.group.shifts.length} {selection.group.shifts.length === 1 ? "trabajador" : "trabajadores"} en este bloque.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                setSelection({
+                  type: "slot",
+                  dayIso: selection.group.shift_date,
+                  startTime: selection.group.start_time,
+                  endTime: selection.group.end_time,
+                  employeeIds: [],
+                  showTimeAdjust: false,
+                })
+              }
+              className="ui-btn ui-btn--ghost w-full"
+            >
+              Agregar trabajadores a este horario
+            </button>
+
+            <div className="space-y-3">
+              {selection.group.shifts.map((shift) => {
+                const employee = employeeById.get(shift.employee_id) ?? {
+                  id: shift.employee_id,
+                  full_name: null,
+                  alias: null,
+                  role: null,
+                };
+                return (
+                  <div
+                    key={shift.id}
+                    className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3"
+                  >
+                    <p className="text-sm font-semibold text-[var(--ui-text)]">
+                      {getEmployeeLabel(employee)}
+                    </p>
+                    <p className="mt-1 text-xs text-[var(--ui-muted)]">
+                      {employee.role ?? "Sin rol"} · {shift.published_at ? "Publicado" : "Borrador"}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelection({ type: "shift", shift, editing: true })}
+                        className="ui-btn ui-btn--ghost ui-btn--sm"
+                      >
+                        Editar
+                      </button>
+                      <form action={deleteAction}>
+                        <input type="hidden" name="shift_id" value={shift.id} />
+                        <input type="hidden" name="employee_id" value={shift.employee_id} />
+                        <input type="hidden" name="return_to" value={returnTo} />
+                        <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm text-[var(--ui-danger)]">
+                          Eliminar
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button type="button" onClick={clearSelection} className="ui-btn ui-btn--ghost ui-btn--sm w-full">
+              Cerrar
+            </button>
           </div>
         )}
 

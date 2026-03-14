@@ -149,6 +149,23 @@ function buildReturnTo(siteId: string, weekStartIso: string) {
   return `/staff/schedule?${query.toString()}`;
 }
 
+function appendReturnParams(
+  returnTo: string,
+  params: Record<string, string | null | undefined>,
+) {
+  const [pathname, rawQuery = ""] = returnTo.split("?");
+  const query = new URLSearchParams(rawQuery);
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      query.set(key, value);
+    } else {
+      query.delete(key);
+    }
+  }
+  const nextQuery = query.toString();
+  return nextQuery ? `${pathname}?${nextQuery}` : pathname;
+}
+
 function getEmployeeRef(row: EmployeeSiteLink["employee"]) {
   if (!row) return null;
   return Array.isArray(row) ? row[0] ?? null : row;
@@ -158,11 +175,23 @@ async function saveShiftAction(formData: FormData) {
   "use server";
   const shiftId = asText(formData.get("shift_id"));
   const employeeId = asText(formData.get("employee_id"));
+  const employeeIds = [...new Set(
+    formData
+      .getAll("employee_ids")
+      .map((value) => asText(value))
+      .filter(Boolean),
+  )];
   const siteId = asText(formData.get("site_id"));
   const shiftDate = asText(formData.get("shift_date"));
   const startTime = asText(formData.get("start_time"));
   const endTime = asText(formData.get("end_time"));
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+  const keepSlot = asText(formData.get("keep_slot")) === "1";
+  const slotDay = asText(formData.get("slot_day")) || shiftDate;
+  const slotStart = asText(formData.get("slot_start")) || startTime;
+  const slotEnd = asText(formData.get("slot_end")) || endTime;
+  const requestedEmployeeIds =
+    employeeIds.length > 0 ? employeeIds : employeeId ? [employeeId] : [];
 
   await requireAppAccess({
     appId: "viso",
@@ -170,8 +199,12 @@ async function saveShiftAction(formData: FormData) {
   });
   const supabase = createAdminClient();
 
-  if (!employeeId || !siteId || !shiftDate || !startTime || !endTime) {
+  if (requestedEmployeeIds.length === 0 || !siteId || !shiftDate || !startTime || !endTime) {
     redirect(`${returnTo}&error=${encodeURIComponent("Completa trabajador, fecha y horario.")}`);
+  }
+
+  if (shiftId && requestedEmployeeIds.length !== 1) {
+    redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un trabajador por turno.")}`);
   }
 
   if (endTime <= startTime) {
@@ -181,8 +214,8 @@ async function saveShiftAction(formData: FormData) {
   // Validar solapamiento: mismo empleado, misma fecha, rangos que se cruzan
   let overlapQuery = supabase
     .from("employee_shifts")
-    .select("id, start_time, end_time")
-    .eq("employee_id", employeeId)
+    .select("id, employee_id, start_time, end_time")
+    .in("employee_id", requestedEmployeeIds)
     .eq("shift_date", shiftDate);
   if (shiftId) {
     overlapQuery = overlapQuery.neq("id", shiftId);
@@ -192,21 +225,36 @@ async function saveShiftAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent(overlapErr.message)}`);
   }
   const overlaps = (sameDayShifts ?? []).filter(
-    (s: { start_time: string; end_time: string }) =>
+    (s: { employee_id: string; start_time: string; end_time: string }) =>
       startTime < s.end_time && s.start_time < endTime,
   );
   if (overlaps.length > 0) {
-    const other = overlaps[0] as { start_time: string; end_time: string };
-    const otherRange = `${other.start_time.slice(0, 5)} - ${other.end_time.slice(0, 5)}`;
+    const conflictingIds = [...new Set(overlaps.map((shift) => shift.employee_id))];
+    const { data: conflictEmployees } = await supabase
+      .from("employees")
+      .select("id,full_name,alias")
+      .in("id", conflictingIds);
+    const conflictNames = new Map(
+      (conflictEmployees ?? []).map((employee) => [
+        employee.id,
+        employee.full_name ?? employee.alias ?? employee.id,
+      ]),
+    );
+    const summary = conflictingIds
+      .map((id) => {
+        const conflict = overlaps.find((shift) => shift.employee_id === id);
+        if (!conflict) return conflictNames.get(id) ?? id;
+        return `${conflictNames.get(id) ?? id} (${conflict.start_time.slice(0, 5)} - ${conflict.end_time.slice(0, 5)})`;
+      })
+      .join(", ");
     redirect(
       `${returnTo}&error=${encodeURIComponent(
-        `Este empleado ya tiene un turno el mismo día que se solapa (${otherRange}). Ajusta el horario o elige otro empleado.`,
+        `Algunos trabajadores ya tienen un turno que se solapa: ${summary}. Ajusta el horario o quítalos de la selección.`,
       )}`,
     );
   }
 
-  const payload = {
-    employee_id: employeeId,
+  const basePayload = {
     site_id: siteId,
     shift_date: shiftDate,
     start_time: startTime,
@@ -219,8 +267,16 @@ async function saveShiftAction(formData: FormData) {
   };
 
   const query = shiftId
-    ? supabase.from("employee_shifts").update(payload).eq("id", shiftId)
-    : supabase.from("employee_shifts").insert(payload);
+    ? supabase
+        .from("employee_shifts")
+        .update({ ...basePayload, employee_id: requestedEmployeeIds[0] })
+        .eq("id", shiftId)
+    : supabase.from("employee_shifts").insert(
+        requestedEmployeeIds.map((id) => ({
+          ...basePayload,
+          employee_id: id,
+        })),
+      );
 
   const { error } = await query;
   if (error) {
@@ -229,7 +285,26 @@ async function saveShiftAction(formData: FormData) {
 
   revalidatePath("/staff");
   revalidatePath("/staff/schedule");
-  redirect(`${returnTo}&ok=${encodeURIComponent(shiftId ? "turno_actualizado_borrador" : "turno_creado_borrador")}`);
+  const successCode = shiftId
+    ? "turno_actualizado_borrador"
+    : requestedEmployeeIds.length > 1
+      ? "turnos_creados_borrador"
+      : "turno_creado_borrador";
+  const nextReturnTo =
+    !shiftId && keepSlot
+      ? appendReturnParams(returnTo, {
+          slot_keep: "1",
+          slot_day: slotDay,
+          slot_start: slotStart,
+          slot_end: slotEnd,
+        })
+      : appendReturnParams(returnTo, {
+          slot_keep: null,
+          slot_day: null,
+          slot_start: null,
+          slot_end: null,
+        });
+  redirect(`${nextReturnTo}&ok=${encodeURIComponent(successCode)}`);
 }
 
 async function deleteShiftAction(formData: FormData) {
@@ -549,6 +624,8 @@ function getOkMessage(code: string) {
   switch (code) {
     case "turno_creado_borrador":
       return "Turno guardado en borrador. No se enviaron notificaciones.";
+    case "turnos_creados_borrador":
+      return "Turnos guardados en borrador. No se enviaron notificaciones.";
     case "turno_actualizado_borrador":
       return "Borrador actualizado. No se enviaron notificaciones.";
     case "turno_eliminado":
@@ -569,7 +646,16 @@ function getOkMessage(code: string) {
 export default async function StaffSchedulePage({
   searchParams,
 }: {
-  searchParams?: Promise<{ site_id?: string; week?: string; ok?: string; error?: string }>;
+  searchParams?: Promise<{
+    site_id?: string;
+    week?: string;
+    ok?: string;
+    error?: string;
+    slot_keep?: string;
+    slot_day?: string;
+    slot_start?: string;
+    slot_end?: string;
+  }>;
 }) {
   const sp = (await searchParams) ?? {};
   const okMsg = getOkMessage(safeDecode(sp.ok));
@@ -681,6 +767,14 @@ export default async function StaffSchedulePage({
   const prevWeekHref = buildReturnTo(selectedSiteId, isoDate(addDays(weekStart, -7)));
   const nextWeekHref = buildReturnTo(selectedSiteId, isoDate(addDays(weekStart, 7)));
   const currentWeekHref = buildReturnTo(selectedSiteId, isoDate(toMonday(new Date())));
+  const initialSlot =
+    sp.slot_keep === "1" && sp.slot_day && sp.slot_start && sp.slot_end
+      ? {
+          dayIso: safeDecode(sp.slot_day),
+          startTime: safeDecode(sp.slot_start),
+          endTime: safeDecode(sp.slot_end),
+        }
+      : null;
 
   return (
     <div className="space-y-6">
@@ -790,10 +884,11 @@ export default async function StaffSchedulePage({
           days={weekDays}
           siteId={selectedSiteId}
           returnTo={returnTo}
+          initialSlot={initialSlot}
           totalsByEmployee={totalsByEmployee}
           saveAction={saveShiftAction}
           deleteAction={deleteShiftAction}
-        deleteManyAction={deleteManyShiftAction}
+          deleteManyAction={deleteManyShiftAction}
           copyPreviousWeekAction={copyPreviousWeekAction}
           copyDayToOtherDaysAction={copyDayToOtherDaysAction}
           publishWeekAction={publishWeekAction}
