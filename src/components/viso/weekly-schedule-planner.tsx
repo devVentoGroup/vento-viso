@@ -415,6 +415,25 @@ export function WeeklySchedulePlanner({
     );
   }, [shifts, siteId, employeeById]);
 
+  const publishedHoursByEmployee = useMemo(() => {
+    const publishedShifts = shifts.filter((s) => s.published_at != null && s.site_id === siteId);
+    const byEmployee = new Map<string, { employee: PlannerEmployee; totalMinutes: number }>();
+    for (const shift of publishedShifts) {
+      const emp = employeeById.get(shift.employee_id);
+      const existing = byEmployee.get(shift.employee_id);
+      const totalMinutes = (existing?.totalMinutes ?? 0) + getShiftMinutes(shift);
+      byEmployee.set(shift.employee_id, {
+        employee: emp ?? { id: shift.employee_id, full_name: null, alias: null, role: null },
+        totalMinutes,
+      });
+    }
+    return Array.from(byEmployee.values()).sort((a, b) =>
+      getEmployeeLabel(a.employee).localeCompare(getEmployeeLabel(b.employee)),
+    );
+  }, [shifts, siteId, employeeById]);
+
+  const [publishedHoursExpanded, setPublishedHoursExpanded] = useState(false);
+
   const daysWithShifts = useMemo(
     () => days.filter((d) => (groupedShiftsByDay.get(d.iso) ?? []).length > 0),
     [days, groupedShiftsByDay],
@@ -1026,6 +1045,45 @@ export function WeeklySchedulePlanner({
                     </li>
                   ))}
                 </ul>
+              </div>
+            ) : null}
+
+            {publishedHoursByEmployee.length > 0 ? (
+              <div className="ui-panel space-y-0 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setPublishedHoursExpanded((v) => !v)}
+                  className="flex w-full items-center justify-between gap-2 py-3 text-left"
+                >
+                  <span className="text-sm font-semibold text-[var(--ui-text)]">
+                    Horas publicadas por trabajador
+                  </span>
+                  <span className="text-[var(--ui-muted)]" aria-hidden>
+                    {publishedHoursExpanded ? "▼" : "▶"}
+                  </span>
+                </button>
+                {publishedHoursExpanded ? (
+                  <div className="border-t border-[var(--ui-border)] pt-3">
+                    <p className="ui-caption text-[var(--ui-muted)] mb-3">
+                      Total de horas publicadas esta semana (solo publicados, sin detalle de turnos).
+                    </p>
+                    <ul className="max-h-64 space-y-2 overflow-auto pr-1 ui-scrollbar-subtle">
+                      {publishedHoursByEmployee.map(({ employee, totalMinutes }) => (
+                        <li
+                          key={employee.id}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2"
+                        >
+                          <span className="text-sm font-semibold text-[var(--ui-text)] truncate">
+                            {getEmployeeLabel(employee)}
+                          </span>
+                          <span className="text-sm font-semibold text-[var(--ui-brand)] shrink-0">
+                            {formatMinutes(totalMinutes)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
