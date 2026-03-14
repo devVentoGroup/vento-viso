@@ -52,6 +52,10 @@ export function RequiredDocumentRulesPanel({
   const employeeScopedTypes = documentTypes.filter((t) => t.scope === "employee");
   const typesForSelect = employeeScopedTypes.length > 0 ? employeeScopedTypes : documentTypes;
 
+  function resetSubmitting() {
+    setIsSubmitting(false);
+  }
+
   async function handleAdd(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!siteId || !selectedTypeId) return;
@@ -61,8 +65,13 @@ export function RequiredDocumentRulesPanel({
     formData.set("site_id", siteId);
     formData.set("document_type_id", selectedTypeId);
     if (roleFilter.trim()) formData.set("role", roleFilter.trim());
-    await addAction(formData);
-    setIsSubmitting(false);
+    const fallback = setTimeout(resetSubmitting, 5000);
+    try {
+      await addAction(formData);
+    } finally {
+      clearTimeout(fallback);
+      resetSubmitting();
+    }
     router.refresh();
   }
 
@@ -72,8 +81,13 @@ export function RequiredDocumentRulesPanel({
     formData.set("business_id", businessId);
     if (!businessId && siteId) formData.set("site_id", siteId);
     formData.set("id", ruleId);
-    await deleteAction(formData);
-    setIsSubmitting(false);
+    const fallback = setTimeout(resetSubmitting, 5000);
+    try {
+      await deleteAction(formData);
+    } finally {
+      clearTimeout(fallback);
+      resetSubmitting();
+    }
     router.refresh();
   }
 
