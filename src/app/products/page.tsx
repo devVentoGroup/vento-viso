@@ -60,6 +60,29 @@ export default async function ProductsPage({
   );
   const effectiveError = errorMsg || error?.message || sitesError?.message || "";
 
+  // Agrupar productos por sede (site_id). Orden: sedes con nombre A-Z, luego "Sin sede".
+  const NO_SITE_KEY = "__no_site__";
+  const groups = new Map<string, RewardRow[]>();
+  for (const row of rows) {
+    const key = row.site_id ?? NO_SITE_KEY;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
+  }
+  const siteOrder = [...new Set(rows.map((r) => r.site_id).filter(Boolean))] as string[];
+  siteOrder.sort((a, b) => {
+    const nameA = sitesById.get(a)?.name ?? sitesById.get(a)?.code ?? "";
+    const nameB = sitesById.get(b)?.name ?? sitesById.get(b)?.code ?? "";
+    return nameA.localeCompare(nameB, "es");
+  });
+  const orderedKeys = [...siteOrder];
+  if (groups.has(NO_SITE_KEY)) orderedKeys.push(NO_SITE_KEY);
+
+  function getSiteLabel(siteId: string | null) {
+    if (!siteId || siteId === NO_SITE_KEY) return "Sin sede";
+    const site = sitesById.get(siteId);
+    return site?.name ?? site?.code ?? "Sin sede";
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -75,55 +98,70 @@ export default async function ProductsPage({
       {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
-      <div className="ui-panel">
-        {rows.length === 0 ? (
+      {rows.length === 0 ? (
+        <div className="ui-panel">
           <div className="ui-empty">No hay productos configurados.</div>
-        ) : (
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>Producto</TableHeaderCell>
-                <TableHeaderCell>Categoria</TableHeaderCell>
-                <TableHeaderCell>Puntos</TableHeaderCell>
-                <TableHeaderCell>Negocio</TableHeaderCell>
-                <TableHeaderCell>Estado</TableHeaderCell>
-                <TableHeaderCell></TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {rows.map((row) => {
-                const site = row.site_id ? sitesById.get(row.site_id) ?? null : null;
-                const category =
-                  row.metadata && typeof row.metadata === "object" && typeof row.metadata.category === "string"
-                    ? row.metadata.category
-                    : "-";
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {orderedKeys.map((siteKey) => {
+            const siteRows = groups.get(siteKey) ?? [];
+            if (siteRows.length === 0) return null;
+            const siteLabel = getSiteLabel(siteKey);
 
-                return (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      <div className="font-semibold">{row.name}</div>
-                      <div className="ui-caption">{row.code}</div>
-                    </TableCell>
-                    <TableCell>{category}</TableCell>
-                    <TableCell>{row.points_cost} pts</TableCell>
-                    <TableCell>{site?.name ?? site?.code ?? "Sin sede"}</TableCell>
-                    <TableCell>
-                      <span className={`ui-chip ${row.is_active ? "ui-chip--success" : ""}`}>
-                        {row.is_active ? "Activo" : "Inactivo"}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Link href={`/products/${row.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
-                        Editar
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </div>
+            return (
+              <div key={siteKey} className="ui-panel space-y-4">
+                <h2 className="text-lg font-semibold text-[var(--ui-text)]">
+                  {siteLabel}
+                  <span className="ml-2 text-sm font-normal text-[var(--ui-muted)]">
+                    ({siteRows.length} {siteRows.length === 1 ? "producto" : "productos"})
+                  </span>
+                </h2>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableHeaderCell>Producto</TableHeaderCell>
+                      <TableHeaderCell>Categoria</TableHeaderCell>
+                      <TableHeaderCell>Puntos</TableHeaderCell>
+                      <TableHeaderCell>Estado</TableHeaderCell>
+                      <TableHeaderCell></TableHeaderCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {siteRows.map((row) => {
+                      const category =
+                        row.metadata && typeof row.metadata === "object" && typeof row.metadata.category === "string"
+                          ? row.metadata.category
+                          : "-";
+
+                      return (
+                        <TableRow key={row.id}>
+                          <TableCell>
+                            <div className="font-semibold">{row.name}</div>
+                            <div className="ui-caption">{row.code}</div>
+                          </TableCell>
+                          <TableCell>{category}</TableCell>
+                          <TableCell>{row.points_cost} pts</TableCell>
+                          <TableCell>
+                            <span className={`ui-chip ${row.is_active ? "ui-chip--success" : ""}`}>
+                              {row.is_active ? "Activo" : "Inactivo"}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Link href={`/products/${row.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
+                              Editar
+                            </Link>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

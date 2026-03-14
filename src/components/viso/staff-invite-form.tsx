@@ -65,6 +65,7 @@ export function StaffInviteForm({ sites, roles }: StaffInviteFormProps) {
     }
 
     const inviteToken = crypto.randomUUID();
+    const now = new Date().toISOString();
     const payload = {
       token: inviteToken,
       email: email.trim() || null,
@@ -73,7 +74,8 @@ export function StaffInviteForm({ sites, roles }: StaffInviteFormProps) {
       staff_role: role || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       created_by: createdBy,
-      status: "pending",
+      invited_at: now,
+      status: "sent",
     };
 
     const { error } = await supabase.from("staff_invitations").insert(payload);
