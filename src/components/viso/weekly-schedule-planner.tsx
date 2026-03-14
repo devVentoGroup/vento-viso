@@ -312,17 +312,14 @@ function buildShiftGroups(shifts: PlannerShift[]) {
   return [...groups.values()];
 }
 
-function getGroupStatusLabel(group: PlannerShiftGroup) {
+function getGroupStatusCounts(group: PlannerShiftGroup) {
   const publishedCount = group.shifts.filter((shift) => shift.published_at).length;
   const draftCount = group.shifts.length - publishedCount;
-  if (publishedCount === 0) return "Borrador";
-  if (draftCount === 0) return "Publicado";
-  return `${publishedCount} pub · ${draftCount} borr`;
+  return { publishedCount, draftCount };
 }
 
 function getGroupStatusTitle(group: PlannerShiftGroup) {
-  const publishedCount = group.shifts.filter((shift) => shift.published_at).length;
-  const draftCount = group.shifts.length - publishedCount;
+  const { publishedCount, draftCount } = getGroupStatusCounts(group);
   if (draftCount === 0) return "Todo publicado";
   if (publishedCount === 0) return "Borrador (no publicado)";
   return `${publishedCount} publicados, ${draftCount} en borrador`;
@@ -833,20 +830,39 @@ export function WeeklySchedulePlanner({
                             }}
                             title={`${formatRange(group.start_time, group.end_time)} · ${group.shifts.length} ${group.shifts.length === 1 ? "trabajador" : "trabajadores"}`}
                           >
-                            <div className="flex items-center justify-between gap-1.5">
-                              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider opacity-80">
+                            <div className="space-y-1.5" title={getGroupStatusTitle(group)}>
+                              <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80">
                                 {formatRange(group.start_time, group.end_time)}
-                              </span>
-                              <span
-                                title={getGroupStatusTitle(group)}
-                                className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
-                                  group.shifts.every((s) => s.published_at)
-                                    ? "bg-emerald-500/20 text-emerald-800"
-                                    : "bg-amber-500/25 text-amber-800 ring-1 ring-amber-400/50"
-                                }`}
-                              >
-                                {getGroupStatusLabel(group)}
-                              </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {(() => {
+                                  const { publishedCount, draftCount } = getGroupStatusCounts(group);
+                                  if (draftCount === 0) {
+                                    return (
+                                      <span className="rounded bg-emerald-500/25 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                                        Publicado
+                                      </span>
+                                    );
+                                  }
+                                  if (publishedCount === 0) {
+                                    return (
+                                      <span className="rounded bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 ring-1 ring-amber-400/50">
+                                        Borrador
+                                      </span>
+                                    );
+                                  }
+                                  return (
+                                    <>
+                                      <span className="rounded bg-emerald-500/25 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                                        {publishedCount} pub
+                                      </span>
+                                      <span className="rounded bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 ring-1 ring-amber-400/50">
+                                        {draftCount} borr
+                                      </span>
+                                    </>
+                                  );
+                                })()}
+                              </div>
                             </div>
                             {isGrouped ? (
                               <>
