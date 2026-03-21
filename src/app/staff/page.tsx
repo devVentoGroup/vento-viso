@@ -219,8 +219,11 @@ export default async function StaffPage() {
                           <span className={`ui-chip ${wallet.contract_active ? "ui-chip--success" : ""}`} title="Contrato activo">
                             {wallet.contract_active ? "Contrato OK" : "Sin contrato"}
                           </span>
-                          <span className={`ui-chip ${wallet.documents_complete ? "ui-chip--success" : ""}`} title="Documentos completos">
-                            {wallet.documents_complete ? "Docs OK" : "Falta docs"}
+                          <span
+                            className={`ui-chip ${wallet.documents_complete ? "ui-chip--success" : ""}`}
+                            title="Valida documentos requeridos por sede/rol (no total de archivos subidos)."
+                          >
+                            {wallet.documents_complete ? "Req docs OK" : "Falta req docs"}
                           </span>
                           <span className={`ui-chip ${wallet.wallet_eligible ? "ui-chip--brand" : ""}`} title="Carnet wallet">
                             {wallet.wallet_status === "issued" ? "Emitido" : wallet.wallet_eligible ? "Elegible" : wallet.wallet_status}
