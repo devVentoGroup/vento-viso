@@ -169,6 +169,66 @@ function getShiftStatusLabel(status: string) {
   }
 }
 
+type AreaVisual = {
+  label: string;
+  chipClass: string;
+  rowClass: string;
+  shiftClass: string;
+};
+
+function getAreaVisualFromRole(role: string | null | undefined): AreaVisual {
+  const normalized = String(role ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+
+  if (normalized.includes("caj")) {
+    return {
+      label: "Caja",
+      chipClass: "border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700",
+      rowClass: "bg-fuchsia-50/40",
+      shiftClass: "border-fuchsia-300 bg-fuchsia-50",
+    };
+  }
+  if (
+    normalized.includes("meser") ||
+    normalized.includes("serv") ||
+    normalized.includes("anfit") ||
+    normalized.includes("runner") ||
+    normalized.includes("host")
+  ) {
+    return {
+      label: "Servicio",
+      chipClass: "border-lime-300 bg-lime-50 text-lime-700",
+      rowClass: "bg-lime-50/40",
+      shiftClass: "border-lime-300 bg-lime-50",
+    };
+  }
+  if (normalized.includes("bar")) {
+    return {
+      label: "Barra",
+      chipClass: "border-orange-300 bg-orange-50 text-orange-700",
+      rowClass: "bg-orange-50/40",
+      shiftClass: "border-orange-300 bg-orange-50",
+    };
+  }
+  if (normalized.includes("cocin") || normalized.includes("repost")) {
+    return {
+      label: "Cocina",
+      chipClass: "border-sky-300 bg-sky-50 text-sky-700",
+      rowClass: "bg-sky-50/40",
+      shiftClass: "border-sky-300 bg-sky-50",
+    };
+  }
+  return {
+    label: "General",
+    chipClass: "border-slate-300 bg-slate-50 text-slate-700",
+    rowClass: "bg-slate-50/30",
+    shiftClass: "border-slate-300 bg-slate-50",
+  };
+}
+
 function buildReturnTo(siteId: string, weekStartIso: string, view?: string) {
   const query = new URLSearchParams();
   if (siteId) query.set("site_id", siteId);
@@ -1082,6 +1142,7 @@ export default async function StaffSchedulePage({
                 <table className="min-w-[1320px] w-full border-collapse text-sm">
                   <thead className="bg-[var(--ui-surface-2)] text-xs uppercase tracking-wide text-[var(--ui-muted)]">
                     <tr>
+                      <th className="border-b border-r border-[var(--ui-border)] px-3 py-3 text-left">Área</th>
                       <th className="border-b border-r border-[var(--ui-border)] px-3 py-3 text-left">Trabajador</th>
                       <th className="border-b border-r border-[var(--ui-border)] px-3 py-3 text-left">Rol</th>
                       {weekDays.map((day) => (
@@ -1097,8 +1158,14 @@ export default async function StaffSchedulePage({
                     {employees.map((employee) => {
                       const employeeName = employee.full_name ?? employee.alias ?? employee.id;
                       const weekMinutes = totalsByEmployee[employee.id]?.weekMinutes ?? 0;
+                      const areaVisual = getAreaVisualFromRole(employee.role);
                       return (
-                        <tr key={employee.id} className="align-top">
+                        <tr key={employee.id} className={`align-top ${areaVisual.rowClass}`}>
+                          <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5">
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${areaVisual.chipClass}`}>
+                              {areaVisual.label}
+                            </span>
+                          </td>
                           <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5 font-semibold text-[var(--ui-text)]">
                             {employeeName}
                           </td>
@@ -1116,10 +1183,8 @@ export default async function StaffSchedulePage({
                                     {dayRows.map((shift) => (
                                       <div
                                         key={shift.id}
-                                        className={`rounded-lg border px-2 py-1.5 ${
-                                          shift.published_at
-                                            ? "border-emerald-200 bg-emerald-50"
-                                            : "border-amber-200 bg-amber-50"
+                                        className={`rounded-lg border px-2 py-1.5 ${areaVisual.shiftClass} ${
+                                          shift.published_at ? "ring-1 ring-emerald-300/70" : "ring-1 ring-amber-300/70"
                                         }`}
                                         title={shift.notes ?? ""}
                                       >
