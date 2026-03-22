@@ -135,6 +135,14 @@ function getEmployeeLabel(employee: PlannerEmployee) {
   return employee.full_name ?? employee.alias ?? employee.id;
 }
 
+function getEmployeeShortLabel(employee: PlannerEmployee) {
+  const label = getEmployeeLabel(employee).trim();
+  if (!label) return "Sin nombre";
+  const parts = label.split(/\s+/).filter(Boolean);
+  if (parts.length <= 2) return label;
+  return `${parts[0]} ${parts[1]}`;
+}
+
 function ShiftEditInline({
   shift,
   employees,
@@ -654,7 +662,7 @@ export function WeeklySchedulePlanner({
   };
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_360px]">
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3">
           <p className="text-sm text-[var(--ui-muted)]">
@@ -693,8 +701,8 @@ export function WeeklySchedulePlanner({
 
         <div className="ui-panel p-0 overflow-hidden">
           <div className="overflow-auto ui-scrollbar-subtle">
-            <div className="min-w-[1160px]">
-              <div className="grid grid-cols-[72px_repeat(7,minmax(150px,1fr))] border-b border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
+            <div className="min-w-[1560px]">
+              <div className="grid grid-cols-[72px_repeat(7,minmax(210px,1fr))] border-b border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
                 <div className="border-r border-[var(--ui-border)] px-3 py-4 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
                   Hora
                 </div>
@@ -714,7 +722,7 @@ export function WeeklySchedulePlanner({
               </div>
 
               <div
-                className="grid grid-cols-[72px_repeat(7,minmax(150px,1fr))]"
+                className="grid grid-cols-[72px_repeat(7,minmax(210px,1fr))]"
                 style={{ minHeight: DAY_HEIGHT }}
               >
                 <div className="relative border-r border-[var(--ui-border)] bg-[var(--ui-surface)]">
@@ -866,7 +874,7 @@ export function WeeklySchedulePlanner({
                             </div>
                             {isGrouped ? (
                               <>
-                                <div className="mt-1.5 line-clamp-1 text-xs font-semibold leading-tight text-[var(--ui-text)]">
+                                <div className="mt-1 line-clamp-1 text-xs font-semibold leading-tight text-[var(--ui-text)]">
                                   {group.shifts.length} trabajadores
                                 </div>
                                 <div className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-[var(--ui-muted)]">
@@ -875,8 +883,8 @@ export function WeeklySchedulePlanner({
                               </>
                             ) : (
                               <>
-                                <div className="mt-1.5 line-clamp-2 text-xs font-semibold leading-tight text-[var(--ui-text)]">
-                                  {getEmployeeLabel(employeeById.get(firstShift.employee_id) ?? {
+                                <div className="mt-1 line-clamp-2 text-xs font-semibold leading-tight text-[var(--ui-text)]">
+                                  {getEmployeeShortLabel(employeeById.get(firstShift.employee_id) ?? {
                                     id: firstShift.employee_id,
                                     full_name: null,
                                     alias: null,
@@ -884,7 +892,7 @@ export function WeeklySchedulePlanner({
                                   })}
                                 </div>
                                 <div className="mt-0.5 text-[11px] leading-tight text-[var(--ui-muted)]">
-                                  {employeeById.get(firstShift.employee_id)?.role ?? "Sin rol"}
+                                  {firstShift.start_time.slice(0, 5)} - {firstShift.end_time.slice(0, 5)}
                                 </div>
                               </>
                             )}
@@ -900,7 +908,7 @@ export function WeeklySchedulePlanner({
         </div>
       </div>
 
-      <div className="space-y-4 xl:sticky xl:top-24">
+      <div className="space-y-4 2xl:sticky 2xl:top-24">
         {selectionMode ? (
           <div className="ui-panel space-y-4">
             <div className="space-y-1">
