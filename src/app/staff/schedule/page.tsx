@@ -176,6 +176,8 @@ type AreaVisual = {
   shiftClass: string;
 };
 
+const AREA_ORDER = ["Caja", "Servicio", "Barra", "Cocina", "General"] as const;
+
 function getAreaVisualFromRole(role: string | null | undefined): AreaVisual {
   const normalized = String(role ?? "")
     .normalize("NFD")
@@ -1052,6 +1054,25 @@ export default async function StaffSchedulePage({
   const selectedShiftEmployee = selectedShift
     ? employees.find((employee) => employee.id === selectedShift.employee_id) ?? null
     : null;
+  const employeesGroupedByArea = (() => {
+    const groups = new Map<string, EmployeeRow[]>();
+    for (const employee of employees) {
+      const areaLabel = getAreaVisualFromRole(employee.role).label;
+      const current = groups.get(areaLabel) ?? [];
+      current.push(employee);
+      groups.set(areaLabel, current);
+    }
+    for (const rows of groups.values()) {
+      rows.sort((a, b) =>
+        (a.full_name ?? a.alias ?? a.id).localeCompare(b.full_name ?? b.alias ?? b.id, "es"),
+      );
+    }
+    return AREA_ORDER.map((label) => ({
+      label,
+      employees: groups.get(label) ?? [],
+      visual: getAreaVisualFromRole(label),
+    })).filter((group) => group.employees.length > 0);
+  })();
 
   return (
     <div className="space-y-6">
@@ -1359,62 +1380,72 @@ export default async function StaffSchedulePage({
                     </tr>
                   </thead>
                   <tbody>
-                    {employees.map((employee) => {
-                      const employeeName = employee.full_name ?? employee.alias ?? employee.id;
-                      const weekMinutes = totalsByEmployee[employee.id]?.weekMinutes ?? 0;
-                      const areaVisual = getAreaVisualFromRole(employee.role);
-                      return (
-                        <tr key={employee.id} className={`align-top ${areaVisual.rowClass}`}>
-                          <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5">
-                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${areaVisual.chipClass}`}>
-                              {areaVisual.label}
-                            </span>
-                          </td>
-                          <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5 font-semibold text-[var(--ui-text)]">
-                            {employeeName}
-                          </td>
-                          <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5 text-[var(--ui-muted)]">
-                            {employee.role ?? "Sin rol"}
-                          </td>
-                          {weekDays.map((day) => {
-                            const dayRows = shiftsByEmployeeDay.get(`${employee.id}__${day.iso}`) ?? [];
-                            return (
-                              <td key={`${employee.id}-${day.iso}`} className="border-b border-r border-[var(--ui-border)] px-2.5 py-2 align-top">
-                                {dayRows.length === 0 ? (
-                                  <span className="text-xs text-[var(--ui-muted)]">—</span>
-                                ) : (
-                                  <div className="space-y-1.5">
-                                    {dayRows.map((shift) => (
-                                      <Link
-                                        key={shift.id}
-                                        href={appendReturnParams(returnTo, { edit_shift: shift.id })}
-                                        className={`block w-full rounded-lg border px-2 py-1.5 no-underline ${areaVisual.shiftClass} ${
-                                          shift.published_at ? "ring-1 ring-emerald-300/70" : "ring-1 ring-amber-300/70"
-                                        } ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
-                                        title={shift.notes ?? ""}
-                                      >
-                                        <div className="text-xs font-semibold text-[var(--ui-text)]">
-                                          {formatShiftRange(shift.start_time, shift.end_time)}
-                                        </div>
-                                        <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-[var(--ui-muted)]">
-                                          <span>{getShiftStatusLabel(shift.status)}</span>
-                                          <span>{formatHoursCompact(getShiftMinutes(shift))}</span>
-                                        </div>
-                                      </Link>
-                                    ))}
-                                  </div>
-                                )}
-                              </td>
-                            );
-                          })}
-                          <td className="border-b border-[var(--ui-border)] px-3 py-2.5">
-                            <span className="inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-xs font-semibold text-[var(--ui-text)]">
-                              {formatHoursCompact(weekMinutes)}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {employeesGroupedByArea.flatMap((group) => [
+                      <tr key={`area-${group.label}`} className={group.visual.rowClass}>
+                        <td
+                          colSpan={weekDays.length + 4}
+                          className="border-b border-t border-[var(--ui-border)] px-3 py-2.5 text-sm font-bold uppercase tracking-wide text-[var(--ui-text)]"
+                        >
+                          {group.label}
+                        </td>
+                      </tr>,
+                      ...group.employees.map((employee) => {
+                        const employeeName = employee.full_name ?? employee.alias ?? employee.id;
+                        const weekMinutes = totalsByEmployee[employee.id]?.weekMinutes ?? 0;
+                        const areaVisual = getAreaVisualFromRole(employee.role);
+                        return (
+                          <tr key={employee.id} className={`align-top ${areaVisual.rowClass}`}>
+                            <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5">
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${areaVisual.chipClass}`}>
+                                {areaVisual.label}
+                              </span>
+                            </td>
+                            <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5 font-semibold text-[var(--ui-text)]">
+                              {employeeName}
+                            </td>
+                            <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5 text-[var(--ui-muted)]">
+                              {employee.role ?? "Sin rol"}
+                            </td>
+                            {weekDays.map((day) => {
+                              const dayRows = shiftsByEmployeeDay.get(`${employee.id}__${day.iso}`) ?? [];
+                              return (
+                                <td key={`${employee.id}-${day.iso}`} className="border-b border-r border-[var(--ui-border)] px-2.5 py-2 align-top">
+                                  {dayRows.length === 0 ? (
+                                    <span className="text-xs text-[var(--ui-muted)]">—</span>
+                                  ) : (
+                                    <div className="space-y-1.5">
+                                      {dayRows.map((shift) => (
+                                        <Link
+                                          key={shift.id}
+                                          href={appendReturnParams(returnTo, { edit_shift: shift.id })}
+                                          className={`block w-full rounded-lg border px-2 py-1.5 no-underline ${areaVisual.shiftClass} ${
+                                            shift.published_at ? "ring-1 ring-emerald-300/70" : "ring-1 ring-amber-300/70"
+                                          } ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
+                                          title={shift.notes ?? ""}
+                                        >
+                                          <div className="text-xs font-semibold text-[var(--ui-text)]">
+                                            {formatShiftRange(shift.start_time, shift.end_time)}
+                                          </div>
+                                          <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-[var(--ui-muted)]">
+                                            <span>{getShiftStatusLabel(shift.status)}</span>
+                                            <span>{formatHoursCompact(getShiftMinutes(shift))}</span>
+                                          </div>
+                                        </Link>
+                                      ))}
+                                    </div>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td className="border-b border-[var(--ui-border)] px-3 py-2.5">
+                              <span className="inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-xs font-semibold text-[var(--ui-text)]">
+                                {formatHoursCompact(weekMinutes)}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      }),
+                    ])}
                   </tbody>
                 </table>
               </div>
