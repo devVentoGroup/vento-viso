@@ -142,10 +142,38 @@ function formatWeekLabel(weekStart: Date) {
   })}`;
 }
 
-function buildReturnTo(siteId: string, weekStartIso: string) {
+function formatShiftRange(startTime: string, endTime: string) {
+  return `${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`;
+}
+
+function formatHoursCompact(totalMinutes: number) {
+  const safe = Math.max(0, Math.round(totalMinutes));
+  const hours = safe / 60;
+  if (Number.isInteger(hours)) return `${hours}h`;
+  return `${hours.toFixed(1).replace(".", ",")}h`;
+}
+
+function getShiftStatusLabel(status: string) {
+  switch (status) {
+    case "confirmed":
+      return "Confirmado";
+    case "completed":
+      return "Completado";
+    case "cancelled":
+      return "Cancelado";
+    case "no_show":
+      return "No asistió";
+    case "scheduled":
+    default:
+      return "Programado";
+  }
+}
+
+function buildReturnTo(siteId: string, weekStartIso: string, view?: string) {
   const query = new URLSearchParams();
   if (siteId) query.set("site_id", siteId);
   if (weekStartIso) query.set("week", weekStartIso);
+  if (view && (view === "table" || view === "planner")) query.set("view", view);
   return `/staff/schedule?${query.toString()}`;
 }
 
@@ -782,6 +810,7 @@ export default async function StaffSchedulePage({
   searchParams?: Promise<{
     site_id?: string;
     week?: string;
+    view?: string;
     ok?: string;
     error?: string;
     slot_keep?: string;
@@ -813,12 +842,13 @@ export default async function StaffSchedulePage({
   const weekStart = parseWeekStart(sp.week);
   const weekStartIso = isoDate(weekStart);
   const weekEndIso = isoDate(addDays(weekStart, 6));
+  const viewMode = sp.view === "planner" ? "planner" : "table";
   const monthStartIso = isoDate(startOfMonth(weekStart));
   const monthEndIso = isoDate(endOfMonth(weekStart));
   const fortnightRange = getFortnightRange(weekStart);
   const fortnightStartIso = isoDate(fortnightRange.start);
   const fortnightEndIso = isoDate(fortnightRange.end);
-  const returnTo = buildReturnTo(selectedSiteId, weekStartIso);
+  const returnTo = buildReturnTo(selectedSiteId, weekStartIso, viewMode);
 
   const [directEmployeesRes, linkedEmployeesRes, shiftsRes] = await Promise.all([
     selectedSiteId
@@ -896,10 +926,21 @@ export default async function StaffSchedulePage({
   }
 
   const weekDays = buildWeekDays(weekStart);
+  const weekShifts = (shiftsRes.data ?? []) as ShiftRow[];
+  const shiftsByEmployeeDay = new Map<string, ShiftRow[]>();
+  for (const shift of weekShifts) {
+    const key = `${shift.employee_id}__${shift.shift_date}`;
+    const current = shiftsByEmployeeDay.get(key) ?? [];
+    current.push(shift);
+    shiftsByEmployeeDay.set(key, current);
+  }
+  for (const rows of shiftsByEmployeeDay.values()) {
+    rows.sort((a, b) => a.start_time.localeCompare(b.start_time, "es"));
+  }
   const selectedSite = sites.find((site) => site.id === selectedSiteId) ?? null;
-  const prevWeekHref = buildReturnTo(selectedSiteId, isoDate(addDays(weekStart, -7)));
-  const nextWeekHref = buildReturnTo(selectedSiteId, isoDate(addDays(weekStart, 7)));
-  const currentWeekHref = buildReturnTo(selectedSiteId, isoDate(toMonday(new Date())));
+  const prevWeekHref = buildReturnTo(selectedSiteId, isoDate(addDays(weekStart, -7)), viewMode);
+  const nextWeekHref = buildReturnTo(selectedSiteId, isoDate(addDays(weekStart, 7)), viewMode);
+  const currentWeekHref = buildReturnTo(selectedSiteId, isoDate(toMonday(new Date())), viewMode);
   const initialSlot =
     sp.slot_keep === "1" && sp.slot_day && sp.slot_start && sp.slot_end
       ? {
@@ -962,6 +1003,7 @@ export default async function StaffSchedulePage({
                 ))}
               </select>
               <input type="hidden" name="week" value={weekStartIso} />
+              <input type="hidden" name="view" value={viewMode} />
               <button type="submit" className="ui-btn ui-btn--ghost">
                 Ir
               </button>
@@ -974,6 +1016,28 @@ export default async function StaffSchedulePage({
           </div>
 
           <div className="flex flex-wrap items-end gap-2">
+            <div className="mr-1 flex items-center gap-1 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1">
+              <Link
+                href={buildReturnTo(selectedSiteId, weekStartIso, "table")}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  viewMode === "table"
+                    ? "bg-[var(--ui-brand)] text-white"
+                    : "text-[var(--ui-muted)] hover:bg-[var(--ui-surface-2)]"
+                }`}
+              >
+                Tabla semanal
+              </Link>
+              <Link
+                href={buildReturnTo(selectedSiteId, weekStartIso, "planner")}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  viewMode === "planner"
+                    ? "bg-[var(--ui-brand)] text-white"
+                    : "text-[var(--ui-muted)] hover:bg-[var(--ui-surface-2)]"
+                }`}
+              >
+                Planner
+              </Link>
+            </div>
             <Link href={prevWeekHref} className="ui-btn ui-btn--ghost">
               Semana anterior
             </Link>
@@ -1011,22 +1075,102 @@ export default async function StaffSchedulePage({
           </div>
         </div>
       ) : (
-        <WeeklySchedulePlanner
-          employees={employees}
-          shifts={(shiftsRes.data ?? []) as ShiftRow[]}
-          days={weekDays}
-          siteId={selectedSiteId}
-          returnTo={returnTo}
-          initialSlot={initialSlot}
-          totalsByEmployee={totalsByEmployee}
-          saveAction={saveShiftAction}
-          deleteAction={deleteShiftAction}
-          deleteManyAction={deleteManyShiftAction}
-          assignManyAction={assignManyShiftAction}
-          copyPreviousWeekAction={copyPreviousWeekAction}
-          copyDayToOtherDaysAction={copyDayToOtherDaysAction}
-          publishWeekAction={publishWeekAction}
-        />
+        viewMode === "table" ? (
+          <div className="space-y-3">
+            <div className="ui-panel p-0 overflow-hidden">
+              <div className="overflow-auto ui-scrollbar-subtle">
+                <table className="min-w-[1320px] w-full border-collapse text-sm">
+                  <thead className="bg-[var(--ui-surface-2)] text-xs uppercase tracking-wide text-[var(--ui-muted)]">
+                    <tr>
+                      <th className="border-b border-r border-[var(--ui-border)] px-3 py-3 text-left">Trabajador</th>
+                      <th className="border-b border-r border-[var(--ui-border)] px-3 py-3 text-left">Rol</th>
+                      {weekDays.map((day) => (
+                        <th key={day.iso} className="border-b border-r border-[var(--ui-border)] px-3 py-3 text-left">
+                          <div>{day.label}</div>
+                          <div className="mt-0.5 text-[11px] normal-case tracking-normal">{day.shortLabel}</div>
+                        </th>
+                      ))}
+                      <th className="border-b border-[var(--ui-border)] px-3 py-3 text-left">Total semana</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.map((employee) => {
+                      const employeeName = employee.full_name ?? employee.alias ?? employee.id;
+                      const weekMinutes = totalsByEmployee[employee.id]?.weekMinutes ?? 0;
+                      return (
+                        <tr key={employee.id} className="align-top">
+                          <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5 font-semibold text-[var(--ui-text)]">
+                            {employeeName}
+                          </td>
+                          <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5 text-[var(--ui-muted)]">
+                            {employee.role ?? "Sin rol"}
+                          </td>
+                          {weekDays.map((day) => {
+                            const dayRows = shiftsByEmployeeDay.get(`${employee.id}__${day.iso}`) ?? [];
+                            return (
+                              <td key={`${employee.id}-${day.iso}`} className="border-b border-r border-[var(--ui-border)] px-2.5 py-2 align-top">
+                                {dayRows.length === 0 ? (
+                                  <span className="text-xs text-[var(--ui-muted)]">—</span>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    {dayRows.map((shift) => (
+                                      <div
+                                        key={shift.id}
+                                        className={`rounded-lg border px-2 py-1.5 ${
+                                          shift.published_at
+                                            ? "border-emerald-200 bg-emerald-50"
+                                            : "border-amber-200 bg-amber-50"
+                                        }`}
+                                        title={shift.notes ?? ""}
+                                      >
+                                        <div className="text-xs font-semibold text-[var(--ui-text)]">
+                                          {formatShiftRange(shift.start_time, shift.end_time)}
+                                        </div>
+                                        <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-[var(--ui-muted)]">
+                                          <span>{getShiftStatusLabel(shift.status)}</span>
+                                          <span>{formatHoursCompact(getShiftMinutes(shift))}</span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="border-b border-[var(--ui-border)] px-3 py-2.5">
+                            <span className="inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-xs font-semibold text-[var(--ui-text)]">
+                              {formatHoursCompact(weekMinutes)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <p className="text-xs text-[var(--ui-muted)]">
+              Vista tabla para planear rápido equipos grandes. Usa la vista <strong>Planner</strong> para edición detallada por bloque.
+            </p>
+          </div>
+        ) : (
+          <WeeklySchedulePlanner
+            employees={employees}
+            shifts={weekShifts}
+            days={weekDays}
+            siteId={selectedSiteId}
+            returnTo={returnTo}
+            initialSlot={initialSlot}
+            totalsByEmployee={totalsByEmployee}
+            saveAction={saveShiftAction}
+            deleteAction={deleteShiftAction}
+            deleteManyAction={deleteManyShiftAction}
+            assignManyAction={assignManyShiftAction}
+            copyPreviousWeekAction={copyPreviousWeekAction}
+            copyDayToOtherDaysAction={copyDayToOtherDaysAction}
+            publishWeekAction={publishWeekAction}
+          />
+        )
       )}
     </div>
   );
