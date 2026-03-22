@@ -389,6 +389,7 @@ async function saveShiftAction(formData: FormData) {
           quick_keep: keepQuick ? "1" : null,
           quick_employee_id: keepQuick ? requestedEmployeeIds[0] ?? null : null,
           quick_shift_date: keepQuick ? shiftDate : null,
+          edit_shift: null,
         })
       : !shiftId && keepQuick
         ? appendReturnParams(returnTo, {
@@ -399,6 +400,7 @@ async function saveShiftAction(formData: FormData) {
             quick_keep: "1",
             quick_employee_id: requestedEmployeeIds[0] ?? null,
             quick_shift_date: shiftDate,
+            edit_shift: null,
           })
         : appendReturnParams(returnTo, {
             slot_keep: null,
@@ -408,6 +410,7 @@ async function saveShiftAction(formData: FormData) {
             quick_keep: null,
             quick_employee_id: null,
             quick_shift_date: null,
+            edit_shift: null,
           });
   redirect(`${nextReturnTo}&ok=${encodeURIComponent(successCode)}`);
 }
@@ -888,6 +891,7 @@ export default async function StaffSchedulePage({
     site_id?: string;
     week?: string;
     view?: string;
+    edit_shift?: string;
     ok?: string;
     error?: string;
     quick_keep?: string;
@@ -923,12 +927,14 @@ export default async function StaffSchedulePage({
   const weekStartIso = isoDate(weekStart);
   const weekEndIso = isoDate(addDays(weekStart, 6));
   const viewMode = sp.view === "planner" ? "planner" : "table";
+  const editShiftId = safeDecode(sp.edit_shift);
   const monthStartIso = isoDate(startOfMonth(weekStart));
   const monthEndIso = isoDate(endOfMonth(weekStart));
   const fortnightRange = getFortnightRange(weekStart);
   const fortnightStartIso = isoDate(fortnightRange.start);
   const fortnightEndIso = isoDate(fortnightRange.end);
   const returnTo = buildReturnTo(selectedSiteId, weekStartIso, viewMode);
+  const returnToWithoutEdit = appendReturnParams(returnTo, { edit_shift: null });
 
   const [directEmployeesRes, linkedEmployeesRes, shiftsRes] = await Promise.all([
     selectedSiteId
@@ -1039,6 +1045,13 @@ export default async function StaffSchedulePage({
     if (!candidate) return weekDays[0]?.iso ?? "";
     return weekDays.some((day) => day.iso === candidate) ? candidate : weekDays[0]?.iso ?? "";
   })();
+  const selectedShift =
+    editShiftId && viewMode === "table"
+      ? weekShifts.find((shift) => shift.id === editShiftId) ?? null
+      : null;
+  const selectedShiftEmployee = selectedShift
+    ? employees.find((employee) => employee.id === selectedShift.employee_id) ?? null
+    : null;
 
   return (
     <div className="space-y-6">
@@ -1167,6 +1180,107 @@ export default async function StaffSchedulePage({
       ) : (
         viewMode === "table" ? (
           <div className="space-y-3">
+            {selectedShift ? (
+              <div className="ui-panel">
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="ui-h3">Editar turno seleccionado</div>
+                    <p className="text-xs text-[var(--ui-muted)]">
+                      {selectedShiftEmployee?.full_name ?? selectedShiftEmployee?.alias ?? selectedShift.employee_id} ·{" "}
+                      {selectedShift.shift_date} · {formatShiftRange(selectedShift.start_time, selectedShift.end_time)}
+                    </p>
+                  </div>
+                  <Link href={returnToWithoutEdit} className="ui-btn ui-btn--ghost ui-btn--sm">
+                    Cerrar edición
+                  </Link>
+                </div>
+                <form action={saveShiftAction} className="grid gap-3 md:grid-cols-7">
+                  <input type="hidden" name="shift_id" value={selectedShift.id} />
+                  <input type="hidden" name="site_id" value={selectedSiteId} />
+                  <input type="hidden" name="return_to" value={returnToWithoutEdit} />
+
+                  <label className="flex flex-col gap-1 md:col-span-2">
+                    <span className="ui-label">Trabajador</span>
+                    <select name="employee_id" className="ui-input" required defaultValue={selectedShift.employee_id}>
+                      {employees.map((employee) => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.full_name ?? employee.alias ?? employee.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="ui-label">Día</span>
+                    <input
+                      name="shift_date"
+                      type="date"
+                      className="ui-input"
+                      required
+                      defaultValue={selectedShift.shift_date}
+                      min={weekDays[0]?.iso ?? undefined}
+                      max={weekDays[6]?.iso ?? undefined}
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="ui-label">Inicio</span>
+                    <input
+                      name="start_time"
+                      type="time"
+                      className="ui-input"
+                      required
+                      defaultValue={selectedShift.start_time.slice(0, 5)}
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="ui-label">Fin</span>
+                    <input
+                      name="end_time"
+                      type="time"
+                      className="ui-input"
+                      required
+                      defaultValue={selectedShift.end_time.slice(0, 5)}
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="ui-label">Descanso (min)</span>
+                    <input
+                      name="break_minutes"
+                      type="number"
+                      min={0}
+                      className="ui-input"
+                      defaultValue={selectedShift.break_minutes ?? 0}
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="ui-label">Estado</span>
+                    <select name="status" className="ui-input" defaultValue={selectedShift.status}>
+                      <option value="scheduled">Programado</option>
+                      <option value="confirmed">Confirmado</option>
+                      <option value="completed">Completado</option>
+                      <option value="cancelled">Cancelado</option>
+                      <option value="no_show">No asistió</option>
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-1 md:col-span-6">
+                    <span className="ui-label">Nota</span>
+                    <input name="notes" className="ui-input" defaultValue={selectedShift.notes ?? ""} />
+                  </label>
+
+                  <div className="flex items-end md:col-span-1">
+                    <button type="submit" className="ui-btn ui-btn--brand w-full">
+                      Guardar cambios
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : null}
+
             <div className="ui-panel">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -1178,7 +1292,7 @@ export default async function StaffSchedulePage({
               </div>
               <form action={saveShiftAction} className="grid gap-3 md:grid-cols-6">
                 <input type="hidden" name="site_id" value={selectedSiteId} />
-                <input type="hidden" name="return_to" value={returnTo} />
+                <input type="hidden" name="return_to" value={returnToWithoutEdit} />
                 <input type="hidden" name="break_minutes" value="0" />
                 <input type="hidden" name="status" value="scheduled" />
                 <input type="hidden" name="notes" value="" />
@@ -1271,11 +1385,12 @@ export default async function StaffSchedulePage({
                                 ) : (
                                   <div className="space-y-1.5">
                                     {dayRows.map((shift) => (
-                                      <div
+                                      <Link
                                         key={shift.id}
+                                        href={appendReturnParams(returnTo, { edit_shift: shift.id })}
                                         className={`rounded-lg border px-2 py-1.5 ${areaVisual.shiftClass} ${
                                           shift.published_at ? "ring-1 ring-emerald-300/70" : "ring-1 ring-amber-300/70"
-                                        }`}
+                                        } ${selectedShift?.id === shift.id ? "ring-2 ring-[var(--ui-brand)]" : ""}`}
                                         title={shift.notes ?? ""}
                                       >
                                         <div className="text-xs font-semibold text-[var(--ui-text)]">
@@ -1285,7 +1400,7 @@ export default async function StaffSchedulePage({
                                           <span>{getShiftStatusLabel(shift.status)}</span>
                                           <span>{formatHoursCompact(getShiftMinutes(shift))}</span>
                                         </div>
-                                      </div>
+                                      </Link>
                                     ))}
                                   </div>
                                 )}
