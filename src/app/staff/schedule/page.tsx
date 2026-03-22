@@ -275,6 +275,7 @@ async function saveShiftAction(formData: FormData) {
   const endTime = asText(formData.get("end_time"));
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
   const keepSlot = asText(formData.get("keep_slot")) === "1";
+  const keepQuick = asText(formData.get("keep_quick")) === "1";
   const slotDay = asText(formData.get("slot_day")) || shiftDate;
   const slotStart = asText(formData.get("slot_start")) || startTime;
   const slotEnd = asText(formData.get("slot_end")) || endTime;
@@ -385,13 +386,29 @@ async function saveShiftAction(formData: FormData) {
           slot_day: slotDay,
           slot_start: slotStart,
           slot_end: slotEnd,
+          quick_keep: keepQuick ? "1" : null,
+          quick_employee_id: keepQuick ? requestedEmployeeIds[0] ?? null : null,
+          quick_shift_date: keepQuick ? shiftDate : null,
         })
-      : appendReturnParams(returnTo, {
-          slot_keep: null,
-          slot_day: null,
-          slot_start: null,
-          slot_end: null,
-        });
+      : !shiftId && keepQuick
+        ? appendReturnParams(returnTo, {
+            slot_keep: null,
+            slot_day: null,
+            slot_start: null,
+            slot_end: null,
+            quick_keep: "1",
+            quick_employee_id: requestedEmployeeIds[0] ?? null,
+            quick_shift_date: shiftDate,
+          })
+        : appendReturnParams(returnTo, {
+            slot_keep: null,
+            slot_day: null,
+            slot_start: null,
+            slot_end: null,
+            quick_keep: null,
+            quick_employee_id: null,
+            quick_shift_date: null,
+          });
   redirect(`${nextReturnTo}&ok=${encodeURIComponent(successCode)}`);
 }
 
@@ -873,6 +890,9 @@ export default async function StaffSchedulePage({
     view?: string;
     ok?: string;
     error?: string;
+    quick_keep?: string;
+    quick_employee_id?: string;
+    quick_shift_date?: string;
     slot_keep?: string;
     slot_day?: string;
     slot_start?: string;
@@ -1009,6 +1029,16 @@ export default async function StaffSchedulePage({
           endTime: safeDecode(sp.slot_end),
         }
       : null;
+  const quickEmployeeId = (() => {
+    const candidate = safeDecode(sp.quick_employee_id);
+    if (!candidate) return "";
+    return employees.some((employee) => employee.id === candidate) ? candidate : "";
+  })();
+  const quickShiftDate = (() => {
+    const candidate = safeDecode(sp.quick_shift_date);
+    if (!candidate) return weekDays[0]?.iso ?? "";
+    return weekDays.some((day) => day.iso === candidate) ? candidate : weekDays[0]?.iso ?? "";
+  })();
 
   return (
     <div className="space-y-6">
@@ -1137,6 +1167,66 @@ export default async function StaffSchedulePage({
       ) : (
         viewMode === "table" ? (
           <div className="space-y-3">
+            <div className="ui-panel">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="ui-h3">Agregar turno por horas</div>
+                  <p className="text-xs text-[var(--ui-muted)]">
+                    Flujo rápido: eliges persona, día y rango horario. Para turno partido crea dos filas.
+                  </p>
+                </div>
+              </div>
+              <form action={saveShiftAction} className="grid gap-3 md:grid-cols-6">
+                <input type="hidden" name="site_id" value={selectedSiteId} />
+                <input type="hidden" name="return_to" value={returnTo} />
+                <input type="hidden" name="break_minutes" value="0" />
+                <input type="hidden" name="status" value="scheduled" />
+                <input type="hidden" name="notes" value="" />
+                <input type="hidden" name="keep_quick" value="1" />
+
+                <label className="flex flex-col gap-1 md:col-span-2">
+                  <span className="ui-label">Trabajador</span>
+                  <select name="employee_id" className="ui-input" required defaultValue={quickEmployeeId}>
+                    <option value="" disabled>Seleccionar</option>
+                    {employees.map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.full_name ?? employee.alias ?? employee.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Día</span>
+                  <input
+                    name="shift_date"
+                    type="date"
+                    className="ui-input"
+                    required
+                    defaultValue={quickShiftDate}
+                    min={weekDays[0]?.iso ?? undefined}
+                    max={weekDays[6]?.iso ?? undefined}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Inicio</span>
+                  <input name="start_time" type="time" className="ui-input" required defaultValue="06:00" />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Fin</span>
+                  <input name="end_time" type="time" className="ui-input" required defaultValue="14:00" />
+                </label>
+
+                <div className="flex items-end">
+                  <button type="submit" className="ui-btn ui-btn--brand w-full">
+                    Guardar turno
+                  </button>
+                </div>
+              </form>
+            </div>
+
             <div className="ui-panel p-0 overflow-hidden">
               <div className="overflow-auto ui-scrollbar-subtle">
                 <table className="min-w-[1320px] w-full border-collapse text-sm">
