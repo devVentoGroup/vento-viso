@@ -12,6 +12,11 @@ type EmployeeSiteRow = {
   is_primary: boolean | null;
 };
 
+function isOperationalSite(site: SiteRow): boolean {
+  const name = String(site.name ?? "").trim().toLowerCase();
+  return name !== "app review (demo)";
+}
+
 export async function VentoShell({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
   const { data: userRes } = await supabase.auth.getUser();
@@ -56,7 +61,10 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
         .select("id,name,site_type")
         .in("id", siteIds)
         .order("name", { ascending: true });
-      sites = (siteRows ?? []) as SiteRow[];
+      sites = ((siteRows ?? []) as SiteRow[]).filter(isOperationalSite);
+      if (activeSiteId && !sites.some((site) => site.id === activeSiteId)) {
+        activeSiteId = sites[0]?.id ?? "";
+      }
     }
   }
 

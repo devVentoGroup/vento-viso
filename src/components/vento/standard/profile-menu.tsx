@@ -14,7 +14,10 @@ type ProfileMenuProps = {
   role?: string;
   email?: string | null;
   sites?: Array<{ id: string; name: string | null }>;
+  activeSiteId?: string;
 };
+
+const SITE_OVERRIDE_COOKIE = "viso_site_override_id";
 
 function initialsFrom(value?: string) {
   const text = (value ?? "").trim();
@@ -24,9 +27,10 @@ function initialsFrom(value?: string) {
   return letters.join("") || "VG";
 }
 
-export function ProfileMenu({ name, role, email, sites }: ProfileMenuProps) {
+export function ProfileMenu({ name, role, email, sites, activeSiteId: baseActiveSiteId }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isRefreshingApp, setIsRefreshingApp] = useState(false);
   const [overrideRole, setOverrideRole] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
@@ -42,7 +46,7 @@ export function ProfileMenu({ name, role, email, sites }: ProfileMenuProps) {
     () => new Map(ROLE_OPTIONS.map((item) => [item.value, item.label])),
     []
   );
-  const activeSiteId = searchParams.get("site_id") ?? "";
+  const activeSiteId = searchParams.get("site_id") ?? baseActiveSiteId ?? "";
 
   const handleSignOut = async () => {
     try {
@@ -65,13 +69,39 @@ export function ProfileMenu({ name, role, email, sites }: ProfileMenuProps) {
     document.cookie = `${ROLE_OVERRIDE_COOKIE}=${value}; path=/; max-age=${maxAge}`;
   };
 
+  const setSiteCookieValue = (value: string | null) => {
+    if (typeof document === "undefined") return;
+    if (!value) {
+      document.cookie = `${SITE_OVERRIDE_COOKIE}=; path=/; max-age=0`;
+      return;
+    }
+    const maxAge = 60 * 60 * 24 * 30;
+    document.cookie = `${SITE_OVERRIDE_COOKIE}=${value}; path=/; max-age=${maxAge}`;
+  };
+
   const handleRoleOverride = (value: string | null) => {
     setOverrideRole(value);
     setCookieValue(value);
     router.refresh();
   };
 
-  const handleSiteChange = (nextSiteId: string) => {
+  const handleSiteChange = async (nextSiteId: string) => {
+    setSiteCookieValue(nextSiteId || null);
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      await supabase.from("employee_settings").upsert(
+        {
+          employee_id: user.id,
+          selected_site_id: nextSiteId || null,
+        },
+        { onConflict: "employee_id" }
+      );
+    }
+
     const params = new URLSearchParams(searchParams.toString());
     if (nextSiteId) {
       params.set("site_id", nextSiteId);
@@ -81,6 +111,55 @@ export function ProfileMenu({ name, role, email, sites }: ProfileMenuProps) {
     const qs = params.toString();
     router.push(qs ? `${pathname}?${qs}` : pathname);
     setOpen(false);
+  };
+
+  const handleRefreshApp = async () => {
+    if (typeof window === "undefined") return;
+    try {
+      setIsRefreshingApp(true);
+      try {
+        window.localStorage.clear();
+      } catch {
+        // ignore storage errors
+      }
+      try {
+        window.sessionStorage.clear();
+      } catch {
+        // ignore storage errors
+      }
+      try {
+        if ("caches" in window) {
+          const cacheKeys = await window.caches.keys();
+          await Promise.all(cacheKeys.map((key) => window.caches.delete(key)));
+        }
+      } catch {
+        // ignore cache API errors
+      }
+      try {
+        if ("indexedDB" in window && "databases" in indexedDB) {
+          const dbs = await (indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> })
+            .databases?.();
+          await Promise.all(
+            (dbs ?? [])
+              .map((db) => db?.name)
+              .filter((name): name is string => Boolean(name))
+              .map(
+                (name) =>
+                  new Promise<void>((resolve) => {
+                    const req = indexedDB.deleteDatabase(name);
+                    req.onsuccess = () => resolve();
+                    req.onerror = () => resolve();
+                    req.onblocked = () => resolve();
+                  })
+              )
+          );
+        }
+      } catch {
+        // ignore indexedDB errors
+      }
+    } finally {
+      window.location.reload();
+    }
   };
 
   useEffect(() => {
@@ -191,6 +270,14 @@ export function ProfileMenu({ name, role, email, sites }: ProfileMenuProps) {
           ) : null}
           <button
             type="button"
+            onClick={handleRefreshApp}
+            disabled={isRefreshingApp || isSigningOut}
+            className="mt-3 inline-flex h-12 w-full items-center justify-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-base font-semibold text-[var(--ui-text)] hover:bg-[var(--ui-surface)] disabled:opacity-60"
+          >
+            {isRefreshingApp ? "Actualizando..." : "Actualizar app (sin cerrar sesión)"}
+          </button>
+          <button
+            type="button"
             onClick={handleSignOut}
             disabled={isSigningOut}
             className="mt-3 inline-flex h-12 w-full items-center justify-center rounded-xl bg-[var(--ui-primary)] px-3 text-base font-semibold text-[var(--ui-on-primary)] hover:bg-[var(--ui-primary-hover)] disabled:opacity-60"
@@ -202,3 +289,4 @@ export function ProfileMenu({ name, role, email, sites }: ProfileMenuProps) {
     </div>
   );
 }
+
