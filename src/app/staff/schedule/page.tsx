@@ -1388,9 +1388,9 @@ export default async function StaffSchedulePage({
                                       <Link
                                         key={shift.id}
                                         href={appendReturnParams(returnTo, { edit_shift: shift.id })}
-                                        className={`rounded-lg border px-2 py-1.5 ${areaVisual.shiftClass} ${
+                                        className={`block w-full rounded-lg border px-2 py-1.5 no-underline ${areaVisual.shiftClass} ${
                                           shift.published_at ? "ring-1 ring-emerald-300/70" : "ring-1 ring-amber-300/70"
-                                        } ${selectedShift?.id === shift.id ? "ring-2 ring-[var(--ui-brand)]" : ""}`}
+                                        } ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
                                         title={shift.notes ?? ""}
                                       >
                                         <div className="text-xs font-semibold text-[var(--ui-text)]">
