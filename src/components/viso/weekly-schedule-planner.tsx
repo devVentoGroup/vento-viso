@@ -40,6 +40,7 @@ type WeeklySchedulePlannerProps = {
   days: PlannerDay[];
   siteId: string;
   returnTo: string;
+  visibleStatusByShiftId?: Record<string, string>;
   initialSlot?: {
     dayIso: string;
     startTime: string;
@@ -338,6 +339,24 @@ function getGroupPublishedClass(group: PlannerShiftGroup) {
   return allPublished ? "ui-shift--block-published" : "ui-shift--block-draft";
 }
 
+function getStatusBadgeClass(status: string) {
+  switch (status) {
+    case "Borrador":
+      return "bg-amber-500/25 text-amber-800 ring-1 ring-amber-400/50";
+    case "Con retraso":
+      return "bg-orange-500/25 text-orange-800";
+    case "No asistió":
+      return "bg-rose-500/25 text-rose-800";
+    case "Asistió":
+      return "bg-sky-500/25 text-sky-800";
+    case "Cancelado":
+      return "bg-rose-500/25 text-rose-800";
+    case "Programado":
+    default:
+      return "bg-emerald-500/25 text-emerald-800";
+  }
+}
+
 function summarizeGroupEmployees(
   group: PlannerShiftGroup,
   employeeById: Map<string, PlannerEmployee>,
@@ -360,6 +379,7 @@ export function WeeklySchedulePlanner({
   days,
   siteId,
   returnTo,
+  visibleStatusByShiftId,
   initialSlot,
   totalsByEmployee,
   saveAction,
@@ -401,6 +421,10 @@ export function WeeklySchedulePlanner({
   const employeeById = useMemo(
     () => new Map(employees.map((employee) => [employee.id, employee])),
     [employees],
+  );
+  const getVisibleStatus = useCallback(
+    (shift: PlannerShift) => visibleStatusByShiftId?.[shift.id] ?? (shift.published_at ? "Programado" : "Borrador"),
+    [visibleStatusByShiftId],
   );
 
   const groupedShiftsByDay = useMemo(() => {
@@ -844,6 +868,14 @@ export function WeeklySchedulePlanner({
                               </div>
                               <div className="flex flex-wrap gap-1">
                                 {(() => {
+                                  if (group.shifts.length === 1) {
+                                    const status = getVisibleStatus(group.shifts[0]);
+                                    return (
+                                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getStatusBadgeClass(status)}`}>
+                                        {status}
+                                      </span>
+                                    );
+                                  }
                                   const { publishedCount, draftCount } = getGroupStatusCounts(group);
                                   if (draftCount === 0) {
                                     return (
@@ -1423,7 +1455,7 @@ export function WeeklySchedulePlanner({
                       {getEmployeeLabel(employee)}
                     </p>
                     <p className="mt-1 text-xs text-[var(--ui-muted)]">
-                      {employee.role ?? "Sin rol"} · {shift.published_at ? "Publicado" : "Borrador"}
+                      {employee.role ?? "Sin rol"} · {getVisibleStatus(shift)}
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
@@ -1463,6 +1495,7 @@ export function WeeklySchedulePlanner({
                 <p className="ui-body-muted">
                   {getDayLabel(selection.shift.shift_date)} · {selection.shift.start_time.slice(0, 5)}–{selection.shift.end_time.slice(0, 5)}
                 </p>
+                <p className="ui-caption">{getVisibleStatus(selection.shift)}</p>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={startEditingShift} className="ui-btn ui-btn--ghost">
                     Editar

@@ -44,6 +44,19 @@ type ShiftRow = {
   published_at: string | null;
 };
 
+type AttendanceLogRow = {
+  shift_id: string | null;
+  employee_id: string;
+  site_id: string;
+  action: "check_in" | "check_out";
+  occurred_at: string;
+};
+
+type ShiftAttendanceInfo = {
+  checkInAt: string | null;
+  checkOutAt: string | null;
+};
+
 type EmployeeTotals = {
   weekMinutes: number;
   fortnightMinutes: number;
@@ -153,20 +166,77 @@ function formatHoursCompact(totalMinutes: number) {
   return `${hours.toFixed(1).replace(".", ",")}h`;
 }
 
-function getShiftStatusLabel(status: string) {
-  switch (status) {
-    case "confirmed":
-      return "Confirmado";
-    case "completed":
-      return "Completado";
-    case "cancelled":
-      return "Cancelado";
-    case "no_show":
-      return "No asistió";
-    case "scheduled":
-    default:
-      return "Programado";
+const BOGOTA_TIME_ZONE = "America/Bogota";
+
+function getBogotaDateTimeParts(dateInput: Date | string) {
+  const parsed = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+  if (Number.isNaN(parsed.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BOGOTA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(parsed);
+  const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const year = lookup.year;
+  const month = lookup.month;
+  const day = lookup.day;
+  const hour = Number(lookup.hour ?? "0");
+  const minute = Number(lookup.minute ?? "0");
+  if (!year || !month || !day) return null;
+  return {
+    dateIso: `${year}-${month}-${day}`,
+    minutes: hour * 60 + minute,
+  };
+}
+
+function parseTimeToMinutes(value: string) {
+  const [hours, minutes] = value.slice(0, 5).split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function hasShiftEnded(shift: ShiftRow, nowDateIso: string, nowMinutes: number) {
+  if (nowDateIso > shift.shift_date) return true;
+  if (nowDateIso < shift.shift_date) return false;
+  return nowMinutes > parseTimeToMinutes(shift.end_time);
+}
+
+function isLateCheckIn(
+  shift: ShiftRow,
+  checkInAt: string,
+  lateToleranceMinutes: number,
+) {
+  const checkInParts = getBogotaDateTimeParts(checkInAt);
+  if (!checkInParts) return false;
+  if (checkInParts.dateIso > shift.shift_date) return true;
+  if (checkInParts.dateIso < shift.shift_date) return false;
+  const toleranceLimit = parseTimeToMinutes(shift.start_time) + Math.max(0, lateToleranceMinutes);
+  return checkInParts.minutes > toleranceLimit;
+}
+
+function getVisibleShiftStatus(
+  shift: ShiftRow,
+  attendance: ShiftAttendanceInfo | undefined,
+  nowDateIso: string,
+  nowMinutes: number,
+  lateToleranceMinutes: number,
+) {
+  if (!shift.published_at) return "Borrador";
+  if (shift.status === "cancelled") return "Cancelado";
+  if (shift.status === "no_show") return "No asistió";
+  if (shift.status === "completed") return "Asistió";
+
+  if (attendance?.checkInAt) {
+    return isLateCheckIn(shift, attendance.checkInAt, lateToleranceMinutes)
+      ? "Con retraso"
+      : "Asistió";
   }
+
+  if (hasShiftEnded(shift, nowDateIso, nowMinutes)) return "No asistió";
+  return "Programado";
 }
 
 type AreaVisual = {
@@ -694,7 +764,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent("Elige el día, la persona y al menos un día destino.")}`);
   }
 
-  let query = supabase
+  const query = supabase
     .from("employee_shifts")
     .select("employee_id,site_id,start_time,end_time,break_minutes,status,notes")
     .eq("site_id", siteId)
@@ -1015,6 +1085,79 @@ export default async function StaffSchedulePage({
 
   const weekDays = buildWeekDays(weekStart);
   const weekShifts = (shiftsRes.data ?? []) as ShiftRow[];
+  const { data: attendancePolicyRow } = await supabase
+    .from("attendance_policy")
+    .select("late_tolerance_minutes")
+    .limit(1)
+    .maybeSingle();
+  const lateToleranceMinutes = Math.max(
+    0,
+    Number((attendancePolicyRow as { late_tolerance_minutes?: number } | null)?.late_tolerance_minutes ?? 15),
+  );
+
+  const shiftAttendanceById = new Map<string, ShiftAttendanceInfo>();
+  if (selectedSiteId && weekShifts.length > 0) {
+    const employeeIdsSet = new Set(weekShifts.map((shift) => shift.employee_id));
+    const shiftIds = weekShifts.map((shift) => shift.id);
+    const dayBuckets = new Map<string, ShiftAttendanceInfo>();
+    const nextWeekStartIso = isoDate(addDays(weekStart, 7));
+    const { data: attendanceLogsData } = await supabase
+      .from("attendance_logs")
+      .select("shift_id,employee_id,site_id,action,occurred_at")
+      .eq("site_id", selectedSiteId)
+      .in("employee_id", [...employeeIdsSet])
+      .in("action", ["check_in", "check_out"])
+      .gte("occurred_at", `${weekStartIso}T00:00:00-05:00`)
+      .lt("occurred_at", `${nextWeekStartIso}T00:00:00-05:00`)
+      .order("occurred_at", { ascending: true });
+
+    const shiftIdsSet = new Set(shiftIds);
+    for (const row of (attendanceLogsData ?? []) as AttendanceLogRow[]) {
+      if (row.shift_id && shiftIdsSet.has(row.shift_id)) {
+        const current = shiftAttendanceById.get(row.shift_id) ?? { checkInAt: null, checkOutAt: null };
+        if (row.action === "check_in" && (!current.checkInAt || row.occurred_at < current.checkInAt)) {
+          current.checkInAt = row.occurred_at;
+        }
+        if (row.action === "check_out" && (!current.checkOutAt || row.occurred_at > current.checkOutAt)) {
+          current.checkOutAt = row.occurred_at;
+        }
+        shiftAttendanceById.set(row.shift_id, current);
+      }
+
+      const occurred = getBogotaDateTimeParts(row.occurred_at);
+      if (!occurred) continue;
+      const dayKey = `${row.employee_id}__${row.site_id}__${occurred.dateIso}`;
+      const dayInfo = dayBuckets.get(dayKey) ?? { checkInAt: null, checkOutAt: null };
+      if (row.action === "check_in" && (!dayInfo.checkInAt || row.occurred_at < dayInfo.checkInAt)) {
+        dayInfo.checkInAt = row.occurred_at;
+      }
+      if (row.action === "check_out" && (!dayInfo.checkOutAt || row.occurred_at > dayInfo.checkOutAt)) {
+        dayInfo.checkOutAt = row.occurred_at;
+      }
+      dayBuckets.set(dayKey, dayInfo);
+    }
+
+    for (const shift of weekShifts) {
+      if (shiftAttendanceById.has(shift.id)) continue;
+      const dayKey = `${shift.employee_id}__${shift.site_id}__${shift.shift_date}`;
+      const dayInfo = dayBuckets.get(dayKey);
+      if (dayInfo) shiftAttendanceById.set(shift.id, dayInfo);
+    }
+  }
+  const nowBogota = getBogotaDateTimeParts(new Date()) ?? {
+    dateIso: isoDate(new Date()),
+    minutes: new Date().getHours() * 60 + new Date().getMinutes(),
+  };
+  const visibleStatusByShiftId: Record<string, string> = {};
+  for (const shift of weekShifts) {
+    visibleStatusByShiftId[shift.id] = getVisibleShiftStatus(
+      shift,
+      shiftAttendanceById.get(shift.id),
+      nowBogota.dateIso,
+      nowBogota.minutes,
+      lateToleranceMinutes,
+    );
+  }
   const shiftsByEmployeeDay = new Map<string, ShiftRow[]>();
   for (const shift of weekShifts) {
     const key = `${shift.employee_id}__${shift.shift_date}`;
@@ -1427,7 +1570,7 @@ export default async function StaffSchedulePage({
                                             {formatShiftRange(shift.start_time, shift.end_time)}
                                           </div>
                                           <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-[var(--ui-muted)]">
-                                            <span>{getShiftStatusLabel(shift.status)}</span>
+                                            <span>{visibleStatusByShiftId[shift.id] ?? "Programado"}</span>
                                             <span>{formatHoursCompact(getShiftMinutes(shift))}</span>
                                           </div>
                                         </Link>
@@ -1463,6 +1606,7 @@ export default async function StaffSchedulePage({
             returnTo={returnTo}
             initialSlot={initialSlot}
             totalsByEmployee={totalsByEmployee}
+            visibleStatusByShiftId={visibleStatusByShiftId}
             saveAction={saveShiftAction}
             deleteAction={deleteShiftAction}
             deleteManyAction={deleteManyShiftAction}
