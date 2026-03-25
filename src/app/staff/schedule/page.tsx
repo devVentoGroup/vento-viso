@@ -1246,7 +1246,7 @@ export default async function StaffSchedulePage({
       ) : null}
 
       <div className="ui-panel space-y-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(280px,1fr)_220px_220px]">
+        <div className="grid gap-3 xl:grid-cols-[minmax(320px,1fr)_minmax(280px,360px)]">
           <div>
             <div className="ui-caption">Sede actual</div>
             <div className="mt-1 text-lg font-semibold text-[var(--ui-text)]">
@@ -1277,12 +1277,7 @@ export default async function StaffSchedulePage({
             </div>
           </form>
 
-          <div>
-            <div className="ui-caption">Semana visible</div>
-            <div className="mt-1 text-lg font-semibold text-[var(--ui-text)]">{formatWeekLabel(weekStart)}</div>
-          </div>
-
-          <div className="flex flex-wrap items-end gap-2 xl:col-span-3 xl:justify-end">
+          <div className="flex flex-wrap items-center gap-2 xl:col-span-2">
             <div className="mr-1 flex items-center gap-1 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1">
               <Link
                 href={buildReturnTo(selectedSiteId, weekStartIso, "table")}
@@ -1305,23 +1300,38 @@ export default async function StaffSchedulePage({
                 Planner
               </Link>
             </div>
-            <Link href={prevWeekHref} className="ui-btn ui-btn--ghost">
-              Semana anterior
-            </Link>
-            <Link href={currentWeekHref} className="ui-btn ui-btn--ghost">
-              Esta semana
-            </Link>
-            <Link href={nextWeekHref} className="ui-btn ui-btn--ghost">
-              Semana siguiente
-            </Link>
-            <form action={publishWeekAction}>
-              <input type="hidden" name="site_id" value={selectedSiteId} />
-              <input type="hidden" name="week_start" value={weekStartIso} />
-              <input type="hidden" name="return_to" value={returnTo} />
-              <button type="submit" className="ui-btn ui-btn--brand">
-                Publicar semana
-              </button>
-            </form>
+            <div className="flex flex-wrap items-center gap-2 xl:ml-auto">
+              <div className="flex items-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1">
+                <Link
+                  href={prevWeekHref}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-lg font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface-2)]"
+                  aria-label="Semana anterior"
+                >
+                  ‹
+                </Link>
+                <div className="min-w-[220px] px-2 text-center text-sm font-semibold text-[var(--ui-text)]">
+                  {formatWeekLabel(weekStart)}
+                </div>
+                <Link
+                  href={nextWeekHref}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-lg font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface-2)]"
+                  aria-label="Semana siguiente"
+                >
+                  ›
+                </Link>
+              </div>
+              <Link href={currentWeekHref} className="ui-btn ui-btn--ghost whitespace-nowrap">
+                Hoy
+              </Link>
+              <form action={publishWeekAction}>
+                <input type="hidden" name="site_id" value={selectedSiteId} />
+                <input type="hidden" name="week_start" value={weekStartIso} />
+                <input type="hidden" name="return_to" value={returnTo} />
+                <button type="submit" className="ui-btn ui-btn--brand">
+                  Publicar semana
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       </div>
