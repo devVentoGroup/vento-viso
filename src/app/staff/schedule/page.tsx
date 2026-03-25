@@ -1246,7 +1246,7 @@ export default async function StaffSchedulePage({
       ) : null}
 
       <div className="ui-panel space-y-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_220px_auto]">
+        <div className="grid gap-3 xl:grid-cols-[minmax(280px,1fr)_220px_220px]">
           <div>
             <div className="ui-caption">Sede actual</div>
             <div className="mt-1 text-lg font-semibold text-[var(--ui-text)]">
@@ -1282,7 +1282,7 @@ export default async function StaffSchedulePage({
             <div className="mt-1 text-lg font-semibold text-[var(--ui-text)]">{formatWeekLabel(weekStart)}</div>
           </div>
 
-          <div className="flex flex-wrap items-end gap-2">
+          <div className="flex flex-wrap items-end gap-2 xl:col-span-3 xl:justify-end">
             <div className="mr-1 flex items-center gap-1 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1">
               <Link
                 href={buildReturnTo(selectedSiteId, weekStartIso, "table")}

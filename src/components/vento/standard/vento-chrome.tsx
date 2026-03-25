@@ -106,6 +106,12 @@ const NAV_GROUPS: NavGroup[] = [
         icon: "menu",
       },
       {
+        href: "/vacancies",
+        label: "Vacantes",
+        description: "Portal de empleo",
+        icon: "briefcase",
+      },
+      {
         href: "/content-blocks",
         label: "Contenido Pass",
         description: "Textos y bloques de la app",
@@ -115,7 +121,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-type IconName = "dashboard" | "users" | "calendar" | "store" | "sparkles" | "package" | "menu" | "fileText";
+type IconName = "dashboard" | "users" | "calendar" | "store" | "sparkles" | "package" | "menu" | "fileText" | "briefcase";
 
 function Icon({ name }: { name?: IconName }) {
   const common = "none";
@@ -195,6 +201,14 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M16 13H8" />
           <path d="M16 17H8" />
           <path d="M10 9H8" />
+        </svg>
+      );
+    case "briefcase":
+      return (
+        <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
+          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+          <rect x="3" y="6" width="18" height="14" rx="2" />
+          <path d="M3 11h18" />
         </svg>
       );
     default:
@@ -318,7 +332,6 @@ export function VentoChrome({
                 </button>
                 <div className="hidden sm:flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--ui-surface-2)] ring-1 ring-inset ring-[var(--ui-border)]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={`/logos/${APP_ENTITY}.svg`} alt={APP_NAME} className="h-6 w-6" />
                   </div>
                   <div className="flex flex-col leading-tight">
