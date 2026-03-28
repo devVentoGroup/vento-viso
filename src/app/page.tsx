@@ -98,6 +98,14 @@ export default async function VisoHomePage() {
             <div className="ui-title ui-title--accent-teal">Contenido Pass</div>
             <p className="mt-2 ui-body-muted">Textos y bloques de la app Vento Pass.</p>
           </Link>
+          <Link href="/website-cms" className="ui-panel-soft ui-panel-soft--accent-blue block">
+            <div className="ui-title ui-title--accent-blue">Website CMS</div>
+            <p className="mt-2 ui-body-muted">Contenido dinamico de ventogroup.co.</p>
+          </Link>
+          <Link href="/website-cms/venues" className="ui-panel-soft ui-panel-soft--accent-amber block">
+            <div className="ui-title ui-title--accent-amber">Venue Detail CMS</div>
+            <p className="mt-2 ui-body-muted">Hero, gallery y contenido de detalle por restaurante.</p>
+          </Link>
         </div>
       </section>
     </div>

@@ -117,6 +117,12 @@ const NAV_GROUPS: NavGroup[] = [
         description: "Textos y bloques de la app",
         icon: "fileText",
       },
+      {
+        href: "/website-cms",
+        label: "Website CMS",
+        description: "Contenido de ventogroup.co",
+        icon: "fileText",
+      },
     ],
   },
 ];

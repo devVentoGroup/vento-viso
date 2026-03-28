@@ -37,6 +37,7 @@ type ShiftRow = {
   shift_date: string;
   start_time: string;
   end_time: string;
+  show_end_as_close?: boolean | null;
   break_minutes: number | null;
   status: string;
   notes: string | null;
@@ -155,8 +156,14 @@ function formatWeekLabel(weekStart: Date) {
   })}`;
 }
 
-function formatShiftRange(startTime: string, endTime: string) {
-  return `${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`;
+function formatShiftRange(
+  startTime: string,
+  endTime: string,
+  showEndAsClose?: boolean | null,
+) {
+  return showEndAsClose
+    ? `${startTime.slice(0, 5)} - Cierre`
+    : `${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`;
 }
 
 function formatHoursCompact(totalMinutes: number) {
@@ -345,6 +352,7 @@ async function saveShiftAction(formData: FormData) {
   const shiftDate = asText(formData.get("shift_date"));
   const startTime = asText(formData.get("start_time"));
   const endTime = asText(formData.get("end_time"));
+  const showEndAsClose = asText(formData.get("show_end_as_close")) === "1";
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
   const keepSlot = asText(formData.get("keep_slot")) === "1";
   const keepQuick = asText(formData.get("keep_quick")) === "1";
@@ -421,6 +429,7 @@ async function saveShiftAction(formData: FormData) {
     start_time: startTime,
     end_time: endTime,
     break_minutes: Math.max(0, asNumber(formData.get("break_minutes"), 0)),
+    show_end_as_close: showEndAsClose,
     status: asText(formData.get("status")) || "scheduled",
     notes: asText(formData.get("notes")) || null,
     published_at: null,
@@ -566,7 +575,7 @@ async function assignManyShiftAction(formData: FormData) {
 
   const { data: sourceShifts, error: sourceError } = await supabase
     .from("employee_shifts")
-    .select("id,employee_id,shift_date,start_time,end_time,break_minutes,status,notes,site_id,published_at")
+    .select("id,employee_id,shift_date,start_time,end_time,show_end_as_close,break_minutes,status,notes,site_id,published_at")
     .in("id", sourceShiftIds);
 
   if (sourceError) {
@@ -649,6 +658,7 @@ async function assignManyShiftAction(formData: FormData) {
         shift_date: shift.shift_date,
         start_time: shift.start_time,
         end_time: shift.end_time,
+        show_end_as_close: shift.show_end_as_close ?? false,
         break_minutes: shift.break_minutes ?? 0,
         status: shift.status || "scheduled",
         notes: shift.notes ?? null,
@@ -693,7 +703,7 @@ async function copyPreviousWeekAction(formData: FormData) {
 
   const { data: previousRows, error: previousError } = await supabase
     .from("employee_shifts")
-    .select("employee_id,site_id,shift_date,start_time,end_time,break_minutes,status,notes")
+    .select("employee_id,site_id,shift_date,start_time,end_time,show_end_as_close,break_minutes,status,notes")
     .eq("site_id", siteId)
     .gte("shift_date", isoDate(prevStart))
     .lte("shift_date", isoDate(prevEnd));
@@ -708,6 +718,7 @@ async function copyPreviousWeekAction(formData: FormData) {
     shift_date: string;
     start_time: string;
     end_time: string;
+    show_end_as_close?: boolean | null;
     break_minutes: number | null;
     status: string;
     notes: string | null;
@@ -766,7 +777,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
 
   const query = supabase
     .from("employee_shifts")
-    .select("employee_id,site_id,start_time,end_time,break_minutes,status,notes")
+    .select("employee_id,site_id,start_time,end_time,show_end_as_close,break_minutes,status,notes")
     .eq("site_id", siteId)
     .eq("shift_date", sourceDayIso)
     .eq("employee_id", employeeId);
@@ -782,6 +793,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
     site_id: string;
     start_time: string;
     end_time: string;
+    show_end_as_close?: boolean | null;
     break_minutes: number | null;
     status: string;
     notes: string | null;
@@ -798,6 +810,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
       shift_date: shiftDate,
       start_time: row.start_time,
       end_time: row.end_time,
+      show_end_as_close: row.show_end_as_close ?? false,
       break_minutes: row.break_minutes,
       status: row.status,
       notes: row.notes,
@@ -1027,7 +1040,7 @@ export default async function StaffSchedulePage({
     selectedSiteId
       ? supabase
           .from("employee_shifts")
-          .select("id,employee_id,shift_date,start_time,end_time,break_minutes,status,notes,site_id,published_at")
+          .select("id,employee_id,shift_date,start_time,end_time,show_end_as_close,break_minutes,status,notes,site_id,published_at")
           .eq("site_id", selectedSiteId)
           .gte("shift_date", weekStartIso)
           .lte("shift_date", weekEndIso)
@@ -1056,7 +1069,7 @@ export default async function StaffSchedulePage({
   if (employeeIds.length > 0) {
     const { data: monthShiftRows } = await supabase
       .from("employee_shifts")
-      .select("id,employee_id,shift_date,start_time,end_time,break_minutes,status,notes,site_id")
+      .select("id,employee_id,shift_date,start_time,end_time,show_end_as_close,break_minutes,status,notes,site_id")
       .in("employee_id", employeeIds)
       .gte("shift_date", monthStartIso)
       .lte("shift_date", monthEndIso);
@@ -1361,7 +1374,7 @@ export default async function StaffSchedulePage({
                     <div className="ui-h3">Editar turno seleccionado</div>
                     <p className="text-xs text-[var(--ui-muted)]">
                       {selectedShiftEmployee?.full_name ?? selectedShiftEmployee?.alias ?? selectedShift.employee_id} ·{" "}
-                      {selectedShift.shift_date} · {formatShiftRange(selectedShift.start_time, selectedShift.end_time)}
+                      {selectedShift.shift_date} · {formatShiftRange(selectedShift.start_time, selectedShift.end_time, selectedShift.show_end_as_close)}
                     </p>
                   </div>
                   <Link href={returnToWithoutEdit} className="ui-btn ui-btn--ghost ui-btn--sm">
@@ -1446,6 +1459,17 @@ export default async function StaffSchedulePage({
                     <input name="notes" className="ui-input" defaultValue={selectedShift.notes ?? ""} />
                   </label>
 
+                  <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                    <input
+                      type="checkbox"
+                      name="show_end_as_close"
+                      value="1"
+                      defaultChecked={Boolean(selectedShift.show_end_as_close)}
+                      className="rounded border-[var(--ui-border)]"
+                    />
+                    Mostrar la salida como "Cierre" al empleado
+                  </label>
+
                   <div className="flex items-end md:col-span-1">
                     <button type="submit" className="ui-btn ui-btn--brand w-full">
                       Guardar cambios
@@ -1505,6 +1529,16 @@ export default async function StaffSchedulePage({
                 <label className="flex flex-col gap-1">
                   <span className="ui-label">Fin</span>
                   <input name="end_time" type="time" className="ui-input" required defaultValue="14:00" />
+                </label>
+
+                <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                  <input
+                    type="checkbox"
+                    name="show_end_as_close"
+                    value="1"
+                    className="rounded border-[var(--ui-border)]"
+                  />
+                  Mostrar la salida como "Cierre" al empleado
                 </label>
 
                 <div className="flex items-end">
@@ -1577,7 +1611,7 @@ export default async function StaffSchedulePage({
                                           title={shift.notes ?? ""}
                                         >
                                           <div className="text-xs font-semibold text-[var(--ui-text)]">
-                                            {formatShiftRange(shift.start_time, shift.end_time)}
+                                            {formatShiftRange(shift.start_time, shift.end_time, shift.show_end_as_close)}
                                           </div>
                                           <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-[var(--ui-muted)]">
                                             <span>{visibleStatusByShiftId[shift.id] ?? "Programado"}</span>

@@ -30,4 +30,5 @@ Si en producción ves **500 Internal Server Error** y en el navegador solo apare
 ## Notas
 
 - El bucket `pass-satellite-logos` debe existir y estar en modo publico.
+- El bucket `website-media` se usa para imagenes/videos del sitio `ventogroup.co`.
 - Las politicas de RLS del migration `20260309000000_viso_pass_admin_policies.sql` habilitan escritura para propietario y gerente_general.
