@@ -37,12 +37,13 @@ type ShiftRow = {
   shift_date: string;
   start_time: string;
   end_time: string;
+  shift_kind?: string | null;
   show_end_as_close?: boolean | null;
   break_minutes: number | null;
   status: string;
   notes: string | null;
   site_id: string;
-  published_at: string | null;
+  published_at?: string | null;
 };
 
 type AttendanceLogRow = {
@@ -123,7 +124,10 @@ function getFortnightRange(date: Date) {
   return { start, end };
 }
 
-function getShiftMinutes(shift: Pick<ShiftRow, "start_time" | "end_time" | "break_minutes">) {
+function getShiftMinutes(
+  shift: Pick<ShiftRow, "start_time" | "end_time" | "break_minutes" | "shift_kind">,
+) {
+  if (shift.shift_kind === "descanso") return 0;
   const [startHours, startMinutes] = shift.start_time.slice(0, 5).split(":").map(Number);
   const [endHours, endMinutes] = shift.end_time.slice(0, 5).split(":").map(Number);
   const gross = endHours * 60 + endMinutes - (startHours * 60 + startMinutes);
@@ -160,7 +164,9 @@ function formatShiftRange(
   startTime: string,
   endTime: string,
   showEndAsClose?: boolean | null,
+  shiftKind?: string | null,
 ) {
+  if (shiftKind === "descanso") return "Descanso";
   return showEndAsClose
     ? `${startTime.slice(0, 5)} - Cierre`
     : `${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`;
@@ -231,6 +237,7 @@ function getVisibleShiftStatus(
   nowMinutes: number,
   lateToleranceMinutes: number,
 ) {
+  if (shift.shift_kind === "descanso") return "Descanso";
   if (!shift.published_at) return "Borrador";
   if (shift.status === "cancelled") return "Cancelado";
   if (shift.status === "no_show") return "No asistió";
@@ -352,6 +359,9 @@ async function saveShiftAction(formData: FormData) {
   const shiftDate = asText(formData.get("shift_date"));
   const startTime = asText(formData.get("start_time"));
   const endTime = asText(formData.get("end_time"));
+  const explicitShiftKind = asText(formData.get("shift_kind"));
+  const isRestShift = asText(formData.get("rest_shift")) === "1";
+  const shiftKind = explicitShiftKind === "descanso" || isRestShift ? "descanso" : "laboral";
   const showEndAsClose = asText(formData.get("show_end_as_close")) === "1";
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
   const keepSlot = asText(formData.get("keep_slot")) === "1";
@@ -376,51 +386,54 @@ async function saveShiftAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un trabajador por turno.")}`);
   }
 
-  if (endTime <= startTime) {
+  if (shiftKind !== "descanso" && endTime <= startTime) {
     redirect(`${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio.")}`);
   }
 
   // Validar solapamiento: mismo empleado, misma fecha, rangos que se cruzan
-  let overlapQuery = supabase
-    .from("employee_shifts")
-    .select("id, employee_id, start_time, end_time")
-    .in("employee_id", requestedEmployeeIds)
-    .eq("shift_date", shiftDate);
-  if (shiftId) {
-    overlapQuery = overlapQuery.neq("id", shiftId);
-  }
-  const { data: sameDayShifts, error: overlapErr } = await overlapQuery;
-  if (overlapErr) {
-    redirect(`${returnTo}&error=${encodeURIComponent(overlapErr.message)}`);
-  }
-  const overlaps = (sameDayShifts ?? []).filter(
-    (s: { employee_id: string; start_time: string; end_time: string }) =>
-      startTime < s.end_time && s.start_time < endTime,
-  );
-  if (overlaps.length > 0) {
-    const conflictingIds = [...new Set(overlaps.map((shift) => shift.employee_id))];
-    const { data: conflictEmployees } = await supabase
-      .from("employees")
-      .select("id,full_name,alias")
-      .in("id", conflictingIds);
-    const conflictNames = new Map(
-      (conflictEmployees ?? []).map((employee) => [
-        employee.id,
-        employee.full_name ?? employee.alias ?? employee.id,
-      ]),
+  if (shiftKind !== "descanso") {
+    let overlapQuery = supabase
+      .from("employee_shifts")
+      .select("id, employee_id, start_time, end_time")
+      .in("employee_id", requestedEmployeeIds)
+      .eq("shift_date", shiftDate)
+      .neq("shift_kind", "descanso");
+    if (shiftId) {
+      overlapQuery = overlapQuery.neq("id", shiftId);
+    }
+    const { data: sameDayShifts, error: overlapErr } = await overlapQuery;
+    if (overlapErr) {
+      redirect(`${returnTo}&error=${encodeURIComponent(overlapErr.message)}`);
+    }
+    const overlaps = (sameDayShifts ?? []).filter(
+      (s: { employee_id: string; start_time: string; end_time: string }) =>
+        startTime < s.end_time && s.start_time < endTime,
     );
-    const summary = conflictingIds
-      .map((id) => {
-        const conflict = overlaps.find((shift) => shift.employee_id === id);
-        if (!conflict) return conflictNames.get(id) ?? id;
-        return `${conflictNames.get(id) ?? id} (${conflict.start_time.slice(0, 5)} - ${conflict.end_time.slice(0, 5)})`;
-      })
-      .join(", ");
-    redirect(
-      `${returnTo}&error=${encodeURIComponent(
-        `Algunos trabajadores ya tienen un turno que se solapa: ${summary}. Ajusta el horario o quítalos de la selección.`,
-      )}`,
-    );
+    if (overlaps.length > 0) {
+      const conflictingIds = [...new Set(overlaps.map((shift) => shift.employee_id))];
+      const { data: conflictEmployees } = await supabase
+        .from("employees")
+        .select("id,full_name,alias")
+        .in("id", conflictingIds);
+      const conflictNames = new Map(
+        (conflictEmployees ?? []).map((employee) => [
+          employee.id,
+          employee.full_name ?? employee.alias ?? employee.id,
+        ]),
+      );
+      const summary = conflictingIds
+        .map((id) => {
+          const conflict = overlaps.find((shift) => shift.employee_id === id);
+          if (!conflict) return conflictNames.get(id) ?? id;
+          return `${conflictNames.get(id) ?? id} (${conflict.start_time.slice(0, 5)} - ${conflict.end_time.slice(0, 5)})`;
+        })
+        .join(", ");
+      redirect(
+        `${returnTo}&error=${encodeURIComponent(
+          `Algunos trabajadores ya tienen un turno que se solapa: ${summary}. Ajusta el horario o quítalos de la selección.`,
+        )}`,
+      );
+    }
   }
 
   const basePayload = {
@@ -428,6 +441,7 @@ async function saveShiftAction(formData: FormData) {
     shift_date: shiftDate,
     start_time: startTime,
     end_time: endTime,
+    shift_kind: shiftKind,
     break_minutes: Math.max(0, asNumber(formData.get("break_minutes"), 0)),
     show_end_as_close: showEndAsClose,
     status: asText(formData.get("status")) || "scheduled",
@@ -575,7 +589,7 @@ async function assignManyShiftAction(formData: FormData) {
 
   const { data: sourceShifts, error: sourceError } = await supabase
     .from("employee_shifts")
-    .select("id,employee_id,shift_date,start_time,end_time,show_end_as_close,break_minutes,status,notes,site_id,published_at")
+    .select("id,employee_id,shift_date,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes,site_id,published_at")
     .in("id", sourceShiftIds);
 
   if (sourceError) {
@@ -587,18 +601,23 @@ async function assignManyShiftAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent("No se encontraron los bloques seleccionados.")}`);
   }
 
-  const requestedRanges = shiftRows.map((shift) => ({
+  const requestedRanges = shiftRows
+    .filter((shift) => shift.shift_kind !== "descanso")
+    .map((shift) => ({
     shift_date: shift.shift_date,
     start_time: shift.start_time,
     end_time: shift.end_time,
   }));
   const requestedDates = [...new Set(requestedRanges.map((item) => item.shift_date))];
 
-  const { data: existingShifts, error: existingError } = await supabase
-    .from("employee_shifts")
-    .select("employee_id,shift_date,start_time,end_time")
-    .in("employee_id", targetEmployeeIds)
-    .in("shift_date", requestedDates);
+  const { data: existingShifts, error: existingError } = requestedRanges.length > 0
+    ? await supabase
+        .from("employee_shifts")
+        .select("employee_id,shift_date,start_time,end_time")
+        .neq("shift_kind", "descanso")
+        .in("employee_id", targetEmployeeIds)
+        .in("shift_date", requestedDates)
+    : { data: [], error: null };
 
   if (existingError) {
     redirect(`${returnTo}&error=${encodeURIComponent(existingError.message)}`);
@@ -658,6 +677,7 @@ async function assignManyShiftAction(formData: FormData) {
         shift_date: shift.shift_date,
         start_time: shift.start_time,
         end_time: shift.end_time,
+        shift_kind: shift.shift_kind ?? "laboral",
         show_end_as_close: shift.show_end_as_close ?? false,
         break_minutes: shift.break_minutes ?? 0,
         status: shift.status || "scheduled",
@@ -703,7 +723,7 @@ async function copyPreviousWeekAction(formData: FormData) {
 
   const { data: previousRows, error: previousError } = await supabase
     .from("employee_shifts")
-    .select("employee_id,site_id,shift_date,start_time,end_time,show_end_as_close,break_minutes,status,notes")
+    .select("employee_id,site_id,shift_date,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes")
     .eq("site_id", siteId)
     .gte("shift_date", isoDate(prevStart))
     .lte("shift_date", isoDate(prevEnd));
@@ -718,6 +738,7 @@ async function copyPreviousWeekAction(formData: FormData) {
     shift_date: string;
     start_time: string;
     end_time: string;
+    shift_kind?: string | null;
     show_end_as_close?: boolean | null;
     break_minutes: number | null;
     status: string;
@@ -777,7 +798,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
 
   const query = supabase
     .from("employee_shifts")
-    .select("employee_id,site_id,start_time,end_time,show_end_as_close,break_minutes,status,notes")
+    .select("employee_id,site_id,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes")
     .eq("site_id", siteId)
     .eq("shift_date", sourceDayIso)
     .eq("employee_id", employeeId);
@@ -793,6 +814,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
     site_id: string;
     start_time: string;
     end_time: string;
+    shift_kind?: string | null;
     show_end_as_close?: boolean | null;
     break_minutes: number | null;
     status: string;
@@ -810,6 +832,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
       shift_date: shiftDate,
       start_time: row.start_time,
       end_time: row.end_time,
+      shift_kind: row.shift_kind ?? "laboral",
       show_end_as_close: row.show_end_as_close ?? false,
       break_minutes: row.break_minutes,
       status: row.status,
@@ -1040,7 +1063,7 @@ export default async function StaffSchedulePage({
     selectedSiteId
       ? supabase
           .from("employee_shifts")
-          .select("id,employee_id,shift_date,start_time,end_time,show_end_as_close,break_minutes,status,notes,site_id,published_at")
+          .select("id,employee_id,shift_date,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes,site_id,published_at")
           .eq("site_id", selectedSiteId)
           .gte("shift_date", weekStartIso)
           .lte("shift_date", weekEndIso)
@@ -1066,11 +1089,12 @@ export default async function StaffSchedulePage({
   const employeeIds = employees.map((employee) => employee.id);
 
   const totalsByEmployee: Record<string, EmployeeTotals> = {};
-  if (employeeIds.length > 0) {
+  if (employeeIds.length > 0 && selectedSiteId) {
     const { data: monthShiftRows } = await supabase
       .from("employee_shifts")
-      .select("id,employee_id,shift_date,start_time,end_time,show_end_as_close,break_minutes,status,notes,site_id")
+      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes,site_id")
       .in("employee_id", employeeIds)
+      .eq("site_id", selectedSiteId)
       .gte("shift_date", monthStartIso)
       .lte("shift_date", monthEndIso);
 
@@ -1374,7 +1398,7 @@ export default async function StaffSchedulePage({
                     <div className="ui-h3">Editar turno seleccionado</div>
                     <p className="text-xs text-[var(--ui-muted)]">
                       {selectedShiftEmployee?.full_name ?? selectedShiftEmployee?.alias ?? selectedShift.employee_id} ·{" "}
-                      {selectedShift.shift_date} · {formatShiftRange(selectedShift.start_time, selectedShift.end_time, selectedShift.show_end_as_close)}
+                      {selectedShift.shift_date} · {formatShiftRange(selectedShift.start_time, selectedShift.end_time, selectedShift.show_end_as_close, selectedShift.shift_kind)}
                     </p>
                   </div>
                   <Link href={returnToWithoutEdit} className="ui-btn ui-btn--ghost ui-btn--sm">
@@ -1470,6 +1494,17 @@ export default async function StaffSchedulePage({
                     Mostrar la salida como "Cierre" al empleado
                   </label>
 
+                  <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                    <input
+                      type="checkbox"
+                      name="rest_shift"
+                      value="1"
+                      defaultChecked={selectedShift.shift_kind === "descanso"}
+                      className="rounded border-[var(--ui-border)]"
+                    />
+                    Marcar como turno de descanso (no laboral)
+                  </label>
+
                   <div className="flex items-end md:col-span-1">
                     <button type="submit" className="ui-btn ui-btn--brand w-full">
                       Guardar cambios
@@ -1539,6 +1574,16 @@ export default async function StaffSchedulePage({
                     className="rounded border-[var(--ui-border)]"
                   />
                   Mostrar la salida como "Cierre" al empleado
+                </label>
+
+                <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                  <input
+                    type="checkbox"
+                    name="rest_shift"
+                    value="1"
+                    className="rounded border-[var(--ui-border)]"
+                  />
+                  Marcar como turno de descanso (no laboral)
                 </label>
 
                 <div className="flex items-end">
@@ -1611,11 +1656,11 @@ export default async function StaffSchedulePage({
                                           title={shift.notes ?? ""}
                                         >
                                           <div className="text-xs font-semibold text-[var(--ui-text)]">
-                                            {formatShiftRange(shift.start_time, shift.end_time, shift.show_end_as_close)}
+                                            {formatShiftRange(shift.start_time, shift.end_time, shift.show_end_as_close, shift.shift_kind)}
                                           </div>
                                           <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-[var(--ui-muted)]">
                                             <span>{visibleStatusByShiftId[shift.id] ?? "Programado"}</span>
-                                            <span>{formatHoursCompact(getShiftMinutes(shift))}</span>
+                                            <span>{shift.shift_kind === "descanso" ? "Descanso" : formatHoursCompact(getShiftMinutes(shift))}</span>
                                           </div>
                                         </Link>
                                       ))}

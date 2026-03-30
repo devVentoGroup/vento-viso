@@ -15,6 +15,7 @@ type PlannerShift = {
   shift_date: string;
   start_time: string;
   end_time: string;
+  shift_kind?: string | null;
   show_end_as_close?: boolean | null;
   break_minutes: number | null;
   status: string;
@@ -94,13 +95,22 @@ function formatSlotLabel(slotIndex: number) {
   return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
 }
 
-function formatRange(start: string, end: string, showEndAsClose?: boolean | null) {
+function formatRange(
+  start: string,
+  end: string,
+  showEndAsClose?: boolean | null,
+  shiftKind?: string | null,
+) {
+  if (shiftKind === "descanso") return "Descanso";
   return showEndAsClose
     ? `${start.slice(0, 5)} - Cierre`
     : `${start.slice(0, 5)} - ${end.slice(0, 5)}`;
 }
 
-function getShiftMinutes(shift: Pick<PlannerShift, "start_time" | "end_time" | "break_minutes">) {
+function getShiftMinutes(
+  shift: Pick<PlannerShift, "start_time" | "end_time" | "break_minutes" | "shift_kind">,
+) {
+  if (shift.shift_kind === "descanso") return 0;
   const gross = timeToMinutes(shift.end_time) - timeToMinutes(shift.start_time);
   return Math.max(0, gross - Math.max(0, shift.break_minutes ?? 0));
 }
@@ -171,6 +181,7 @@ function ShiftEditInline({
   const [startTime, setStartTime] = useState(shift.start_time.slice(0, 5));
   const [endTime, setEndTime] = useState(shift.end_time.slice(0, 5));
   const [showEndAsClose, setShowEndAsClose] = useState(Boolean(shift.show_end_as_close));
+  const [isRestShift, setIsRestShift] = useState(shift.shift_kind === "descanso");
 
   return (
     <>
@@ -240,6 +251,17 @@ function ShiftEditInline({
           />
           Mostrar salida como "Cierre" al empleado
         </label>
+        <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+          <input
+            type="checkbox"
+            name="rest_shift"
+            value="1"
+            checked={isRestShift}
+            onChange={(e) => setIsRestShift(e.target.checked)}
+            className="rounded border-[var(--ui-border)]"
+          />
+          Marcar como turno de descanso (no laboral)
+        </label>
         <div className="flex flex-wrap gap-2">
           <button type="submit" className="ui-btn ui-btn--brand">Guardar</button>
           <button type="button" onClick={onCancel} className="ui-btn ui-btn--ghost">Cancelar</button>
@@ -262,6 +284,7 @@ type PlannerShiftGroup = {
   shift_date: string;
   start_time: string;
   end_time: string;
+  shift_kind?: string | null;
   show_end_as_close?: boolean | null;
   site_id: string;
   shifts: PlannerShift[];
@@ -319,7 +342,7 @@ function buildDayLayouts<T extends LayoutItem>(items: T[]) {
 function buildShiftGroups(shifts: PlannerShift[]) {
   const groups = new Map<string, PlannerShiftGroup>();
   for (const shift of shifts) {
-    const key = `${shift.shift_date}|${shift.start_time}|${shift.end_time}|${shift.show_end_as_close ? "close" : "time"}`;
+    const key = `${shift.shift_date}|${shift.start_time}|${shift.end_time}|${shift.show_end_as_close ? "close" : "time"}|${shift.shift_kind ?? "laboral"}`;
     const existing = groups.get(key);
     if (existing) {
       existing.shifts.push(shift);
@@ -330,6 +353,7 @@ function buildShiftGroups(shifts: PlannerShift[]) {
       shift_date: shift.shift_date,
       start_time: shift.start_time,
       end_time: shift.end_time,
+      shift_kind: shift.shift_kind ?? "laboral",
       show_end_as_close: shift.show_end_as_close ?? false,
       site_id: shift.site_id,
       shifts: [shift],
@@ -877,11 +901,11 @@ export function WeeklySchedulePlanner({
                               left: `calc(${group.lane * laneWidth}% + 6px)`,
                               width: `calc(${laneWidth}% - 12px)`,
                             }}
-                            title={`${formatRange(group.start_time, group.end_time, group.show_end_as_close)} · ${group.shifts.length} ${group.shifts.length === 1 ? "trabajador" : "trabajadores"}`}
+                            title={`${formatRange(group.start_time, group.end_time, group.show_end_as_close, group.shift_kind)} · ${group.shifts.length} ${group.shifts.length === 1 ? "trabajador" : "trabajadores"}`}
                           >
                             <div className="space-y-1.5" title={getGroupStatusTitle(group)}>
                               <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80">
-                                {formatRange(group.start_time, group.end_time, group.show_end_as_close)}
+                                {formatRange(group.start_time, group.end_time, group.show_end_as_close, group.shift_kind)}
                               </div>
                               <div className="flex flex-wrap gap-1">
                                 {(() => {
@@ -941,7 +965,7 @@ export function WeeklySchedulePlanner({
                                   })}
                                 </div>
                                 <div className="mt-0.5 text-[11px] leading-tight text-[var(--ui-muted)]">
-                                  {formatRange(firstShift.start_time, firstShift.end_time, firstShift.show_end_as_close)}
+                                  {formatRange(firstShift.start_time, firstShift.end_time, firstShift.show_end_as_close, firstShift.shift_kind)}
                                 </div>
                               </>
                             )}
@@ -977,7 +1001,7 @@ export function WeeklySchedulePlanner({
                   <div>
                     <p className="text-sm font-semibold text-[var(--ui-text)]">
                       {getDayLabel(selectionModeGroup.shift_date)} ·{" "}
-                      {formatRange(selectionModeGroup.start_time, selectionModeGroup.end_time, selectionModeGroup.show_end_as_close)}
+                      {formatRange(selectionModeGroup.start_time, selectionModeGroup.end_time, selectionModeGroup.show_end_as_close, selectionModeGroup.shift_kind)}
                     </p>
                     <p className="ui-caption text-[var(--ui-muted)]">
                       Selecciona uno o varios trabajadores de este horario.
@@ -1130,7 +1154,7 @@ export function WeeklySchedulePlanner({
                       <ul className="mt-2 space-y-1 text-xs text-[var(--ui-muted)]">
                         {empShifts.map((s) => (
                           <li key={s.id}>
-                            {getDayLabel(s.shift_date)} — {formatRange(s.start_time, s.end_time, s.show_end_as_close)}
+                            {getDayLabel(s.shift_date)} — {formatRange(s.start_time, s.end_time, s.show_end_as_close, s.shift_kind)}
                             {s.break_minutes ? ` · ${s.break_minutes} min descanso` : null}
                           </li>
                         ))}
@@ -1404,6 +1428,15 @@ export function WeeklySchedulePlanner({
                 />
                 Mostrar salida como "Cierre" al empleado
               </label>
+              <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                <input
+                  type="checkbox"
+                  name="rest_shift"
+                  value="1"
+                  className="rounded border-[var(--ui-border)]"
+                />
+                Marcar como turno de descanso (no laboral)
+              </label>
 
               <div className="flex flex-wrap gap-2">
                 <button
@@ -1441,7 +1474,7 @@ export function WeeklySchedulePlanner({
           <div className="ui-panel space-y-4">
             <div className="space-y-1">
               <p className="text-sm font-medium text-[var(--ui-text)]">
-                {getDayLabel(selection.group.shift_date)} · {formatRange(selection.group.start_time, selection.group.end_time, selection.group.show_end_as_close)}
+                {getDayLabel(selection.group.shift_date)} · {formatRange(selection.group.start_time, selection.group.end_time, selection.group.show_end_as_close, selection.group.shift_kind)}
               </p>
               <p className="ui-caption">
                 {selection.group.shifts.length} {selection.group.shifts.length === 1 ? "trabajador" : "trabajadores"} en este bloque.
@@ -1520,7 +1553,7 @@ export function WeeklySchedulePlanner({
                   {getEmployeeLabel(employeeById.get(selection.shift.employee_id) ?? { id: selection.shift.employee_id, full_name: null, alias: null, role: null })}
                 </p>
                 <p className="ui-body-muted">
-                  {getDayLabel(selection.shift.shift_date)} · {formatRange(selection.shift.start_time, selection.shift.end_time, selection.shift.show_end_as_close)}
+                  {getDayLabel(selection.shift.shift_date)} · {formatRange(selection.shift.start_time, selection.shift.end_time, selection.shift.show_end_as_close, selection.shift.shift_kind)}
                 </p>
                 <p className="ui-caption">{getVisibleStatus(selection.shift)}</p>
                 <div className="flex flex-wrap gap-2">

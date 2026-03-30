@@ -77,6 +77,12 @@ const NAV_GROUPS: NavGroup[] = [
         icon: "calendar",
       },
       {
+        href: "/staff/calendar",
+        label: "Calendario maestro",
+        description: "Contratos, festivos y mantenimientos",
+        icon: "calendar",
+      },
+      {
         href: "/pass-users",
         label: "Usuarios Pass",
         description: "Clientes y lealtad",
