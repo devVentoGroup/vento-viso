@@ -29,7 +29,10 @@ type MaintenanceEventRow = {
   responsible: string | null;
   work_done: string | null;
   planner_bucket: string | null;
-  products?: { id: string; name: string | null; sku: string | null } | null;
+  products?:
+    | { id: string; name: string | null; sku: string | null }
+    | Array<{ id: string; name: string | null; sku: string | null }>
+    | null;
 };
 type AssetProfileRow = {
   product_id: string;
@@ -181,6 +184,17 @@ function endOfCalendarWeek(date: Date): Date {
   return addDays(start, 6);
 }
 
+function getMaintenanceProductName(
+  products: MaintenanceEventRow["products"],
+  fallbackProductId: string,
+) {
+  if (!products) return fallbackProductId;
+  if (Array.isArray(products)) {
+    return products[0]?.name ?? fallbackProductId;
+  }
+  return products.name ?? fallbackProductId;
+}
+
 export default async function StaffMasterCalendarPage({
   searchParams,
 }: {
@@ -290,7 +304,7 @@ export default async function StaffMasterCalendarPage({
     events.push({
       date: String(row.scheduled_date ?? ""),
       type: "maintenance",
-      title: `Mant. ${row.products?.name ?? row.product_id}`,
+      title: `Mant. ${getMaintenanceProductName(row.products, row.product_id)}`,
       detail:
         `${row.work_done ?? "Mantenimiento programado"} · ${row.responsible ?? "Sin responsable"}`,
       priority: "medium",
