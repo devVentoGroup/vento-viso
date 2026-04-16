@@ -126,6 +126,19 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
   const [uploadMessage, setUploadMessage] = useState<Record<UploadTarget, string>>({ card: "", header: "" });
 
   const legacyLogo = useMemo(() => cardLogoUrl || headerLogoUrl || initial.logo_url || "", [cardLogoUrl, headerLogoUrl, initial.logo_url]);
+  const logoDiagnostics = useMemo(() => {
+    const savedCard = initial.card_logo_url?.trim() || "";
+    const savedHeader = initial.header_logo_url?.trim() || "";
+    const savedLegacy = initial.logo_url?.trim() || "";
+    const hasSavedLogo = Boolean(savedCard || savedHeader || savedLegacy);
+
+    return {
+      savedCard,
+      savedHeader,
+      savedLegacy,
+      hasSavedLogo,
+    };
+  }, [initial.card_logo_url, initial.header_logo_url, initial.logo_url]);
 
   const handleUpload = async (file: File | null, target: UploadTarget) => {
     if (!file) return;
@@ -226,6 +239,35 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
         <div>
           <div className="ui-h3">Logos Vento Pass</div>
           <p className="ui-caption">Usa un logo cuadrado para la tarjeta en Home y uno horizontal para el header interno.</p>
+        </div>
+
+        <div className={`rounded-2xl border p-4 ${logoDiagnostics.hasSavedLogo ? "border-emerald-200 bg-emerald-50/70" : "border-amber-200 bg-amber-50/80"}`}>
+          <div className="ui-label">Diagnóstico de logos guardados</div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-[var(--ui-border)] bg-white px-3 py-2">
+              <div className="ui-caption">Card logo URL</div>
+              <div className="mt-1 break-all text-xs text-[var(--ui-text)]">
+                {logoDiagnostics.savedCard || "Vacío"}
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--ui-border)] bg-white px-3 py-2">
+              <div className="ui-caption">Header logo URL</div>
+              <div className="mt-1 break-all text-xs text-[var(--ui-text)]">
+                {logoDiagnostics.savedHeader || "Vacío"}
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--ui-border)] bg-white px-3 py-2">
+              <div className="ui-caption">Legacy logo URL</div>
+              <div className="mt-1 break-all text-xs text-[var(--ui-text)]">
+                {logoDiagnostics.savedLegacy || "Vacío"}
+              </div>
+            </div>
+          </div>
+          <p className="mt-3 text-sm text-[var(--ui-text)]">
+            {logoDiagnostics.hasSavedLogo
+              ? "VISO detectó URLs guardadas en base de datos. Si no se ven arriba, el problema sería de acceso a la URL o render del archivo."
+              : "VISO no detectó ninguna URL de logo guardada en base de datos. Si en Vento Pass ves la card, muy probablemente se está mostrando el fallback local de la app y no un archivo del bucket."}
+          </p>
         </div>
 
         <input type="hidden" name="card_logo_url" value={cardLogoUrl} />
