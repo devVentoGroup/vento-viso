@@ -45,6 +45,7 @@ export default async function BusinessesPage({
   });
 
   const { data, error } = await supabase
+    .schema("pass")
     .from("pass_satellites")
     .select("id,code,name,is_active,site_id")
     .order("sort_order", { ascending: true });
@@ -123,4 +124,3 @@ export default async function BusinessesPage({
     </div>
   );
 }
-

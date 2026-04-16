@@ -103,7 +103,10 @@ async function createBusiness(formData: FormData) {
     is_active: asBool(formData.get("is_active")),
   };
 
-  const { error: satelliteError } = await supabase.from("pass_satellites").insert(satellitePayload);
+  const { error: satelliteError } = await supabase
+    .schema("pass")
+    .from("pass_satellites")
+    .insert(satellitePayload);
 
   if (satelliteError) {
     await supabase.from("sites").delete().eq("id", siteRow.id);
@@ -184,4 +187,3 @@ export default async function NewBusinessPage({
     </div>
   );
 }
-

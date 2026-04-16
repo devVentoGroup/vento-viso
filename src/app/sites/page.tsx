@@ -60,7 +60,7 @@ export default async function SitesPage({
       .from("sites")
       .select("id,code,name,site_type,is_active")
       .order("name", { ascending: true }),
-    supabase.from("pass_satellites").select("id,site_id"),
+    supabase.schema("pass").from("pass_satellites").select("id,site_id"),
   ]);
 
   if (sitesError) {

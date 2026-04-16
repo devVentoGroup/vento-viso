@@ -55,6 +55,7 @@ type WeeklySchedulePlannerProps = {
   assignManyAction: (formData: FormData) => Promise<void>;
   copyPreviousWeekAction: (formData: FormData) => Promise<void>;
   copyDayToOtherDaysAction: (formData: FormData) => Promise<void>;
+  suggestDraftAction: (formData: FormData) => Promise<void>;
   publishWeekAction: (formData: FormData) => Promise<void>;
 };
 
@@ -429,6 +430,7 @@ export function WeeklySchedulePlanner({
   assignManyAction,
   copyPreviousWeekAction,
   copyDayToOtherDaysAction,
+  suggestDraftAction,
   publishWeekAction,
 }: WeeklySchedulePlannerProps) {
   type SlotSelection = {
@@ -751,6 +753,14 @@ export function WeeklySchedulePlanner({
               <input type="hidden" name="return_to" value={returnTo} />
               <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
                 Copiar semana anterior
+              </button>
+            </form>
+            <form action={suggestDraftAction}>
+              <input type="hidden" name="site_id" value={siteId} />
+              <input type="hidden" name="week_start" value={days[0]?.iso ?? ""} />
+              <input type="hidden" name="return_to" value={returnTo} />
+              <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+                Sugerir borrador
               </button>
             </form>
             <form action={publishWeekAction}>

@@ -3,9 +3,14 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
+import { PlanningAvailabilityPanel } from "@/components/viso/planning-availability-panel";
+import { PlanningCoveragePanel } from "@/components/viso/planning-coverage-panel";
+import { PlanningWorkerRulesPanel } from "@/components/viso/planning-worker-rules-panel";
 import { WeeklySchedulePlanner } from "@/components/viso/weekly-schedule-planner";
 import { notifyShiftChange } from "@/lib/anima/shift-notify";
 import { requireAppAccess } from "@/lib/auth/guard";
+import { generateWeeklySuggestion } from "@/lib/planning-ai/generate";
+import type { PlanningAvailability, PlanningGenerationInput, PlanningRequirement, PlanningShiftDraft } from "@/lib/planning-ai/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +68,28 @@ type EmployeeTotals = {
   weekMinutes: number;
   fortnightMinutes: number;
   monthMinutes: number;
+};
+
+type StaffingRequirementRow = {
+  id: string;
+  site_id: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  min_headcount: number;
+  ideal_headcount: number;
+  max_headcount: number | null;
+  required_role_code: string | null;
+};
+
+type AvailabilityRow = {
+  employee_id: string;
+  site_id: string | null;
+  day_of_week: number;
+  available_from: string;
+  available_to: string;
+  is_available: boolean;
+  availability_kind: "preferred" | "allowed" | "blocked";
 };
 
 function asText(value: FormDataEntryValue | null) {
@@ -146,6 +173,31 @@ function buildWeekDays(weekStart: Date) {
       }),
     };
   });
+}
+
+function getDayOfWeek(iso: string) {
+  const parsed = new Date(`${iso}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? -1 : parsed.getDay();
+}
+
+function normalizeRole(value: string | null | undefined) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function roleMatches(role: string | null | undefined, requiredRole: string | null | undefined) {
+  const normalizedRole = normalizeRole(role);
+  const normalizedRequired = normalizeRole(requiredRole);
+  if (!normalizedRequired) return true;
+  if (!normalizedRole) return false;
+  return (
+    normalizedRole === normalizedRequired ||
+    normalizedRole.includes(normalizedRequired) ||
+    normalizedRequired.includes(normalizedRole)
+  );
 }
 
 function formatWeekLabel(weekStart: Date) {
@@ -958,6 +1010,539 @@ async function publishWeekAction(formData: FormData) {
   redirect(`${returnTo}&ok=${encodeURIComponent("semana_publicada")}`);
 }
 
+async function suggestDraftWeekAction(formData: FormData) {
+  "use server";
+  const siteId = asText(formData.get("site_id"));
+  const weekStartIso = asText(formData.get("week_start"));
+  const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo,
+  });
+  const supabase = createAdminClient();
+
+  if (!siteId || !weekStartIso) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Faltan datos para generar el borrador sugerido.")}`);
+  }
+
+  const weekStart = parseWeekStart(weekStartIso);
+  const weekEndIso = isoDate(addDays(weekStart, 6));
+  const weekDays = buildWeekDays(weekStart);
+
+  const [
+    directEmployeesRes,
+    linkedEmployeesRes,
+    existingShiftsRes,
+    staffingRequirementsRes,
+    availabilityRes,
+    planningLimitsRes,
+    shiftPreferencesRes,
+  ] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("id,full_name,alias,role,is_active,site_id")
+      .eq("site_id", siteId)
+      .eq("is_active", true)
+      .order("full_name", { ascending: true }),
+    supabase
+      .from("employee_sites")
+      .select("employee_id,is_active,employee:employees(id,full_name,alias,role,is_active,site_id)")
+      .eq("site_id", siteId)
+      .eq("is_active", true),
+    supabase
+      .from("employee_shifts")
+      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes,site_id,published_at")
+      .eq("site_id", siteId)
+      .gte("shift_date", weekStartIso)
+      .lte("shift_date", weekEndIso),
+    supabase
+      .schema("viso")
+      .from("site_staffing_requirements")
+      .select("site_id,day_of_week,start_time,end_time,min_headcount,required_role_code")
+      .eq("site_id", siteId)
+      .order("day_of_week", { ascending: true })
+      .order("start_time", { ascending: true }),
+    supabase
+      .schema("viso")
+      .from("employee_availability")
+      .select("employee_id,site_id,day_of_week,available_from,available_to,is_available,availability_kind")
+      .or(`site_id.is.null,site_id.eq.${siteId}`),
+    supabase
+      .schema("viso")
+      .from("employee_planning_limits")
+      .select("employee_id,target_weekly_minutes,max_weekly_minutes")
+      .or(`site_id.is.null,site_id.eq.${siteId}`),
+    supabase
+      .schema("viso")
+      .from("employee_shift_preferences")
+      .select("employee_id,prefers_morning,prefers_afternoon,prefers_evening,avoid_opening,avoid_closing")
+      .or(`site_id.is.null,site_id.eq.${siteId}`),
+  ]);
+
+  if (staffingRequirementsRes.error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(staffingRequirementsRes.error.message)}`);
+  }
+
+  const staffingRequirements = (staffingRequirementsRes.data ?? []) as StaffingRequirementRow[];
+  if (staffingRequirements.length === 0) {
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(
+        "Primero configura la cobertura minima por franja en viso.site_staffing_requirements para esta sede.",
+      )}`,
+    );
+  }
+
+  const employeeMap = new Map<string, EmployeeRow>();
+  for (const row of (directEmployeesRes.data ?? []) as EmployeeRow[]) {
+    employeeMap.set(row.id, row);
+  }
+  for (const link of (linkedEmployeesRes.data ?? []) as EmployeeSiteLink[]) {
+    const employee = getEmployeeRef(link.employee);
+    if (employee?.id && employee.is_active) {
+      employeeMap.set(employee.id, employee);
+    }
+  }
+  const employees = [...employeeMap.values()];
+
+  if (employees.length === 0) {
+    redirect(`${returnTo}&error=${encodeURIComponent("No hay trabajadores activos en esta sede para sugerir horarios.")}`);
+  }
+
+  const existingShifts = ((existingShiftsRes.data ?? []) as ShiftRow[])
+    .filter((shift) => shift.status !== "cancelled")
+    .map<PlanningShiftDraft>((shift) => ({
+      employeeId: shift.employee_id,
+      siteId: shift.site_id,
+      shiftDate: shift.shift_date,
+      startTime: shift.start_time,
+      endTime: shift.end_time,
+      shiftKind: (shift.shift_kind ?? "laboral") as "laboral" | "descanso",
+      notes: shift.notes,
+    }));
+
+  const requirements: PlanningRequirement[] = [];
+  for (const day of weekDays) {
+    const dayOfWeek = getDayOfWeek(day.iso);
+    const dayRequirements = staffingRequirements.filter((row) => row.day_of_week === dayOfWeek);
+
+    for (const row of dayRequirements) {
+      const coveredCount = existingShifts.filter(
+        (shift) =>
+          shift.shiftDate === day.iso &&
+          shift.startTime === row.start_time &&
+          shift.endTime === row.end_time &&
+          roleMatches(employeeMap.get(shift.employeeId)?.role ?? null, row.required_role_code),
+      ).length;
+      const missingHeadcount = Math.max(0, row.min_headcount - coveredCount);
+
+      for (let index = 0; index < missingHeadcount; index += 1) {
+        requirements.push({
+          siteId,
+          shiftDate: day.iso,
+          startTime: row.start_time,
+          endTime: row.end_time,
+          requiredHeadcount: 1,
+          roleCode: row.required_role_code,
+        });
+      }
+    }
+  }
+
+  if (requirements.length === 0) {
+    redirect(`${returnTo}&ok=${encodeURIComponent("sugerencia_no_necesaria")}`);
+  }
+
+  const availabilityRows = (availabilityRes.data ?? []) as AvailabilityRow[];
+  const planningLimitsRows = (planningLimitsRes.data ?? []) as Array<{
+    employee_id: string;
+    target_weekly_minutes: number;
+    max_weekly_minutes: number;
+  }>;
+  const shiftPreferenceRows = (shiftPreferencesRes.data ?? []) as Array<{
+    employee_id: string;
+    prefers_morning: boolean;
+    prefers_afternoon: boolean;
+    prefers_evening: boolean;
+    avoid_opening: boolean;
+    avoid_closing: boolean;
+  }>;
+  const planningLimitsByEmployee = new Map(
+    planningLimitsRows.map((row) => [row.employee_id, row] as const),
+  );
+  const shiftPreferencesByEmployee = new Map(
+    shiftPreferenceRows.map((row) => [row.employee_id, row] as const),
+  );
+  const availability: PlanningAvailability[] = availabilityRows.flatMap((row) =>
+    weekDays
+      .filter((day) => row.day_of_week === getDayOfWeek(day.iso))
+      .map((day) => ({
+        employeeId: row.employee_id,
+        siteId: row.site_id,
+        shiftDate: day.iso,
+        availableFrom: row.available_from,
+        availableTo: row.available_to,
+        isAvailable: row.is_available,
+        availabilityKind: row.availability_kind,
+      })),
+  );
+
+  const generationInput: PlanningGenerationInput = {
+    siteId,
+    weekStartIso,
+    employees: employees.map((employee) => {
+      const limits = planningLimitsByEmployee.get(employee.id);
+      const preferences = shiftPreferencesByEmployee.get(employee.id);
+      return {
+        id: employee.id,
+        fullName: employee.full_name ?? employee.alias ?? null,
+        roleCode: employee.role ?? null,
+        siteIds: [siteId],
+        isActive: Boolean(employee.is_active ?? true),
+        targetWeeklyMinutes: limits?.target_weekly_minutes ?? null,
+        maxWeeklyMinutes: limits?.max_weekly_minutes ?? null,
+        prefersMorning: preferences?.prefers_morning ?? false,
+        prefersAfternoon: preferences?.prefers_afternoon ?? false,
+        prefersEvening: preferences?.prefers_evening ?? false,
+        avoidOpening: preferences?.avoid_opening ?? false,
+        avoidClosing: preferences?.avoid_closing ?? false,
+      };
+    }),
+    requirements,
+    availability,
+    existingShifts,
+  };
+
+  const suggestion = generateWeeklySuggestion(generationInput);
+
+  const { data: runRow, error: runError } = await supabase
+    .schema("viso")
+    .from("shift_generation_runs")
+    .insert({
+      site_id: siteId,
+      week_start: weekStartIso,
+      status: suggestion.shifts.length > 0 ? "completed" : "failed",
+      strategy: "heuristic_v1",
+      input_snapshot: {
+        requirementsCount: requirements.length,
+        employeeCount: employees.length,
+        existingShiftCount: existingShifts.length,
+      },
+      warnings: suggestion.warnings,
+    })
+    .select("id")
+    .single();
+
+  if (runError || !runRow) {
+    redirect(`${returnTo}&error=${encodeURIComponent(runError?.message ?? "No se pudo registrar la corrida de sugerencia.")}`);
+  }
+
+  const explanation = {
+    score: suggestion.score,
+    breakdown: suggestion.breakdown,
+  };
+
+  const { data: candidateRow, error: candidateError } = await supabase
+    .schema("viso")
+    .from("shift_generation_candidates")
+    .insert({
+      run_id: runRow.id,
+      rank_order: 1,
+      score: suggestion.score,
+      coverage_score: suggestion.breakdown.coverage,
+      fairness_score: suggestion.breakdown.fairness,
+      continuity_score: suggestion.breakdown.continuity,
+      preference_score: suggestion.breakdown.preference,
+      warnings: suggestion.warnings,
+      explanation,
+    })
+    .select("id")
+    .single();
+
+  if (candidateError || !candidateRow) {
+    redirect(`${returnTo}&error=${encodeURIComponent(candidateError?.message ?? "No se pudo registrar el candidato sugerido.")}`);
+  }
+
+  if (suggestion.shifts.length > 0) {
+    const candidateItems = suggestion.shifts.map((shift) => ({
+      candidate_id: candidateRow.id,
+      employee_id: shift.employeeId,
+      site_id: shift.siteId,
+      shift_date: shift.shiftDate,
+      start_time: shift.startTime,
+      end_time: shift.endTime,
+      shift_kind: shift.shiftKind,
+      notes: shift.notes ?? null,
+      explanation: {
+        requiredRoleCode: shift.requiredRoleCode ?? null,
+      },
+    }));
+
+    const { error: itemsError } = await supabase
+      .schema("viso")
+      .from("shift_generation_candidate_items")
+      .insert(candidateItems);
+
+    if (itemsError) {
+      redirect(`${returnTo}&error=${encodeURIComponent(itemsError.message)}`);
+    }
+
+    const draftRows = suggestion.shifts.map((shift) => ({
+      employee_id: shift.employeeId,
+      site_id: shift.siteId,
+      shift_date: shift.shiftDate,
+      start_time: shift.startTime,
+      end_time: shift.endTime,
+      shift_kind: shift.shiftKind,
+      show_end_as_close: false,
+      break_minutes: 0,
+      status: "scheduled",
+      notes: shift.notes ?? "Sugerido por VISO",
+      published_at: null,
+      published_by: null,
+    }));
+
+    const { error: insertDraftError } = await supabase.from("employee_shifts").insert(draftRows);
+    if (insertDraftError) {
+      redirect(`${returnTo}&error=${encodeURIComponent(insertDraftError.message)}`);
+    }
+  }
+
+  revalidatePath("/staff");
+  revalidatePath("/staff/schedule");
+  redirect(
+    `${returnTo}&ok=${encodeURIComponent(
+      suggestion.shifts.length > 0 ? "sugerencia_generada_borrador" : "sugerencia_sin_resultado",
+    )}`,
+  );
+}
+
+async function saveCoverageRequirementAction(formData: FormData) {
+  "use server";
+  const siteId = asText(formData.get("site_id"));
+  const weekStartIso = asText(formData.get("week_start"));
+  const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+  const dayOfWeek = asNumber(formData.get("day_of_week"), -1);
+  const startTime = asText(formData.get("start_time"));
+  const endTime = asText(formData.get("end_time"));
+  const minHeadcount = asNumber(formData.get("min_headcount"), 0);
+  const idealHeadcount = asNumber(formData.get("ideal_headcount"), minHeadcount);
+  const requiredRoleCode = asText(formData.get("required_role_code")) || null;
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo,
+  });
+  const supabase = createAdminClient();
+
+  if (!siteId || !weekStartIso || dayOfWeek < 0 || dayOfWeek > 6 || !startTime || !endTime) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Completa día, franja y sede para guardar la cobertura.")}`);
+  }
+
+  if (endTime <= startTime) {
+    redirect(`${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio.")}`);
+  }
+
+  if (minHeadcount < 1 || idealHeadcount < minHeadcount) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Define un mínimo válido y un ideal mayor o igual al mínimo.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("viso")
+    .from("site_staffing_requirements")
+    .upsert({
+      site_id: siteId,
+      day_of_week: dayOfWeek,
+      start_time: startTime,
+      end_time: endTime,
+      min_headcount: minHeadcount,
+      ideal_headcount: idealHeadcount,
+      required_role_code: requiredRoleCode,
+    });
+
+  if (error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/staff");
+  revalidatePath("/staff/schedule");
+  redirect(`${returnTo}&ok=${encodeURIComponent("cobertura_guardada")}`);
+}
+
+async function deleteCoverageRequirementAction(formData: FormData) {
+  "use server";
+  const id = asText(formData.get("id"));
+  const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo,
+  });
+  const supabase = createAdminClient();
+
+  if (!id) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Regla de cobertura inválida.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("viso")
+    .from("site_staffing_requirements")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/staff");
+  revalidatePath("/staff/schedule");
+  redirect(`${returnTo}&ok=${encodeURIComponent("cobertura_eliminada")}`);
+}
+
+async function saveAvailabilityAction(formData: FormData) {
+  "use server";
+  const siteId = asText(formData.get("site_id"));
+  const weekStartIso = asText(formData.get("week_start"));
+  const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+  const employeeId = asText(formData.get("employee_id"));
+  const dayOfWeek = asNumber(formData.get("day_of_week"), -1);
+  const availableFrom = asText(formData.get("available_from"));
+  const availableTo = asText(formData.get("available_to"));
+  const availabilityKind = asText(formData.get("availability_kind")) as "preferred" | "allowed" | "blocked";
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo,
+  });
+  const supabase = createAdminClient();
+
+  if (!siteId || !weekStartIso || !employeeId || dayOfWeek < 0 || dayOfWeek > 6 || !availableFrom || !availableTo) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Completa trabajador, día y horario para guardar la disponibilidad.")}`);
+  }
+
+  if (availableTo <= availableFrom) {
+    redirect(`${returnTo}&error=${encodeURIComponent("La hora final debe ser posterior a la inicial.")}`);
+  }
+
+  if (!["preferred", "allowed", "blocked"].includes(availabilityKind)) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Tipo de disponibilidad inválido.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("viso")
+    .from("employee_availability")
+    .insert({
+      employee_id: employeeId,
+      site_id: siteId,
+      day_of_week: dayOfWeek,
+      available_from: availableFrom,
+      available_to: availableTo,
+      is_available: availabilityKind !== "blocked",
+      availability_kind: availabilityKind,
+    });
+
+  if (error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/staff");
+  revalidatePath("/staff/schedule");
+  redirect(`${returnTo}&ok=${encodeURIComponent("disponibilidad_guardada")}`);
+}
+
+async function deleteAvailabilityAction(formData: FormData) {
+  "use server";
+  const id = asText(formData.get("id"));
+  const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo,
+  });
+  const supabase = createAdminClient();
+
+  if (!id) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Disponibilidad inválida.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("viso")
+    .from("employee_availability")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/staff");
+  revalidatePath("/staff/schedule");
+  redirect(`${returnTo}&ok=${encodeURIComponent("disponibilidad_eliminada")}`);
+}
+
+async function saveWorkerRulesAction(formData: FormData) {
+  "use server";
+  const siteId = asText(formData.get("site_id"));
+  const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+  const employeeId = asText(formData.get("employee_id"));
+  const targetWeeklyMinutes = asNumber(formData.get("target_weekly_minutes"), 2400);
+  const maxWeeklyMinutes = asNumber(formData.get("max_weekly_minutes"), 2880);
+  const prefersMorning = asText(formData.get("prefers_morning")) === "1";
+  const prefersAfternoon = asText(formData.get("prefers_afternoon")) === "1";
+  const prefersEvening = asText(formData.get("prefers_evening")) === "1";
+  const avoidOpening = asText(formData.get("avoid_opening")) === "1";
+  const avoidClosing = asText(formData.get("avoid_closing")) === "1";
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo,
+  });
+  const supabase = createAdminClient();
+
+  if (!siteId || !employeeId) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Selecciona un trabajador para guardar sus reglas.")}`);
+  }
+
+  if (targetWeeklyMinutes < 0 || maxWeeklyMinutes < targetWeeklyMinutes) {
+    redirect(`${returnTo}&error=${encodeURIComponent("El máximo semanal debe ser mayor o igual al objetivo semanal.")}`);
+  }
+
+  const { error: limitsError } = await supabase
+    .schema("viso")
+    .from("employee_planning_limits")
+    .upsert({
+      employee_id: employeeId,
+      site_id: siteId,
+      target_weekly_minutes: targetWeeklyMinutes,
+      max_weekly_minutes: maxWeeklyMinutes,
+    });
+
+  if (limitsError) {
+    redirect(`${returnTo}&error=${encodeURIComponent(limitsError.message)}`);
+  }
+
+  const { error: preferencesError } = await supabase
+    .schema("viso")
+    .from("employee_shift_preferences")
+    .upsert({
+      employee_id: employeeId,
+      site_id: siteId,
+      prefers_morning: prefersMorning,
+      prefers_afternoon: prefersAfternoon,
+      prefers_evening: prefersEvening,
+      avoid_opening: avoidOpening,
+      avoid_closing: avoidClosing,
+    });
+
+  if (preferencesError) {
+    redirect(`${returnTo}&error=${encodeURIComponent(preferencesError.message)}`);
+  }
+
+  revalidatePath("/staff");
+  revalidatePath("/staff/schedule");
+  redirect(`${returnTo}&ok=${encodeURIComponent("reglas_trabajador_guardadas")}`);
+}
+
 function safeDecode(value: string | null | undefined) {
   if (!value) return "";
   try {
@@ -987,6 +1572,22 @@ function getOkMessage(code: string) {
       return "Semana publicada y notificada a los trabajadores con turnos en borrador.";
     case "semana_copiada_borrador":
       return "Semana anterior copiada en borrador.";
+    case "cobertura_guardada":
+      return "Franja de cobertura guardada.";
+    case "cobertura_eliminada":
+      return "Franja de cobertura eliminada.";
+    case "disponibilidad_guardada":
+      return "Disponibilidad guardada.";
+    case "disponibilidad_eliminada":
+      return "Disponibilidad eliminada.";
+    case "reglas_trabajador_guardadas":
+      return "Límites y preferencias del trabajador guardados.";
+    case "sugerencia_generada_borrador":
+      return "Se generó un borrador sugerido y quedó guardado sin publicar.";
+    case "sugerencia_sin_resultado":
+      return "La sugerencia se ejecutó, pero no encontró asignaciones válidas nuevas.";
+    case "sugerencia_no_necesaria":
+      return "La cobertura mínima de la semana ya estaba cubierta con los turnos actuales.";
     default:
       return code ? code.replace(/_/g, " ") : "";
   }
@@ -1044,7 +1645,15 @@ export default async function StaffSchedulePage({
   const returnTo = buildReturnTo(selectedSiteId, weekStartIso, viewMode);
   const returnToWithoutEdit = appendReturnParams(returnTo, { edit_shift: null });
 
-  const [directEmployeesRes, linkedEmployeesRes, shiftsRes] = await Promise.all([
+  const [
+    directEmployeesRes,
+    linkedEmployeesRes,
+    shiftsRes,
+    staffingRequirementsRes,
+    availabilityConfigRes,
+    planningLimitsRes,
+    shiftPreferencesRes,
+  ] = await Promise.all([
     selectedSiteId
       ? supabase
           .from("employees")
@@ -1070,6 +1679,38 @@ export default async function StaffSchedulePage({
           .order("shift_date", { ascending: true })
           .order("start_time", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
+    selectedSiteId
+      ? supabase
+          .schema("viso")
+          .from("site_staffing_requirements")
+          .select("id,site_id,day_of_week,start_time,end_time,min_headcount,ideal_headcount,max_headcount,required_role_code")
+          .eq("site_id", selectedSiteId)
+          .order("day_of_week", { ascending: true })
+          .order("start_time", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+    selectedSiteId
+      ? supabase
+          .schema("viso")
+          .from("employee_availability")
+          .select("id,employee_id,site_id,day_of_week,available_from,available_to,is_available,availability_kind")
+          .eq("site_id", selectedSiteId)
+          .order("day_of_week", { ascending: true })
+          .order("available_from", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+    selectedSiteId
+      ? supabase
+          .schema("viso")
+          .from("employee_planning_limits")
+          .select("employee_id,target_weekly_minutes,max_weekly_minutes")
+          .eq("site_id", selectedSiteId)
+      : Promise.resolve({ data: [], error: null }),
+    selectedSiteId
+      ? supabase
+          .schema("viso")
+          .from("employee_shift_preferences")
+          .select("employee_id,prefers_morning,prefers_afternoon,prefers_evening,avoid_opening,avoid_closing")
+          .eq("site_id", selectedSiteId)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   const employeeMap = new Map<string, EmployeeRow>();
@@ -1086,7 +1727,25 @@ export default async function StaffSchedulePage({
   const employees = [...employeeMap.values()].sort((a, b) =>
     (a.full_name ?? a.alias ?? a.id).localeCompare(b.full_name ?? b.alias ?? b.id, "es"),
   );
+  const roleOptions = [...new Set(employees.map((employee) => employee.role).filter(Boolean) as string[])].sort(
+    (a, b) => a.localeCompare(b, "es"),
+  );
   const employeeIds = employees.map((employee) => employee.id);
+  const staffingRequirements = (staffingRequirementsRes.data ?? []) as StaffingRequirementRow[];
+  const availabilityConfigRows = (availabilityConfigRes.data ?? []) as (AvailabilityRow & { id: string })[];
+  const planningLimitsRows = (planningLimitsRes.data ?? []) as Array<{
+    employee_id: string;
+    target_weekly_minutes: number;
+    max_weekly_minutes: number;
+  }>;
+  const shiftPreferenceRows = (shiftPreferencesRes.data ?? []) as Array<{
+    employee_id: string;
+    prefers_morning: boolean;
+    prefers_afternoon: boolean;
+    prefers_evening: boolean;
+    avoid_opening: boolean;
+    avoid_closing: boolean;
+  }>;
 
   const totalsByEmployee: Record<string, EmployeeTotals> = {};
   if (employeeIds.length > 0 && selectedSiteId) {
@@ -1389,7 +2048,74 @@ export default async function StaffSchedulePage({
           </div>
         </div>
       ) : (
-        viewMode === "table" ? (
+        <div className="space-y-3">
+          <PlanningCoveragePanel
+            siteId={selectedSiteId}
+            weekStartIso={weekStartIso}
+            returnTo={returnTo}
+            requirements={staffingRequirements.map((item) => ({
+              id: item.id,
+              dayOfWeek: item.day_of_week,
+              startTime: item.start_time,
+              endTime: item.end_time,
+              minHeadcount: item.min_headcount,
+              idealHeadcount: item.ideal_headcount,
+              maxHeadcount: item.max_headcount,
+              requiredRoleCode: item.required_role_code,
+            }))}
+            roleOptions={roleOptions}
+            saveAction={saveCoverageRequirementAction}
+            deleteAction={deleteCoverageRequirementAction}
+          />
+          <PlanningAvailabilityPanel
+            siteId={selectedSiteId}
+            weekStartIso={weekStartIso}
+            returnTo={returnTo}
+            employees={employees.map((employee) => ({
+              id: employee.id,
+              label: employee.full_name ?? employee.alias ?? employee.id,
+            }))}
+            rows={availabilityConfigRows.map((row) => ({
+              id: row.id,
+              employeeId: row.employee_id,
+              employeeName:
+                employeeMap.get(row.employee_id)?.full_name ??
+                employeeMap.get(row.employee_id)?.alias ??
+                row.employee_id,
+              dayOfWeek: row.day_of_week,
+              availableFrom: row.available_from,
+              availableTo: row.available_to,
+              availabilityKind: row.availability_kind,
+            }))}
+            saveAction={saveAvailabilityAction}
+            deleteAction={deleteAvailabilityAction}
+          />
+          <PlanningWorkerRulesPanel
+            siteId={selectedSiteId}
+            weekStartIso={weekStartIso}
+            returnTo={returnTo}
+            employees={employees.map((employee) => ({
+              id: employee.id,
+              label: employee.full_name ?? employee.alias ?? employee.id,
+            }))}
+            rows={employees.map((employee) => {
+              const limits = planningLimitsRows.find((row) => row.employee_id === employee.id);
+              const preference = shiftPreferenceRows.find((row) => row.employee_id === employee.id);
+              return {
+                employeeId: employee.id,
+                employeeName: employee.full_name ?? employee.alias ?? employee.id,
+                targetWeeklyMinutes: limits?.target_weekly_minutes ?? 2400,
+                maxWeeklyMinutes: limits?.max_weekly_minutes ?? 2880,
+                prefersMorning: preference?.prefers_morning ?? false,
+                prefersAfternoon: preference?.prefers_afternoon ?? false,
+                prefersEvening: preference?.prefers_evening ?? false,
+                avoidOpening: preference?.avoid_opening ?? false,
+                avoidClosing: preference?.avoid_closing ?? false,
+              };
+            })}
+            saveAction={saveWorkerRulesAction}
+          />
+        {viewMode === "table" ? (
           <div className="space-y-3">
             {selectedShift ? (
               <div className="ui-panel">
@@ -1702,9 +2428,11 @@ export default async function StaffSchedulePage({
             assignManyAction={assignManyShiftAction}
             copyPreviousWeekAction={copyPreviousWeekAction}
             copyDayToOtherDaysAction={copyDayToOtherDaysAction}
+            suggestDraftAction={suggestDraftWeekAction}
             publishWeekAction={publishWeekAction}
           />
-        )
+        )}
+        </div>
       )}
     </div>
   );
