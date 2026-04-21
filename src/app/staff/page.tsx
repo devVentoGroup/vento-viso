@@ -144,6 +144,9 @@ export default async function StaffPage() {
         subtitle="Gestiona empleados, sedes asignadas, estado y asistencia reciente."
         actions={
           <div className="flex items-center gap-2">
+            <Link href="/staff/attendance" className="ui-btn ui-btn--ghost">
+              Reportes
+            </Link>
             <Link href="/staff/schedule" className="ui-btn ui-btn--ghost">
               Horario semanal
             </Link>
