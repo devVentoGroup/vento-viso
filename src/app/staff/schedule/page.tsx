@@ -3,9 +3,6 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
-import { PlanningAvailabilityPanel } from "@/components/viso/planning-availability-panel";
-import { PlanningCoveragePanel } from "@/components/viso/planning-coverage-panel";
-import { PlanningWorkerRulesPanel } from "@/components/viso/planning-worker-rules-panel";
 import { WeeklySchedulePlanner } from "@/components/viso/weekly-schedule-planner";
 import { notifyShiftChange } from "@/lib/anima/shift-notify";
 import { requireAppAccess } from "@/lib/auth/guard";
@@ -1923,6 +1920,9 @@ export default async function StaffSchedulePage({
             <Link href="/staff" className="ui-btn ui-btn--ghost">
               Ver trabajadores
             </Link>
+            <Link href={appendReturnParams(buildReturnTo(selectedSiteId, weekStartIso), { view: null }).replace("/staff/schedule", "/staff/schedule/settings")} className="ui-btn ui-btn--ghost">
+              Configuración planner
+            </Link>
             <Link href="/staff/new" className="ui-btn ui-btn--ghost">
               Invitar trabajador
             </Link>
@@ -2049,72 +2049,14 @@ export default async function StaffSchedulePage({
         </div>
       ) : (
         <div className="space-y-3">
-          <PlanningCoveragePanel
-            siteId={selectedSiteId}
-            weekStartIso={weekStartIso}
-            returnTo={returnTo}
-            requirements={staffingRequirements.map((item) => ({
-              id: item.id,
-              dayOfWeek: item.day_of_week,
-              startTime: item.start_time,
-              endTime: item.end_time,
-              minHeadcount: item.min_headcount,
-              idealHeadcount: item.ideal_headcount,
-              maxHeadcount: item.max_headcount,
-              requiredRoleCode: item.required_role_code,
-            }))}
-            roleOptions={roleOptions}
-            saveAction={saveCoverageRequirementAction}
-            deleteAction={deleteCoverageRequirementAction}
-          />
-          <PlanningAvailabilityPanel
-            siteId={selectedSiteId}
-            weekStartIso={weekStartIso}
-            returnTo={returnTo}
-            employees={employees.map((employee) => ({
-              id: employee.id,
-              label: employee.full_name ?? employee.alias ?? employee.id,
-            }))}
-            rows={availabilityConfigRows.map((row) => ({
-              id: row.id,
-              employeeId: row.employee_id,
-              employeeName:
-                employeeMap.get(row.employee_id)?.full_name ??
-                employeeMap.get(row.employee_id)?.alias ??
-                row.employee_id,
-              dayOfWeek: row.day_of_week,
-              availableFrom: row.available_from,
-              availableTo: row.available_to,
-              availabilityKind: row.availability_kind,
-            }))}
-            saveAction={saveAvailabilityAction}
-            deleteAction={deleteAvailabilityAction}
-          />
-          <PlanningWorkerRulesPanel
-            siteId={selectedSiteId}
-            weekStartIso={weekStartIso}
-            returnTo={returnTo}
-            employees={employees.map((employee) => ({
-              id: employee.id,
-              label: employee.full_name ?? employee.alias ?? employee.id,
-            }))}
-            rows={employees.map((employee) => {
-              const limits = planningLimitsRows.find((row) => row.employee_id === employee.id);
-              const preference = shiftPreferenceRows.find((row) => row.employee_id === employee.id);
-              return {
-                employeeId: employee.id,
-                employeeName: employee.full_name ?? employee.alias ?? employee.id,
-                targetWeeklyMinutes: limits?.target_weekly_minutes ?? 2400,
-                maxWeeklyMinutes: limits?.max_weekly_minutes ?? 2880,
-                prefersMorning: preference?.prefers_morning ?? false,
-                prefersAfternoon: preference?.prefers_afternoon ?? false,
-                prefersEvening: preference?.prefers_evening ?? false,
-                avoidOpening: preference?.avoid_opening ?? false,
-                avoidClosing: preference?.avoid_closing ?? false,
-              };
-            })}
-            saveAction={saveWorkerRulesAction}
-          />
+          <div className="flex justify-end">
+            <Link
+              href={appendReturnParams(buildReturnTo(selectedSiteId, weekStartIso), { view: null }).replace("/staff/schedule", "/staff/schedule/settings")}
+              className="text-sm text-[var(--ui-muted)] underline-offset-4 transition hover:text-[var(--ui-text)] hover:underline"
+            >
+              Configurar cobertura, disponibilidad y reglas del planificador
+            </Link>
+          </div>
         {viewMode === "table" ? (
           <div className="space-y-3">
             {selectedShift ? (
