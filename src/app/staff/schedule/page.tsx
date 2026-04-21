@@ -89,6 +89,9 @@ type AvailabilityRow = {
   availability_kind: "preferred" | "allowed" | "blocked";
 };
 
+const FULL_DAY_REST_START_TIME = "00:00";
+const FULL_DAY_REST_END_TIME = "23:59";
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -410,14 +413,17 @@ async function saveShiftAction(formData: FormData) {
   const endTime = asText(formData.get("end_time"));
   const explicitShiftKind = asText(formData.get("shift_kind"));
   const isRestShift = asText(formData.get("rest_shift")) === "1";
-  const shiftKind = explicitShiftKind === "descanso" || isRestShift ? "descanso" : "laboral";
+  const isFullDayRest = asText(formData.get("full_day_rest")) === "1";
+  const shiftKind = explicitShiftKind === "descanso" || isRestShift || isFullDayRest ? "descanso" : "laboral";
+  const resolvedStartTime = isFullDayRest ? FULL_DAY_REST_START_TIME : startTime;
+  const resolvedEndTime = isFullDayRest ? FULL_DAY_REST_END_TIME : endTime;
   const showEndAsClose = asText(formData.get("show_end_as_close")) === "1";
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
   const keepSlot = asText(formData.get("keep_slot")) === "1";
   const keepQuick = asText(formData.get("keep_quick")) === "1";
   const slotDay = asText(formData.get("slot_day")) || shiftDate;
-  const slotStart = asText(formData.get("slot_start")) || startTime;
-  const slotEnd = asText(formData.get("slot_end")) || endTime;
+  const slotStart = asText(formData.get("slot_start")) || resolvedStartTime;
+  const slotEnd = asText(formData.get("slot_end")) || resolvedEndTime;
   const requestedEmployeeIds =
     employeeIds.length > 0 ? employeeIds : employeeId ? [employeeId] : [];
 
@@ -427,7 +433,7 @@ async function saveShiftAction(formData: FormData) {
   });
   const supabase = createAdminClient();
 
-  if (requestedEmployeeIds.length === 0 || !siteId || !shiftDate || !startTime || !endTime) {
+  if (requestedEmployeeIds.length === 0 || !siteId || !shiftDate || !resolvedStartTime || !resolvedEndTime) {
     redirect(`${returnTo}&error=${encodeURIComponent("Completa trabajador, fecha y horario.")}`);
   }
 
@@ -435,7 +441,7 @@ async function saveShiftAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un trabajador por turno.")}`);
   }
 
-  if (shiftKind !== "descanso" && endTime <= startTime) {
+  if (shiftKind !== "descanso" && resolvedEndTime <= resolvedStartTime) {
     redirect(`${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio.")}`);
   }
 
@@ -456,7 +462,7 @@ async function saveShiftAction(formData: FormData) {
     }
     const overlaps = (sameDayShifts ?? []).filter(
       (s: { employee_id: string; start_time: string; end_time: string }) =>
-        startTime < s.end_time && s.start_time < endTime,
+        resolvedStartTime < s.end_time && s.start_time < resolvedEndTime,
     );
     if (overlaps.length > 0) {
       const conflictingIds = [...new Set(overlaps.map((shift) => shift.employee_id))];
@@ -488,11 +494,11 @@ async function saveShiftAction(formData: FormData) {
   const basePayload = {
     site_id: siteId,
     shift_date: shiftDate,
-    start_time: startTime,
-    end_time: endTime,
+    start_time: resolvedStartTime,
+    end_time: resolvedEndTime,
     shift_kind: shiftKind,
-    break_minutes: Math.max(0, asNumber(formData.get("break_minutes"), 0)),
-    show_end_as_close: showEndAsClose,
+    break_minutes: shiftKind === "descanso" ? 0 : Math.max(0, asNumber(formData.get("break_minutes"), 0)),
+    show_end_as_close: shiftKind === "descanso" ? false : showEndAsClose,
     status: asText(formData.get("status")) || "scheduled",
     notes: asText(formData.get("notes")) || null,
     published_at: null,
@@ -610,6 +616,42 @@ async function deleteManyShiftAction(formData: FormData) {
   revalidatePath("/staff");
   revalidatePath("/staff/schedule");
   redirect(`${returnTo}&ok=${encodeURIComponent("turnos_eliminados")}`);
+}
+
+async function deleteDraftWeekAction(formData: FormData) {
+  "use server";
+  const siteId = asText(formData.get("site_id"));
+  const weekStartIso = asText(formData.get("week_start"));
+  const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo,
+  });
+  const supabase = createAdminClient();
+
+  if (!siteId || !weekStartIso) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Faltan datos para descartar los borradores.")}`);
+  }
+
+  const weekStart = parseWeekStart(weekStartIso);
+  const weekEndIso = isoDate(addDays(weekStart, 6));
+
+  const { error } = await supabase
+    .from("employee_shifts")
+    .delete()
+    .eq("site_id", siteId)
+    .gte("shift_date", weekStartIso)
+    .lte("shift_date", weekEndIso)
+    .is("published_at", null);
+
+  if (error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/staff");
+  revalidatePath("/staff/schedule");
+  redirect(`${returnTo}&ok=${encodeURIComponent("borradores_descartados")}`);
 }
 
 async function assignManyShiftAction(formData: FormData) {
@@ -1561,6 +1603,8 @@ function getOkMessage(code: string) {
       return "Turno eliminado.";
     case "turnos_eliminados":
       return "Bloques eliminados correctamente.";
+    case "borradores_descartados":
+      return "Se eliminaron los borradores de la semana.";
     case "turnos_asignados_masivo":
       return "Bloques copiados a los trabajadores seleccionados.";
     case "sin_borradores_por_publicar":
@@ -1778,6 +1822,7 @@ export default async function StaffSchedulePage({
 
   const weekDays = buildWeekDays(weekStart);
   const weekShifts = (shiftsRes.data ?? []) as ShiftRow[];
+  const draftWeekCount = weekShifts.filter((shift) => !shift.published_at).length;
   const { data: attendancePolicyRow } = await supabase
     .from("attendance_policy")
     .select("late_tolerance_minutes")
@@ -2019,6 +2064,16 @@ export default async function StaffSchedulePage({
               <Link href={currentWeekHref} className="ui-btn ui-btn--ghost whitespace-nowrap">
                 Hoy
               </Link>
+              {draftWeekCount > 0 ? (
+                <form action={deleteDraftWeekAction}>
+                  <input type="hidden" name="site_id" value={selectedSiteId} />
+                  <input type="hidden" name="week_start" value={weekStartIso} />
+                  <input type="hidden" name="return_to" value={returnTo} />
+                  <button type="submit" className="ui-btn ui-btn--ghost whitespace-nowrap text-[var(--ui-danger)]">
+                    Descartar borradores
+                  </button>
+                </form>
+              ) : null}
               <form action={publishWeekAction}>
                 <input type="hidden" name="site_id" value={selectedSiteId} />
                 <input type="hidden" name="week_start" value={weekStartIso} />
@@ -2172,6 +2227,20 @@ export default async function StaffSchedulePage({
                     />
                     Marcar como turno de descanso (no laboral)
                   </label>
+                  <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                    <input
+                      type="checkbox"
+                      name="full_day_rest"
+                      value="1"
+                      defaultChecked={
+                        selectedShift.shift_kind === "descanso" &&
+                        selectedShift.start_time.slice(0, 5) === FULL_DAY_REST_START_TIME &&
+                        selectedShift.end_time.slice(0, 5) === FULL_DAY_REST_END_TIME
+                      }
+                      className="rounded border-[var(--ui-border)]"
+                    />
+                    Marcar el día completo como descanso
+                  </label>
 
                   <div className="flex items-end md:col-span-1">
                     <button type="submit" className="ui-btn ui-btn--brand w-full">
@@ -2253,6 +2322,15 @@ export default async function StaffSchedulePage({
                   />
                   Marcar como turno de descanso (no laboral)
                 </label>
+                <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                  <input
+                    type="checkbox"
+                    name="full_day_rest"
+                    value="1"
+                    className="rounded border-[var(--ui-border)]"
+                  />
+                  Marcar el día completo como descanso
+                </label>
 
                 <div className="flex items-end">
                   <button type="submit" className="ui-btn ui-btn--brand w-full">
@@ -2327,8 +2405,14 @@ export default async function StaffSchedulePage({
                                             {formatShiftRange(shift.start_time, shift.end_time, shift.show_end_as_close, shift.shift_kind)}
                                           </div>
                                           <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-[var(--ui-muted)]">
-                                            <span>{visibleStatusByShiftId[shift.id] ?? "Programado"}</span>
-                                            <span>{shift.shift_kind === "descanso" ? "Descanso" : formatHoursCompact(getShiftMinutes(shift))}</span>
+                                            {shift.shift_kind === "descanso" ? (
+                                              <span>Día libre</span>
+                                            ) : (
+                                              <>
+                                                <span>{visibleStatusByShiftId[shift.id] ?? "Programado"}</span>
+                                                <span>{formatHoursCompact(getShiftMinutes(shift))}</span>
+                                              </>
+                                            )}
                                           </div>
                                         </Link>
                                       ))}

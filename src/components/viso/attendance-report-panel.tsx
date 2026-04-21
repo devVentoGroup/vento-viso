@@ -58,6 +58,13 @@ function formatMinutesLabel(totalMinutes: number) {
   return `${minutes} min`;
 }
 
+function formatHoursLabel(totalMinutes: number) {
+  const safe = Math.max(0, Number(totalMinutes) || 0);
+  const totalHours = safe / 60;
+  if (Number.isInteger(totalHours)) return `${totalHours} h`;
+  return `${totalHours.toFixed(1).replace(".", ",")} h`;
+}
+
 function toInputDate(value: Date) {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, "0");
@@ -240,7 +247,7 @@ export function AttendanceReportPanel({
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <div className="ui-panel">
           <div className="text-sm text-[var(--ui-muted)]">Turnos programados</div>
           <div className="mt-2 text-2xl font-semibold">{summary?.summary.scheduledShifts ?? (isLoading ? "..." : 0)}</div>
@@ -258,9 +265,15 @@ export function AttendanceReportPanel({
           </div>
         </div>
         <div className="ui-panel">
-          <div className="text-sm text-[var(--ui-muted)]">Horas netas</div>
+          <div className="text-sm text-[var(--ui-muted)]">Minutos netos</div>
           <div className="mt-2 text-2xl font-semibold">
             {summary ? formatMinutesLabel(summary.summary.netMinutes) : isLoading ? "..." : "0 min"}
+          </div>
+        </div>
+        <div className="ui-panel">
+          <div className="text-sm text-[var(--ui-muted)]">Horas netas</div>
+          <div className="mt-2 text-2xl font-semibold">
+            {summary ? formatHoursLabel(summary.summary.netMinutes) : isLoading ? "..." : "0 h"}
           </div>
         </div>
       </div>

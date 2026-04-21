@@ -72,6 +72,8 @@ const VISIBLE_SLOT_COUNT = VISIBLE_SLOT_END - VISIBLE_SLOT_START + 1; // 37
 const VISIBLE_START_MINUTES = VISIBLE_START_HOUR * 60;
 const VISIBLE_END_MINUTES = VISIBLE_END_HOUR * 60;
 const DAY_HEIGHT = VISIBLE_SLOT_COUNT * SLOT_HEIGHT;
+const FULL_DAY_REST_START_TIME = "00:00";
+const FULL_DAY_REST_END_TIME = "23:59";
 
 function timeToMinutes(value: string) {
   const [hours, minutes] = value.slice(0, 5).split(":").map((part) => Number(part));
@@ -183,6 +185,11 @@ function ShiftEditInline({
   const [endTime, setEndTime] = useState(shift.end_time.slice(0, 5));
   const [showEndAsClose, setShowEndAsClose] = useState(Boolean(shift.show_end_as_close));
   const [isRestShift, setIsRestShift] = useState(shift.shift_kind === "descanso");
+  const [isFullDayRest, setIsFullDayRest] = useState(
+    shift.shift_kind === "descanso" &&
+      shift.start_time.slice(0, 5) === FULL_DAY_REST_START_TIME &&
+      shift.end_time.slice(0, 5) === FULL_DAY_REST_END_TIME,
+  );
 
   return (
     <>
@@ -227,6 +234,7 @@ function ShiftEditInline({
               type="time"
               className="ui-input mt-1 w-full"
               value={startTime}
+              disabled={isFullDayRest}
               onChange={(e) => setStartTime(e.target.value)}
             />
           </label>
@@ -237,6 +245,7 @@ function ShiftEditInline({
               type="time"
               className="ui-input mt-1 w-full"
               value={endTime}
+              disabled={isFullDayRest}
               onChange={(e) => setEndTime(e.target.value)}
             />
           </label>
@@ -262,6 +271,21 @@ function ShiftEditInline({
             className="rounded border-[var(--ui-border)]"
           />
           Marcar como turno de descanso (no laboral)
+        </label>
+        <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+          <input
+            type="checkbox"
+            name="full_day_rest"
+            value="1"
+            checked={isFullDayRest}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setIsFullDayRest(checked);
+              if (checked) setIsRestShift(true);
+            }}
+            className="rounded border-[var(--ui-border)]"
+          />
+          Marcar día completo como descanso
         </label>
         <div className="flex flex-wrap gap-2">
           <button type="submit" className="ui-btn ui-btn--brand">Guardar</button>
@@ -920,6 +944,13 @@ export function WeeklySchedulePlanner({
                               <div className="flex flex-wrap gap-1">
                                 {(() => {
                                   if (group.shifts.length === 1) {
+                                    if (group.shifts[0].shift_kind === "descanso") {
+                                      return (
+                                        <span className="rounded bg-slate-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-700">
+                                          Día libre
+                                        </span>
+                                      );
+                                    }
                                     const status = getVisibleStatus(group.shifts[0]);
                                     return (
                                       <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getStatusBadgeClass(status)}`}>
@@ -1446,6 +1477,15 @@ export function WeeklySchedulePlanner({
                   className="rounded border-[var(--ui-border)]"
                 />
                 Marcar como turno de descanso (no laboral)
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                <input
+                  type="checkbox"
+                  name="full_day_rest"
+                  value="1"
+                  className="rounded border-[var(--ui-border)]"
+                />
+                Marcar día completo como descanso
               </label>
 
               <div className="flex flex-wrap gap-2">
