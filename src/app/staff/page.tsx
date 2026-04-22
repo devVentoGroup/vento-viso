@@ -56,18 +56,29 @@ function attendanceLabel(status: AttendanceStatusRow | undefined) {
   return { label: "Fuera de turno", tone: "" };
 }
 
-export default async function StaffPage() {
+export default async function StaffPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ site?: string; status?: string; role?: string }>;
+}) {
   await requireAppAccess({
     appId: "viso",
     returnTo: "/staff",
   });
 
   const supabase = createAdminClient();
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const siteFilter = typeof resolvedSearchParams.site === "string" ? resolvedSearchParams.site : "all";
+  const statusFilter = typeof resolvedSearchParams.status === "string" ? resolvedSearchParams.status : "all";
+  const roleFilter = typeof resolvedSearchParams.role === "string" ? resolvedSearchParams.role : "all";
 
-  const { data, error: employeesError } = await supabase
-    .from("employees")
-    .select("id,full_name,alias,role,is_active,site_id,site:sites!employees_site_id_fkey(id,name,code)")
-    .order("full_name", { ascending: true });
+  const [{ data, error: employeesError }, { data: sitesData }] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("id,full_name,alias,role,is_active,site_id,site:sites!employees_site_id_fkey(id,name,code)")
+      .order("full_name", { ascending: true }),
+    supabase.from("sites").select("id,name,code").order("name", { ascending: true }),
+  ]);
 
   if (employeesError) {
     console.error("Staff list query error:", employeesError);
@@ -89,12 +100,13 @@ export default async function StaffPage() {
   }
 
   const employees = (data ?? []) as EmployeeRow[];
+  const sites = ((sitesData ?? []) as SiteLite[]).sort((a, b) => (a.name ?? a.code ?? "").localeCompare(b.name ?? b.code ?? "", "es"));
+  const roleOptions = Array.from(new Set(employees.map((employee) => employee.role).filter((role): role is string => Boolean(role)))).sort((a, b) => a.localeCompare(b, "es"));
   const employeeIds = employees.map((employee) => employee.id);
 
   let linksByEmployee = new Map<string, EmployeeSiteLink[]>();
   let attendanceByEmployee = new Map<string, AttendanceStatusRow>();
-
-  let walletEligibilityByEmployee = new Map<
+  const walletEligibilityByEmployee = new Map<
     string,
     { contract_active: boolean; documents_complete: boolean; wallet_eligible: boolean; wallet_status: string }
   >();
@@ -137,6 +149,21 @@ export default async function StaffPage() {
     });
   }
 
+  const filteredEmployees = employees.filter((employee) => {
+    const matchesSite =
+      siteFilter === "all" ||
+      employee.site_id === siteFilter ||
+      (linksByEmployee.get(employee.id) ?? []).some((link) => link.site_id === siteFilter);
+
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilter === "active" ? employee.is_active === true : employee.is_active !== true);
+
+    const matchesRole = roleFilter === "all" || employee.role === roleFilter;
+
+    return matchesSite && matchesStatus && matchesRole;
+  });
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -157,16 +184,65 @@ export default async function StaffPage() {
         }
       />
 
+      <form method="get" className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--ui-border)] bg-white/80 px-4 py-3">
+        <label className="min-w-[180px] flex-1 text-sm text-[var(--ui-muted)]">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-[0.16em] text-[var(--ui-muted)]/80">Sede</span>
+          <select name="site" defaultValue={siteFilter} className="ui-input">
+            <option value="all">Todas</option>
+            {sites.map((site) => (
+              <option key={site.id} value={site.id}>
+                {site.name ?? site.code ?? site.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="min-w-[160px] flex-1 text-sm text-[var(--ui-muted)]">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-[0.16em] text-[var(--ui-muted)]/80">Estado</span>
+          <select name="status" defaultValue={statusFilter} className="ui-input">
+            <option value="all">Todos</option>
+            <option value="active">Activos</option>
+            <option value="inactive">Inactivos</option>
+          </select>
+        </label>
+        <label className="min-w-[180px] flex-1 text-sm text-[var(--ui-muted)]">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-[0.16em] text-[var(--ui-muted)]/80">Rol</span>
+          <select name="role" defaultValue={roleFilter} className="ui-input">
+            <option value="all">Todos</option>
+            {roleOptions.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex items-center gap-2">
+          <button type="submit" className="ui-btn ui-btn--ghost">
+            Filtrar
+          </button>
+          <Link href="/staff" className="ui-btn ui-btn--ghost">
+            Limpiar
+          </Link>
+        </div>
+      </form>
+
       <div className="ui-panel ui-panel--accent-brand">
-        {employees.length === 0 ? (
+        {filteredEmployees.length === 0 ? (
           <div className="ui-empty flex flex-col items-center gap-4 py-12">
-            <p className="text-[var(--ui-muted)]">Aún no hay trabajadores registrados.</p>
-            <p className="text-center text-sm text-[var(--ui-muted)]">
-              Usa el botón de arriba para invitar al primer trabajador por correo; recibirá un enlace para completar su perfil y asignarse a una sede.
-            </p>
-            <Link href="/staff/new" className="ui-btn ui-btn--brand">
-              Invitar trabajador
-            </Link>
+            <p className="text-[var(--ui-muted)]">{employees.length === 0 ? "Aún no hay trabajadores registrados." : "No hay trabajadores que coincidan con esos filtros."}</p>
+            {employees.length === 0 ? (
+              <>
+                <p className="text-center text-sm text-[var(--ui-muted)]">
+                  Usa el botón de arriba para invitar al primer trabajador por correo; recibirá un enlace para completar su perfil y asignarse a una sede.
+                </p>
+                <Link href="/staff/new" className="ui-btn ui-btn--brand">
+                  Invitar trabajador
+                </Link>
+              </>
+            ) : (
+              <Link href="/staff" className="ui-btn ui-btn--ghost">
+                Limpiar filtros
+              </Link>
+            )}
           </div>
         ) : (
           <Table className="ui-table--accent">
@@ -182,7 +258,7 @@ export default async function StaffPage() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {employees.map((employee) => {
+              {filteredEmployees.map((employee) => {
                 const directSite = Array.isArray(employee.site) ? employee.site[0] ?? null : employee.site ?? null;
                 const links = linksByEmployee.get(employee.id) ?? [];
                 const primaryLink = links.find((link) => link.is_primary) ?? null;
