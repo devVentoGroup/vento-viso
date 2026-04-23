@@ -124,6 +124,12 @@ const NAV_GROUPS: NavGroup[] = [
         icon: "fileText",
       },
       {
+        href: "/app-updates",
+        label: "Actualización app",
+        description: "Versiones y links Store",
+        icon: "phone",
+      },
+      {
         href: "/website-cms",
         label: "Website CMS",
         description: "Contenido de ventogroup.co",
@@ -133,7 +139,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-type IconName = "dashboard" | "users" | "calendar" | "store" | "sparkles" | "package" | "menu" | "fileText" | "briefcase";
+type IconName = "dashboard" | "users" | "calendar" | "store" | "sparkles" | "package" | "menu" | "fileText" | "briefcase" | "phone";
 
 function Icon({ name }: { name?: IconName }) {
   const common = "none";
@@ -221,6 +227,14 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
           <rect x="3" y="6" width="18" height="14" rx="2" />
           <path d="M3 11h18" />
+        </svg>
+      );
+    case "phone":
+      return (
+        <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
+          <rect x="7" y="2.5" width="10" height="19" rx="2" />
+          <path d="M11 18.5h2" />
+          <path d="M10 5.5h4" />
         </svg>
       );
     default:
