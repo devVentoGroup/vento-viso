@@ -50,6 +50,7 @@ type MenuItemFormProps = {
 };
 
 const PRODUCT_UPLOAD_ENDPOINT = "/api/viso/upload-product-image";
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 function getPreviewTitle(name: string) {
   const trimmed = name.trim();
@@ -149,6 +150,11 @@ export function MenuItemForm({ mode, sites, products, initial, action }: MenuIte
 
   const handleUpload = async (file: File | null) => {
     if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadStatus("error");
+      setUploadMessage("La imagen supera 5 MB. Comprimela o usa una mas liviana.");
+      return;
+    }
     setUploadStatus("uploading");
     setUploadMessage("");
     try {
@@ -161,11 +167,22 @@ export function MenuItemForm({ mode, sites, products, initial, action }: MenuIte
         method: "POST",
         body: formData,
       });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload?.error || "Error subiendo imagen.");
+      const raw = await response.text();
+      let payload: Record<string, unknown> | null = null;
+      if (raw) {
+        try {
+          payload = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          payload = null;
+        }
       }
-      setImageUrl(payload.url || "");
+      if (!response.ok) {
+        const backendError =
+          payload && typeof payload === "object" && "error" in payload ? (payload.error as string) : null;
+        throw new Error(backendError || raw || "Error subiendo imagen.");
+      }
+      const nextUrl = payload && typeof payload === "object" && "url" in payload ? (payload.url as string) : "";
+      setImageUrl(nextUrl || "");
       setUploadStatus("done");
       setUploadMessage("Imagen cargada.");
     } catch (error) {
