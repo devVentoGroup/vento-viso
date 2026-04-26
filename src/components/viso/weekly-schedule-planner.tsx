@@ -259,7 +259,7 @@ function ShiftEditInline({
             onChange={(e) => setShowEndAsClose(e.target.checked)}
             className="rounded border-[var(--ui-border)]"
           />
-          Mostrar salida como "Cierre" al empleado
+          Mostrar salida como &quot;Cierre&quot; al empleado
         </label>
         <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
           <input
@@ -562,27 +562,34 @@ export function WeeklySchedulePlanner({
 
   useEffect(() => {
     if (daysWithShifts.length > 0 && !daysWithShifts.some((d) => d.iso === copySourceDayIso)) {
-      setCopySourceDayIso(daysWithShifts[0].iso);
+      const timer = window.setTimeout(() => setCopySourceDayIso(daysWithShifts[0].iso), 0);
+      return () => window.clearTimeout(timer);
     }
+    return undefined;
   }, [daysWithShifts, copySourceDayIso]);
 
   useEffect(() => {
     if (employeesOnSourceDay.length > 0 && !employeesOnSourceDay.some((e) => e.id === copyEmployeeId)) {
-      setCopyEmployeeId(employeesOnSourceDay[0].id);
+      const timer = window.setTimeout(() => setCopyEmployeeId(employeesOnSourceDay[0].id), 0);
+      return () => window.clearTimeout(timer);
     }
+    return undefined;
   }, [employeesOnSourceDay, copyEmployeeId]);
 
   useEffect(() => {
     if (!initialSlot || initialSlotConsumed || selectionMode) return;
-    setSelection({
-      type: "slot",
-      dayIso: initialSlot.dayIso,
-      startTime: initialSlot.startTime,
-      endTime: initialSlot.endTime,
-      employeeIds: [],
-      showTimeAdjust: false,
-    });
-    setInitialSlotConsumed(true);
+    const timer = window.setTimeout(() => {
+      setSelection({
+        type: "slot",
+        dayIso: initialSlot.dayIso,
+        startTime: initialSlot.startTime,
+        endTime: initialSlot.endTime,
+        employeeIds: [],
+        showTimeAdjust: false,
+      });
+      setInitialSlotConsumed(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [initialSlot, initialSlotConsumed, selectionMode]);
 
   const selectShift = (shift: PlannerShift) => {
@@ -1467,7 +1474,7 @@ export function WeeklySchedulePlanner({
                   value="1"
                   className="rounded border-[var(--ui-border)]"
                 />
-                Mostrar salida como "Cierre" al empleado
+                Mostrar salida como &quot;Cierre&quot; al empleado
               </label>
               <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                 <input

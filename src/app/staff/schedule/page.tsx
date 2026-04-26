@@ -2214,7 +2214,7 @@ export default async function StaffSchedulePage({
                       defaultChecked={Boolean(selectedShift.show_end_as_close)}
                       className="rounded border-[var(--ui-border)]"
                     />
-                    Mostrar la salida como "Cierre" al empleado
+                    Mostrar la salida como &quot;Cierre&quot; al empleado
                   </label>
 
                   <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
@@ -2310,7 +2310,7 @@ export default async function StaffSchedulePage({
                     value="1"
                     className="rounded border-[var(--ui-border)]"
                   />
-                  Mostrar la salida como "Cierre" al empleado
+                  Mostrar la salida como &quot;Cierre&quot; al empleado
                 </label>
 
                 <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
