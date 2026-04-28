@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useRef, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
 
@@ -19,20 +19,6 @@ type StaffInviteFormProps = {
   roles: RoleOption[];
 };
 
-const INVITE_BASE_URL =
-  process.env.NEXT_PUBLIC_STAFF_INVITE_BASE_URL ||
-  "https://os.ventogroup.co/invite";
-
-function buildInviteUrl(token: string) {
-  if (!token) return "";
-  if (INVITE_BASE_URL.includes(":token")) {
-    return INVITE_BASE_URL.replace(":token", token);
-  }
-  const url = new URL(INVITE_BASE_URL);
-  url.searchParams.set("token", token);
-  return url.toString();
-}
-
 export function StaffInviteForm({ sites, roles }: StaffInviteFormProps) {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
@@ -41,54 +27,56 @@ export function StaffInviteForm({ sites, roles }: StaffInviteFormProps) {
   const [expiresAt, setExpiresAt] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "done" | "error">("idle");
   const [message, setMessage] = useState("");
-  const [token, setToken] = useState("");
-
-  const inviteUrl = useMemo(() => buildInviteUrl(token), [token]);
+  const inFlightRef = useRef(false);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (inFlightRef.current) return;
 
+    inFlightRef.current = true;
     setStatus("saving");
     setMessage("");
 
     const supabase = createClient();
-    const { data: userRes } = await supabase.auth.getUser();
-    const userId = userRes.user?.id ?? null;
-    let createdBy: string | null = null;
-    if (userId) {
-      const { data: creatorRow } = await supabase
-        .from("users")
-        .select("id")
-        .eq("id", userId)
-        .maybeSingle();
-      createdBy = creatorRow?.id ?? null;
+    try {
+      const { data, error } = await supabase.functions.invoke("staff-invitations-create", {
+        body: {
+          email: email.trim(),
+          full_name: fullName.trim() || null,
+          site_id: siteId,
+          role,
+          expires_at: expiresAt ? new Date(expiresAt).toISOString() : undefined,
+        },
+      });
+
+      if (error) {
+        let detail = error.message || "No se pudo crear la invitacion.";
+        const context = (error as { context?: unknown }).context;
+        if (context && typeof (context as Response).clone === "function") {
+          try {
+            const payload = await (context as Response).clone().json();
+            detail = payload?.error || payload?.message || payload?.details || detail;
+          } catch {
+            // Non-JSON function error.
+          }
+        }
+        setStatus("error");
+        setMessage(detail);
+        return;
+      }
+
+      const response = data as { message?: string; invited?: boolean; added_to_team?: boolean; error?: string } | null;
+      if (response?.error || (!response?.invited && !response?.added_to_team)) {
+        setStatus("error");
+        setMessage(response?.error || "No se pudo completar la invitacion.");
+        return;
+      }
+
+      setStatus("done");
+      setMessage(response.message || "Invitacion enviada. El trabajador recibira un correo para crear contrasena.");
+    } finally {
+      inFlightRef.current = false;
     }
-
-    const inviteToken = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const payload = {
-      token: inviteToken,
-      email: email.trim() || null,
-      full_name: fullName.trim() || null,
-      staff_site_id: siteId || null,
-      staff_role: role || null,
-      expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-      created_by: createdBy,
-      invited_at: now,
-      status: "sent",
-    };
-
-    const { error } = await supabase.from("staff_invitations").insert(payload);
-
-    if (error) {
-      setStatus("error");
-      setMessage(error.message || "No se pudo crear la invitacion.");
-      return;
-    }
-
-    setStatus("done");
-    setMessage("Invitacion creada.");
-    setToken(inviteToken);
   };
 
   const canSubmit = email.trim() && siteId && role;
@@ -162,24 +150,6 @@ export function StaffInviteForm({ sites, roles }: StaffInviteFormProps) {
       {status === "error" ? <div className="ui-alert ui-alert--error">{message}</div> : null}
       {status === "done" ? <div className="ui-alert ui-alert--success">{message}</div> : null}
 
-      {token ? (
-        <div className="ui-panel-soft space-y-2">
-          <div className="ui-label">Link de invitacion</div>
-          <div className="ui-code break-all">{inviteUrl || token}</div>
-          <button
-            type="button"
-            className="ui-btn ui-btn--ghost"
-            onClick={() => {
-              if (inviteUrl) {
-                void navigator.clipboard.writeText(inviteUrl);
-              }
-            }}
-          >
-            Copiar link
-          </button>
-        </div>
-      ) : null}
-
       <div className="flex gap-3">
         <button
           type="submit"
@@ -197,7 +167,6 @@ export function StaffInviteForm({ sites, roles }: StaffInviteFormProps) {
             setSiteId("");
             setRole("");
             setExpiresAt("");
-            setToken("");
             setStatus("idle");
             setMessage("");
           }}
