@@ -154,6 +154,7 @@ function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
   try {
     return new Intl.DateTimeFormat("es-CO", {
+      timeZone: "America/Bogota",
       dateStyle: "short",
       timeStyle: "short",
     }).format(new Date(value));
