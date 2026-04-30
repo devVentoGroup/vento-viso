@@ -83,6 +83,12 @@ const NAV_GROUPS: NavGroup[] = [
         icon: "calendar",
       },
       {
+        href: "/ops/audit",
+        label: "Auditoria ops",
+        description: "Areas, LOCs y asignaciones",
+        icon: "dashboard",
+      },
+      {
         href: "/pass-users",
         label: "Usuarios Pass",
         description: "Clientes y lealtad",
@@ -358,6 +364,7 @@ export function VentoChrome({
                 </button>
                 <div className="hidden sm:flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--ui-surface-2)] ring-1 ring-inset ring-[var(--ui-border)]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={`/logos/${APP_ENTITY}.svg`} alt={APP_NAME} className="h-6 w-6" />
                   </div>
                   <div className="flex flex-col leading-tight">

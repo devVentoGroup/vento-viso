@@ -28,6 +28,7 @@ type EmployeeRow = {
   role: string | null;
   is_active: boolean | null;
   site_id: string | null;
+  pin_code_hash?: string | null;
 };
 
 type EmployeeSiteRow = {
@@ -73,6 +74,41 @@ type AreaRow = {
   name: string | null;
   kind: string | null;
   is_active: boolean | null;
+};
+
+type InventoryLocationRow = {
+  id: string;
+  site_id: string | null;
+  area_id: string | null;
+  code: string | null;
+  description: string | null;
+  zone: string | null;
+  location_type: string | null;
+  is_active: boolean | null;
+};
+
+type EmployeeInventoryLocationAssignmentRow = {
+  id: string;
+  employee_id: string;
+  site_id: string;
+  location_id: string;
+  purpose: "kiosk_withdraw";
+  is_active: boolean | null;
+  location?: {
+    id: string;
+    site_id: string | null;
+    area_id: string | null;
+    code: string | null;
+    description: string | null;
+    zone: string | null;
+  } | {
+    id: string;
+    site_id: string | null;
+    area_id: string | null;
+    code: string | null;
+    description: string | null;
+    zone: string | null;
+  }[] | null;
 };
 
 type AreaKindRow = {
@@ -196,6 +232,103 @@ async function saveEmployeeAreaPurposeAssignment(formData: FormData) {
   revalidatePath(`/staff/${employeeId}`);
   revalidatePath("/staff");
   redirect(`/staff/${employeeId}?ok=area_assignment_saved`);
+}
+
+async function saveEmployeeInventoryLocationAssignment(formData: FormData) {
+  "use server";
+  const employeeId = asText(formData.get("employee_id"));
+  const siteId = asText(formData.get("site_id"));
+  const locationId = asText(formData.get("location_id"));
+
+  if (!employeeId || !siteId) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Faltan trabajador o sede para asignar LOC.")}`);
+  }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
+
+  if (!locationId) {
+    const { error: delError } = await supabase
+      .from("employee_inventory_location_assignments")
+      .delete()
+      .eq("employee_id", employeeId)
+      .eq("site_id", siteId)
+      .eq("purpose", "kiosk_withdraw");
+    if (delError) {
+      redirect(`/staff/${employeeId}?error=${encodeURIComponent(delError.message)}`);
+    }
+    revalidatePath(`/staff/${employeeId}`);
+    revalidatePath("/staff");
+    redirect(`/staff/${employeeId}?ok=inventory_location_assignment_saved`);
+  }
+
+  const { data: locationCheck, error: locationCheckError } = await supabase
+    .from("inventory_locations")
+    .select("id,site_id,is_active")
+    .eq("id", locationId)
+    .maybeSingle();
+  if (locationCheckError || !locationCheck) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("LOC invalido.")}`);
+  }
+  if (String(locationCheck.site_id ?? "") !== siteId) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("El LOC no pertenece a la sede seleccionada.")}`);
+  }
+
+  const { error } = await supabase.from("employee_inventory_location_assignments").upsert(
+    {
+      employee_id: employeeId,
+      site_id: siteId,
+      location_id: locationId,
+      purpose: "kiosk_withdraw",
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "employee_id,site_id,purpose" }
+  );
+
+  if (error) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/staff/${employeeId}`);
+  revalidatePath("/staff");
+  redirect(`/staff/${employeeId}?ok=inventory_location_assignment_saved`);
+}
+
+async function setEmployeeKioskPin(formData: FormData) {
+  "use server";
+  const employeeId = asText(formData.get("employee_id"));
+  const pin = asText(formData.get("pin"));
+
+  if (!employeeId) {
+    redirect("/staff?error=" + encodeURIComponent("Trabajador invalido."));
+  }
+
+  if (!/^[0-9]{4,8}$/.test(pin)) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("El PIN debe tener entre 4 y 8 digitos.")}`);
+  }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+  });
+  const supabase = createAdminClient();
+
+  const { error } = await supabase.rpc("set_employee_kiosk_pin", {
+    p_employee_id: employeeId,
+    p_pin: pin,
+  });
+
+  if (error) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/staff/${employeeId}`);
+  revalidatePath("/staff");
+  redirect(`/staff/${employeeId}?ok=kiosk_pin_saved`);
 }
 
 async function updateEmployee(formData: FormData) {
@@ -659,7 +792,11 @@ export default async function StaffDetailPage({
               ? "Turno eliminado."
               : okRaw === "area_assignment_saved"
                 ? "Asignación de área guardada."
-              : okRaw;
+                : okRaw === "inventory_location_assignment_saved"
+                  ? "Asignacion de LOC guardada."
+                  : okRaw === "kiosk_pin_saved"
+                    ? "PIN de quiosco guardado."
+                    : okRaw;
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
   const { id } = await params;
 
@@ -678,14 +815,16 @@ export default async function StaffDetailPage({
     { data: attendanceLogs },
     { data: shifts },
     { data: areasData },
+    { data: inventoryLocationsData },
     { data: areaKindsData },
     { data: siteAreaPurposeRulesData },
     { data: employeeAreaAssignmentsData },
+    { data: employeeInventoryLocationAssignmentsData },
     ...restResults
   ] = await Promise.all([
     supabase
       .from("employees")
-      .select("id,full_name,alias,role,is_active,site_id")
+      .select("id,full_name,alias,role,is_active,site_id,pin_code_hash")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -726,6 +865,12 @@ export default async function StaffDetailPage({
       .eq("is_active", true)
       .order("name", { ascending: true }),
     supabase
+      .from("inventory_locations")
+      .select("id,site_id,area_id,code,description,zone,location_type,is_active")
+      .eq("is_active", true)
+      .order("description", { ascending: true })
+      .order("code", { ascending: true }),
+    supabase
       .from("area_kinds")
       .select("code,use_for_remission"),
     supabase
@@ -737,6 +882,12 @@ export default async function StaffDetailPage({
       .from("employee_area_purpose_assignments")
       .select("id,employee_id,site_id,area_id,purpose,is_active,area:areas(id,site_id,name,kind)")
       .eq("employee_id", id)
+      .eq("is_active", true),
+    supabase
+      .from("employee_inventory_location_assignments")
+      .select("id,employee_id,site_id,location_id,purpose,is_active,location:inventory_locations(id,site_id,area_id,code,description,zone)")
+      .eq("employee_id", id)
+      .eq("purpose", "kiosk_withdraw")
       .eq("is_active", true),
     supabase
       .from("documents")
@@ -769,9 +920,12 @@ export default async function StaffDetailPage({
   const attendanceRows = (attendanceLogs ?? []) as AttendanceLogRow[];
   const shiftRows = (shifts ?? []) as ShiftRow[];
   const areaRows = (areasData ?? []) as AreaRow[];
+  const inventoryLocationRows = (inventoryLocationsData ?? []) as InventoryLocationRow[];
   const areaKinds = (areaKindsData ?? []) as AreaKindRow[];
   const siteRemissionRules = (siteAreaPurposeRulesData ?? []) as SiteAreaPurposeRuleRow[];
   const employeeAreaAssignments = (employeeAreaAssignmentsData ?? []) as EmployeeAreaPurposeAssignmentRow[];
+  const employeeInventoryLocationAssignments =
+    (employeeInventoryLocationAssignmentsData ?? []) as EmployeeInventoryLocationAssignmentRow[];
 
   const areasBySite = areaRows.reduce((acc, row) => {
     const siteId = String(row.site_id ?? "").trim();
@@ -801,6 +955,18 @@ export default async function StaffDetailPage({
     acc[key] = row;
     return acc;
   }, {} as Record<string, EmployeeAreaPurposeAssignmentRow>);
+  const locationsBySite = inventoryLocationRows.reduce((acc, row) => {
+    const siteId = String(row.site_id ?? "").trim();
+    if (!siteId) return acc;
+    const current = acc[siteId] ?? [];
+    current.push(row);
+    acc[siteId] = current;
+    return acc;
+  }, {} as Record<string, InventoryLocationRow[]>);
+  const inventoryLocationAssignmentBySite = employeeInventoryLocationAssignments.reduce((acc, row) => {
+    acc[String(row.site_id)] = row;
+    return acc;
+  }, {} as Record<string, EmployeeInventoryLocationAssignmentRow>);
 
   const attendanceLabel = attendance?.current_status === "check_in" ? "En turno" : attendance?.current_status === "check_out" ? "Fuera de turno" : "Sin registros";
 
@@ -1086,6 +1252,108 @@ export default async function StaffDetailPage({
                           Guardar
                         </button>
                       </form>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+
+      <div className="ui-panel space-y-4">
+        <div>
+          <div className="ui-h3">LOC de retiro NEXO</div>
+          <p className="ui-body-muted">
+            Define el destino fijo para retiros hechos desde el quiosco. El trabajador retira desde bodega y NEXO traslada al LOC asignado.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-bg-soft)] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-[var(--ui-text)]">PIN de quiosco</div>
+              <div className="mt-1 text-sm text-[var(--ui-muted)]">
+                Se usa para confirmar retiros desde la tablet. No se muestra despues de guardarlo.
+              </div>
+            </div>
+            <span className={`ui-chip ${emp.pin_code_hash ? "ui-chip--success" : ""}`}>
+              {emp.pin_code_hash ? "PIN activo" : "Sin PIN"}
+            </span>
+          </div>
+          <form action={setEmployeeKioskPin} className="mt-4 flex flex-wrap items-end gap-2">
+            <input type="hidden" name="employee_id" value={emp.id} />
+            <label className="flex min-w-[220px] flex-1 flex-col gap-1">
+              <span className="ui-label">Nuevo PIN</span>
+              <input
+                name="pin"
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]{4,8}"
+                className="ui-input"
+                placeholder="4 a 8 digitos"
+                autoComplete="off"
+                required
+              />
+            </label>
+            <button type="submit" className="ui-btn ui-btn--ghost">
+              Guardar PIN
+            </button>
+          </form>
+        </div>
+        {siteLinks.length === 0 ? (
+          <div className="ui-empty">Primero asigna al menos una sede al trabajador.</div>
+        ) : (
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Sede</TableHeaderCell>
+                <TableHeaderCell>LOC destino para retiro</TableHeaderCell>
+                <TableHeaderCell>Estado</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {siteLinks.map((link) => {
+                const site = Array.isArray(link.site) ? link.site[0] ?? null : link.site ?? null;
+                const siteId = String(link.site_id ?? "").trim();
+                const siteLocations = (locationsBySite[siteId] ?? []).slice().sort((a, b) =>
+                  String(a.description ?? a.zone ?? a.code ?? "").localeCompare(
+                    String(b.description ?? b.zone ?? b.code ?? ""),
+                    "es",
+                    { sensitivity: "base" }
+                  )
+                );
+                const assignment = inventoryLocationAssignmentBySite[siteId];
+
+                return (
+                  <TableRow key={`inventory-location-${siteId}`}>
+                    <TableCell>{site?.name ?? site?.code ?? siteId}</TableCell>
+                    <TableCell>
+                      <form action={saveEmployeeInventoryLocationAssignment} className="flex flex-wrap items-center gap-2">
+                        <input type="hidden" name="employee_id" value={emp.id} />
+                        <input type="hidden" name="site_id" value={siteId} />
+                        <select
+                          name="location_id"
+                          className="ui-input min-w-[260px]"
+                          defaultValue={assignment?.location_id ?? ""}
+                        >
+                          <option value="">Sin LOC asignado</option>
+                          {siteLocations.map((location) => (
+                            <option key={location.id} value={location.id}>
+                              {location.description || location.zone || location.code || location.id}
+                            </option>
+                          ))}
+                        </select>
+                        <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+                          Guardar
+                        </button>
+                      </form>
+                    </TableCell>
+                    <TableCell>
+                      {assignment ? (
+                        <span className="ui-chip ui-chip--success">Configurado</span>
+                      ) : (
+                        <span className="ui-chip">Pendiente</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 );
