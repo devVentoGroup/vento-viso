@@ -49,6 +49,7 @@ type StaffWalletDocsPanelProps = {
   documentTypeNamesById: Record<string, string>;
   documentTypes: DocumentTypeOption[];
   uploadDocumentAction: (formData: FormData) => Promise<void>;
+  canUploadDocuments?: boolean;
   canEditDocuments?: boolean;
   updateDocumentAction?: (formData: FormData) => Promise<void>;
 };
@@ -156,13 +157,13 @@ function toDateInputValue(s: string | null) {
 
 export function StaffWalletDocsPanel({
   employeeId,
-  employeeName,
   documents,
   eligibility,
   walletCard,
   documentTypeNamesById,
   documentTypes,
   uploadDocumentAction,
+  canUploadDocuments = false,
   canEditDocuments = false,
   updateDocumentAction,
 }: StaffWalletDocsPanelProps) {
@@ -180,7 +181,9 @@ export function StaffWalletDocsPanel({
         <h4 className="ui-label mb-2">Documentos del trabajador</h4>
         <div className="mb-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
           <p className="ui-caption mb-3">Sube documentos desde aquí o desde ANIMA. Para contrato laboral elige tipo &quot;Contrato laboral&quot; e indica fechas de vigencia.</p>
-          {!showUpload ? (
+          {!canUploadDocuments ? (
+            <p className="ui-caption">No tienes permiso para subir documentos de trabajadores.</p>
+          ) : !showUpload ? (
             <button
               type="button"
               onClick={() => setShowUpload(true)}

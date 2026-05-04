@@ -65,6 +65,7 @@ export default async function StaffPage({
   await requireAppAccess({
     appId: "viso",
     returnTo: "/staff",
+    permissionCode: "staff.read",
   });
 
   const supabase = createAdminClient();

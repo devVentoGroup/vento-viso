@@ -30,7 +30,7 @@ type AppSwitcherProps = {
 };
 
 const GLOBAL_OPERATIONS_ROLES = new Set(["propietario", "gerente_general"]);
-const MANAGEMENT_ROLES = new Set(["propietario", "gerente_general", "gerente"]);
+const MANAGEMENT_ROLES = new Set(["propietario", "gerente_general", "gerente", "auxiliar_administrativa"]);
 
 function normalizeRole(role?: string | null) {
   return String(role ?? "").trim().toLowerCase();

@@ -3,6 +3,12 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
+import { StaffPhotoPanel } from "@/components/viso/staff-photo-panel";
+import {
+  StaffPermissionsPanel,
+  type StaffEmployeePermission,
+  type StaffPermissionOption,
+} from "@/components/viso/staff-permissions-panel";
 import { StaffWalletDocsPanel } from "@/components/viso/staff-wallet-docs-panel";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { requireAppAccess } from "@/lib/auth/guard";
@@ -28,6 +34,7 @@ type EmployeeRow = {
   role: string | null;
   is_active: boolean | null;
   site_id: string | null;
+  photo_url: string | null;
   pin_code_hash?: string | null;
 };
 
@@ -133,6 +140,25 @@ type EmployeeAreaPurposeAssignmentRow = {
   area?: { id: string; site_id: string | null; name: string | null; kind: string | null } | { id: string; site_id: string | null; name: string | null; kind: string | null }[] | null;
 };
 
+const STAFF_PERMISSION_CODES = [
+  "anima.documents.view_all",
+  "anima.documents.upload",
+  "anima.documents.delete",
+  "anima.employee_photos.upload",
+  "viso.access",
+  "viso.staff.read",
+  "viso.staff.manage",
+  "viso.staff.documents.manage",
+  "viso.staff.employee_photos.manage",
+  "viso.staff.permissions.manage",
+] as const;
+
+const PHOTO_MIME_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -184,6 +210,7 @@ async function saveEmployeeAreaPurposeAssignment(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -248,6 +275,7 @@ async function saveEmployeeInventoryLocationAssignment(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -315,6 +343,7 @@ async function setEmployeeKioskPin(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -348,6 +377,7 @@ async function updateEmployee(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${id}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -379,6 +409,7 @@ async function deleteEmployee(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${id}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -404,6 +435,7 @@ async function addEmployeeSite(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -441,6 +473,7 @@ async function setPrimarySite(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -472,6 +505,7 @@ async function toggleEmployeeSite(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -497,6 +531,7 @@ async function removeEmployeeSite(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -536,6 +571,7 @@ async function uploadStaffDocument(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.documents.manage",
   });
   const supabase = createAdminClient();
 
@@ -628,17 +664,12 @@ async function updateStaffDocument(formData: FormData) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent("Faltan documento o empleado.")}`);
   }
 
-  const { user } = await requireAppAccess({
+  await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.documents.manage",
   });
   const supabase = createAdminClient();
-
-  const { data: me } = await supabase.from("employees").select("role").eq("id", user.id).maybeSingle();
-  const allowedRoles = ["propietario", "gerente_general", "gerente"];
-  if (!me?.role || !allowedRoles.includes(me.role)) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Sin permiso para editar documentos.")}`);
-  }
 
   const updates: { issue_date?: string | null; expiry_date?: string | null; title?: string | null } = {};
   if (issueDate !== undefined) updates.issue_date = issueDate;
@@ -658,6 +689,169 @@ async function updateStaffDocument(formData: FormData) {
   redirect(`/staff/${employeeId}?ok=document_updated`);
 }
 
+async function uploadStaffPhoto(formData: FormData) {
+  "use server";
+  const employeeId = asText(formData.get("employee_id"));
+  const file = formData.get("file") as File | null;
+
+  if (!employeeId) {
+    redirect("/staff?error=" + encodeURIComponent("Trabajador invalido."));
+  }
+  if (!file || !(file instanceof File) || file.size === 0) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Selecciona una imagen.")}`);
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("La foto supera 5 MB.")}`);
+  }
+
+  const mime = String(file.type || "").toLowerCase();
+  const extension = PHOTO_MIME_EXTENSIONS[mime];
+  if (!extension) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Solo se permiten JPG, PNG o WebP.")}`);
+  }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.employee_photos.manage",
+  });
+  const supabase = createAdminClient();
+
+  const storagePath = `staff/${employeeId}/${Date.now()}.${extension}`;
+  const { error: uploadError } = await supabase.storage
+    .from("employee-photos")
+    .upload(storagePath, await file.arrayBuffer(), {
+      contentType: mime,
+      cacheControl: "3600",
+      upsert: false,
+    });
+
+  if (uploadError) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al subir la foto: " + uploadError.message)}`);
+  }
+
+  const { data } = supabase.storage.from("employee-photos").getPublicUrl(storagePath);
+  const { error } = await supabase
+    .from("employees")
+    .update({ photo_url: data.publicUrl })
+    .eq("id", employeeId);
+
+  if (error) {
+    await supabase.storage.from("employee-photos").remove([storagePath]);
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al guardar la foto: " + error.message)}`);
+  }
+
+  revalidatePath(`/staff/${employeeId}`);
+  revalidatePath("/staff");
+  redirect(`/staff/${employeeId}?ok=photo_uploaded`);
+}
+
+async function grantEmployeePermission(formData: FormData) {
+  "use server";
+  const employeeId = asText(formData.get("employee_id"));
+  const permissionId = asText(formData.get("permission_id"));
+  const scopeTypeRaw = asText(formData.get("scope_type"));
+  const scopeType = scopeTypeRaw === "site" ? "site" : "global";
+  const isAllowed = asText(formData.get("is_allowed")) !== "false";
+
+  if (!employeeId || !permissionId) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Faltan trabajador o permiso.")}`);
+  }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.permissions.manage",
+  });
+  const supabase = createAdminClient();
+
+  const { data: permission, error: permissionError } = await supabase
+    .from("app_permissions")
+    .select("id,code,app:apps(code)")
+    .eq("id", permissionId)
+    .maybeSingle();
+
+  const app = Array.isArray(permission?.app) ? permission?.app[0] : permission?.app;
+  const fullCode = app?.code && permission?.code ? `${app.code}.${permission.code}` : "";
+  if (permissionError || !permission || !STAFF_PERMISSION_CODES.includes(fullCode as (typeof STAFF_PERMISSION_CODES)[number])) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Permiso no permitido para esta pantalla.")}`);
+  }
+
+  let scopeSiteId: string | null = null;
+  if (scopeType === "site") {
+    const { data: employee } = await supabase
+      .from("employees")
+      .select("site_id")
+      .eq("id", employeeId)
+      .maybeSingle();
+    scopeSiteId = employee?.site_id ?? null;
+    if (!scopeSiteId) {
+      redirect(`/staff/${employeeId}?error=${encodeURIComponent("El trabajador no tiene sede principal para alcance por sede.")}`);
+    }
+  }
+
+  let cleanup = supabase
+    .from("employee_permissions")
+    .delete()
+    .eq("employee_id", employeeId)
+    .eq("permission_id", permissionId)
+    .eq("scope_type", scopeType);
+  cleanup = scopeSiteId ? cleanup.eq("scope_site_id", scopeSiteId) : cleanup.is("scope_site_id", null);
+  const { error: cleanupError } = await cleanup
+    .is("scope_area_id", null)
+    .is("scope_site_type", null)
+    .is("scope_area_kind", null);
+
+  if (cleanupError) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(cleanupError.message)}`);
+  }
+
+  const { error } = await supabase.from("employee_permissions").insert({
+    employee_id: employeeId,
+    permission_id: permissionId,
+    is_allowed: isAllowed,
+    scope_type: scopeType,
+    scope_site_id: scopeSiteId,
+  });
+
+  if (error) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/staff/${employeeId}`);
+  redirect(`/staff/${employeeId}?ok=permission_saved`);
+}
+
+async function removeEmployeePermission(formData: FormData) {
+  "use server";
+  const employeeId = asText(formData.get("employee_id"));
+  const permissionRowId = asText(formData.get("permission_row_id"));
+
+  if (!employeeId || !permissionRowId) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Permiso invalido.")}`);
+  }
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.permissions.manage",
+  });
+  const supabase = createAdminClient();
+
+  const { error } = await supabase
+    .from("employee_permissions")
+    .delete()
+    .eq("id", permissionRowId)
+    .eq("employee_id", employeeId);
+
+  if (error) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/staff/${employeeId}`);
+  redirect(`/staff/${employeeId}?ok=permission_removed`);
+}
+
 async function createEmployeeShift(formData: FormData) {
   "use server";
   const employeeId = asText(formData.get("employee_id"));
@@ -673,6 +867,7 @@ async function createEmployeeShift(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -715,6 +910,7 @@ async function updateEmployeeShift(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -754,6 +950,7 @@ async function deleteEmployeeShift(formData: FormData) {
   await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${employeeId}`,
+    permissionCode: "staff.manage",
   });
   const supabase = createAdminClient();
 
@@ -801,9 +998,10 @@ export default async function StaffDetailPage({
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
   const { id } = await params;
 
-  const { user } = await requireAppAccess({
+  const { supabase: authClient } = await requireAppAccess({
     appId: "viso",
     returnTo: `/staff/${id}`,
+    permissionCode: "staff.read",
   });
   const supabase = createAdminClient();
 
@@ -825,7 +1023,7 @@ export default async function StaffDetailPage({
   ] = await Promise.all([
     supabase
       .from("employees")
-      .select("id,full_name,alias,role,is_active,site_id,pin_code_hash")
+      .select("id,full_name,alias,role,is_active,site_id,photo_url,pin_code_hash")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -898,20 +1096,31 @@ export default async function StaffDetailPage({
     supabase.rpc("employee_wallet_eligibility", { p_employee_id: id }).maybeSingle(),
     supabase.from("employee_wallet_cards").select("id,status,serial_number,last_issued_at,last_revoked_at,revocation_reason").eq("employee_id", id).maybeSingle(),
     supabase.from("document_types").select("id,name,requires_expiry,validity_months").eq("is_active", true).order("name", { ascending: true }),
+    supabase
+      .from("app_permissions")
+      .select("id,code,name,app:apps(code)")
+      .in("code", STAFF_PERMISSION_CODES.map((code) => code.split(".").slice(1).join(".")))
+      .order("code", { ascending: true }),
+    supabase
+      .from("employee_permissions")
+      .select("id,is_allowed,scope_type,permission:app_permissions(id,code,name,app:apps(code))")
+      .eq("employee_id", id),
   ]);
 
   if (!employee) {
     redirect("/staff?error=" + encodeURIComponent("Empleado no encontrado."));
   }
 
-  const { data: currentEmployee } = await supabase
-    .from("employees")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-  const canEditDocuments =
-    !!currentEmployee?.role &&
-    ["propietario", "gerente_general", "gerente"].includes(currentEmployee.role);
+  const [documentsPermission, photoPermission, permissionsPermission, managePermission] = await Promise.all([
+    authClient.rpc("has_permission", { p_permission_code: "viso.staff.documents.manage" }),
+    authClient.rpc("has_permission", { p_permission_code: "viso.staff.employee_photos.manage" }),
+    authClient.rpc("has_permission", { p_permission_code: "viso.staff.permissions.manage" }),
+    authClient.rpc("has_permission", { p_permission_code: "viso.staff.manage" }),
+  ]);
+  const canEditDocuments = !documentsPermission.error && Boolean(documentsPermission.data);
+  const canEditPhoto = !photoPermission.error && Boolean(photoPermission.data);
+  const canManagePermissions = !permissionsPermission.error && Boolean(permissionsPermission.data);
+  const canManageStaff = !managePermission.error && Boolean(managePermission.data);
 
   const siteRows = (sites ?? []) as SiteRow[];
   const roleRows = (roles ?? []) as RoleRow[];
@@ -975,7 +1184,57 @@ export default async function StaffDetailPage({
   const eligibilityResult = restResults[1] as { data?: unknown } | undefined;
   const walletCardResult = restResults[2] as { data?: unknown } | undefined;
   const documentTypesResult = restResults[3] as { data?: { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null }[] | null } | undefined;
+  const availablePermissionsResult = restResults[4] as { data?: unknown[] | null } | undefined;
+  const employeePermissionsResult = restResults[5] as { data?: unknown[] | null } | undefined;
   const documentTypesForSelect = (documentTypesResult?.data ?? []) as { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null }[];
+  type RawPermissionOption = {
+    id: string;
+    code: string;
+    name: string | null;
+    app: { code: string } | { code: string }[] | null;
+  };
+  const availablePermissions = ((availablePermissionsResult?.data ?? []) as RawPermissionOption[])
+    .map((item) => {
+      const app = Array.isArray(item.app) ? item.app[0] ?? null : item.app;
+      return {
+        id: item.id,
+        appCode: app?.code ?? "",
+        code: item.code,
+        name: item.name,
+      };
+    })
+    .filter((item): item is StaffPermissionOption =>
+      STAFF_PERMISSION_CODES.includes(`${item.appCode}.${item.code}` as (typeof STAFF_PERMISSION_CODES)[number])
+    )
+    .sort((a, b) => `${a.appCode}.${a.code}`.localeCompare(`${b.appCode}.${b.code}`, "es"));
+  type RawEmployeePermission = {
+    id: string;
+    is_allowed: boolean;
+    scope_type: string;
+    permission: RawPermissionOption | RawPermissionOption[] | null;
+  };
+  const employeePermissions = ((employeePermissionsResult?.data ?? []) as RawEmployeePermission[])
+    .map((item) => {
+      const permissionRaw = Array.isArray(item.permission) ? item.permission[0] ?? null : item.permission;
+      const app = Array.isArray(permissionRaw?.app) ? permissionRaw?.app[0] ?? null : permissionRaw?.app;
+      if (!permissionRaw || !app?.code) return null;
+      const permission = {
+        id: permissionRaw.id,
+        appCode: app.code,
+        code: permissionRaw.code,
+        name: permissionRaw.name,
+      };
+      if (!STAFF_PERMISSION_CODES.includes(`${permission.appCode}.${permission.code}` as (typeof STAFF_PERMISSION_CODES)[number])) {
+        return null;
+      }
+      return {
+        id: item.id,
+        isAllowed: item.is_allowed,
+        scopeType: item.scope_type,
+        permission,
+      };
+    })
+    .filter((item): item is StaffEmployeePermission => item !== null);
   const staffDocs = (docsResult?.data ?? []) as { id: string; title: string | null; status: string; issue_date: string | null; expiry_date: string | null; document_type: { id: string; name: string | null } | { id: string; name: string | null }[] | null }[];
   const staffDocsNormalized = staffDocs.map((d) => ({
     ...d,
@@ -1027,6 +1286,19 @@ export default async function StaffDetailPage({
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">Listo: {okMsg}</div> : null}
+      {!canManageStaff ? (
+        <div className="ui-alert">
+          Tienes acceso de lectura. Las acciones operativas del trabajador requieren el permiso viso.staff.manage.
+        </div>
+      ) : null}
+
+      <StaffPhotoPanel
+        employeeId={emp.id}
+        employeeName={emp.full_name}
+        photoUrl={emp.photo_url}
+        canEditPhoto={canEditPhoto}
+        uploadPhotoAction={uploadStaffPhoto}
+      />
 
       <StaffWalletDocsPanel
         employeeId={emp.id}
@@ -1037,8 +1309,18 @@ export default async function StaffDetailPage({
         documentTypeNamesById={documentTypeNamesById}
         documentTypes={documentTypesForSelect}
         uploadDocumentAction={uploadStaffDocument}
+        canUploadDocuments={canEditDocuments}
         canEditDocuments={canEditDocuments}
         updateDocumentAction={updateStaffDocument}
+      />
+
+      <StaffPermissionsPanel
+        employeeId={emp.id}
+        availablePermissions={availablePermissions}
+        employeePermissions={employeePermissions}
+        canManagePermissions={canManagePermissions}
+        grantPermissionAction={grantEmployeePermission}
+        removePermissionAction={removeEmployeePermission}
       />
 
       <div className="ui-panel space-y-6">
