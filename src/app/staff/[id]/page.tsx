@@ -159,6 +159,27 @@ const PHOTO_MIME_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
 };
 
+const PHOTO_BUCKET = "employee-photos";
+const STAFF_PHOTO_STORAGE_PREFIX = "staff";
+const STAFF_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+function normalizePhotoMime(value: string) {
+  const mime = value.trim().toLowerCase();
+  return PHOTO_MIME_EXTENSIONS[mime] ? mime : "";
+}
+
+function isSafeStaffPhotoPath(storagePath: string, employeeId: string, extension: string) {
+  const expectedPrefix = `${STAFF_PHOTO_STORAGE_PREFIX}/${employeeId}/`;
+  return (
+    storagePath.startsWith(expectedPrefix) &&
+    storagePath.length > expectedPrefix.length &&
+    storagePath.length <= 500 &&
+    !storagePath.includes("..") &&
+    !storagePath.includes("//") &&
+    storagePath.toLowerCase().endsWith(`.${extension}`)
+  );
+}
+
 const DOCUMENT_BUCKET = "documents";
 const STAFF_DOCUMENT_STORAGE_PREFIX = "viso";
 const STAFF_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
@@ -786,22 +807,12 @@ async function updateStaffDocument(formData: FormData) {
 async function uploadStaffPhoto(formData: FormData) {
   "use server";
   const employeeId = asText(formData.get("employee_id"));
-  const file = formData.get("file") as File | null;
+  const storagePath = asText(formData.get("storage_path"));
+  const fileSizeBytes = asPositiveInteger(formData.get("file_size_bytes"));
+  const mime = normalizePhotoMime(asText(formData.get("file_mime")));
 
   if (!employeeId) {
     redirect("/staff?error=" + encodeURIComponent("Trabajador invalido."));
-  }
-  if (!file || !(file instanceof File) || file.size === 0) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Selecciona una imagen.")}`);
-  }
-  if (file.size > 5 * 1024 * 1024) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("La foto supera 5 MB.")}`);
-  }
-
-  const mime = String(file.type || "").toLowerCase();
-  const extension = PHOTO_MIME_EXTENSIONS[mime];
-  if (!extension) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Solo se permiten JPG, PNG o WebP.")}`);
   }
 
   await requireAppAccess({
@@ -809,29 +820,54 @@ async function uploadStaffPhoto(formData: FormData) {
     returnTo: `/staff/${employeeId}`,
     permissionCode: "staff.employee_photos.manage",
   });
+
   const supabase = createAdminClient();
 
-  const storagePath = `staff/${employeeId}/${Date.now()}.${extension}`;
-  const { error: uploadError } = await supabase.storage
-    .from("employee-photos")
-    .upload(storagePath, await file.arrayBuffer(), {
-      contentType: mime,
-      cacheControl: "3600",
-      upsert: false,
-    });
+  const failAndCleanup = async (message: string): Promise<never> => {
+    const extension = PHOTO_MIME_EXTENSIONS[mime];
 
-  if (uploadError) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al subir la foto: " + uploadError.message)}`);
+    if (storagePath && extension && isSafeStaffPhotoPath(storagePath, employeeId, extension)) {
+      await supabase.storage.from(PHOTO_BUCKET).remove([storagePath]);
+    }
+
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(message)}`);
+  };
+
+  if (!mime) {
+    return await failAndCleanup("Solo se permiten JPG, PNG o WebP.");
   }
 
-  const { data } = supabase.storage.from("employee-photos").getPublicUrl(storagePath);
+  const extension = PHOTO_MIME_EXTENSIONS[mime];
+
+  if (!extension) {
+    return await failAndCleanup("Solo se permiten JPG, PNG o WebP.");
+  }
+
+  if (!storagePath || !isSafeStaffPhotoPath(storagePath, employeeId, extension)) {
+    return await failAndCleanup("Ruta de foto inválida.");
+  }
+
+  if (fileSizeBytes <= 0) {
+    return await failAndCleanup("La foto está vacía o no tiene tamaño válido.");
+  }
+
+  if (fileSizeBytes > STAFF_PHOTO_MAX_BYTES) {
+    return await failAndCleanup("La foto supera 5 MB.");
+  }
+
+  const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(storagePath);
+
+  if (!data.publicUrl) {
+    return await failAndCleanup("No se pudo obtener la URL pública de la foto.");
+  }
+
   const { error } = await supabase
     .from("employees")
     .update({ photo_url: data.publicUrl })
     .eq("id", employeeId);
 
   if (error) {
-    await supabase.storage.from("employee-photos").remove([storagePath]);
+    await supabase.storage.from(PHOTO_BUCKET).remove([storagePath]);
     redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al guardar la foto: " + error.message)}`);
   }
 
@@ -1072,25 +1108,27 @@ export default async function StaffDetailPage({
   const sp = (await searchParams) ?? {};
   const okRaw = sp.ok ? safeDecode(sp.ok) : "";
   const okMsg =
-    okRaw === "document_uploaded"
-      ? "Documento subido correctamente."
-      : okRaw === "document_updated"
-        ? "Documento actualizado."
-        : okRaw === "document_deleted"
-          ? "Documento eliminado."
-          : okRaw === "shift_created"
-            ? "Turno creado."
-            : okRaw === "shift_updated"
-              ? "Turno actualizado."
-              : okRaw === "shift_deleted"
-                ? "Turno eliminado."
-                : okRaw === "area_assignment_saved"
-                  ? "Asignación de área guardada."
-                  : okRaw === "inventory_location_assignment_saved"
-                    ? "Asignacion de LOC guardada."
-                    : okRaw === "kiosk_pin_saved"
-                      ? "PIN de quiosco guardado."
-                      : okRaw;
+    okRaw === "photo_uploaded"
+      ? "Foto actualizada correctamente."
+      : okRaw === "document_uploaded"
+        ? "Documento subido correctamente."
+        : okRaw === "document_updated"
+          ? "Documento actualizado."
+          : okRaw === "document_deleted"
+            ? "Documento eliminado."
+            : okRaw === "shift_created"
+              ? "Turno creado."
+              : okRaw === "shift_updated"
+                ? "Turno actualizado."
+                : okRaw === "shift_deleted"
+                  ? "Turno eliminado."
+                  : okRaw === "area_assignment_saved"
+                    ? "Asignación de área guardada."
+                    : okRaw === "inventory_location_assignment_saved"
+                      ? "Asignacion de LOC guardada."
+                      : okRaw === "kiosk_pin_saved"
+                        ? "PIN de quiosco guardado."
+                        : okRaw;
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
   const { id } = await params;
 
