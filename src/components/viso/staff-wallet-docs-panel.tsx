@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { createClient } from "@/lib/supabase/client";
 
@@ -307,7 +307,19 @@ export function StaffWalletDocsPanel({
   const [showUpload, setShowUpload] = useState(false);
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const documentsResetKey = documents
+    .map((doc) => `${doc.id}:${doc.status}:${doc.issue_date ?? ""}:${doc.expiry_date ?? ""}`)
+    .join("|");
   const editingDoc = editingDocId ? documents.find((d) => d.id === editingDocId) : null;
+
+  useEffect(() => {
+    setShowUpload(false);
+    setEditingDocId(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, [documentsResetKey]);
 
   return (
     <div className="ui-panel ui-panel--accent-brand space-y-6">

@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 
@@ -51,6 +51,14 @@ export function StaffPhotoPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  useEffect(() => {
+    setIsUploading(false);
+    setUploadError("");
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, [photoUrl]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
