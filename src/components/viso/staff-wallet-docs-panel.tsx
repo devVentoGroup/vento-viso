@@ -57,6 +57,13 @@ type StaffWalletDocsPanelProps = {
 
 function formatDate(s: string | null) {
   if (!s) return "-";
+
+  const dateOnly = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    return `${Number(day)}/${month}/${year.slice(2)}`;
+  }
+
   try {
     return new Intl.DateTimeFormat("es-CO", { dateStyle: "short" }).format(new Date(s));
   } catch {
@@ -270,6 +277,12 @@ function UploadDocumentForm({
 
 function toDateInputValue(s: string | null) {
   if (!s) return "";
+
+  const dateOnly = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (dateOnly) {
+    return `${dateOnly[1]}-${dateOnly[2]}-${dateOnly[3]}`;
+  }
+
   try {
     const d = new Date(s);
     return d.toISOString().slice(0, 10);
