@@ -351,7 +351,7 @@ export function StaffWalletDocsPanel({
                   <TableHeaderCell>Estado</TableHeaderCell>
                   <TableHeaderCell>Expedición</TableHeaderCell>
                   <TableHeaderCell>Vencimiento</TableHeaderCell>
-                  {canEditDocuments && <TableHeaderCell>Acciones</TableHeaderCell>}
+                  {canEditDocuments && updateDocumentAction && <TableHeaderCell>Acciones</TableHeaderCell>}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -365,15 +365,39 @@ export function StaffWalletDocsPanel({
                     </TableCell>
                     <TableCell>{formatDate(d.issue_date)}</TableCell>
                     <TableCell>{formatDate(d.expiry_date)}</TableCell>
-                    {canEditDocuments && (
+                    {canEditDocuments && updateDocumentAction && (
                       <TableCell>
-                        <button
-                          type="button"
-                          onClick={() => setEditingDocId(d.id)}
-                          className="ui-btn ui-btn--ghost text-sm"
-                        >
-                          Editar fechas
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingDocId(d.id)}
+                            className="ui-btn ui-btn--ghost text-sm"
+                          >
+                            Editar fechas
+                          </button>
+
+                          <form
+                            action={updateDocumentAction}
+                            method="post"
+                            onSubmit={(event) => {
+                              const confirmed = window.confirm(
+                                "¿Eliminar este documento? Esta acción borrará el registro y el archivo PDF."
+                              );
+
+                              if (!confirmed) {
+                                event.preventDefault();
+                              }
+                            }}
+                          >
+                            <input type="hidden" name="document_action" value="delete" />
+                            <input type="hidden" name="document_id" value={d.id} />
+                            <input type="hidden" name="employee_id" value={employeeId} />
+
+                            <button type="submit" className="ui-btn ui-btn--danger text-sm">
+                              Eliminar
+                            </button>
+                          </form>
+                        </div>
                       </TableCell>
                     )}
                   </TableRow>

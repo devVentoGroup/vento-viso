@@ -700,6 +700,7 @@ async function updateStaffDocument(formData: FormData) {
   "use server";
   const documentId = asText(formData.get("document_id"));
   const employeeId = asText(formData.get("employee_id"));
+  const documentAction = asText(formData.get("document_action"));
   const issueDateRaw = formData.get("issue_date");
   const expiryDateRaw = formData.get("expiry_date");
   const titleRaw = formData.get("title");
@@ -716,7 +717,52 @@ async function updateStaffDocument(formData: FormData) {
     returnTo: `/staff/${employeeId}`,
     permissionCode: "staff.documents.manage",
   });
+
   const supabase = createAdminClient();
+
+  if (documentAction === "delete") {
+    const { data: docRow, error: findError } = await supabase
+      .from("documents")
+      .select("id,storage_path")
+      .eq("id", documentId)
+      .eq("target_employee_id", employeeId)
+      .maybeSingle();
+
+    if (findError) {
+      redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al buscar el documento: " + findError.message)}`);
+    }
+
+    if (!docRow) {
+      redirect(`/staff/${employeeId}?error=${encodeURIComponent("Documento no encontrado.")}`);
+    }
+
+    const storagePath = typeof docRow.storage_path === "string" ? docRow.storage_path : "";
+
+    const { error: deleteError } = await supabase
+      .from("documents")
+      .delete()
+      .eq("id", documentId)
+      .eq("target_employee_id", employeeId);
+
+    if (deleteError) {
+      redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al eliminar el documento: " + deleteError.message)}`);
+    }
+
+    if (storagePath && isSafeStaffDocumentPath(storagePath, employeeId)) {
+      const { error: storageDeleteError } = await supabase.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
+
+      if (storageDeleteError) {
+        redirect(
+          `/staff/${employeeId}?error=${encodeURIComponent(
+            "Documento eliminado, pero no se pudo borrar el archivo del Storage: " + storageDeleteError.message
+          )}`
+        );
+      }
+    }
+
+    revalidatePath(`/staff/${employeeId}`);
+    redirect(`/staff/${employeeId}?ok=document_deleted`);
+  }
 
   const updates: { issue_date?: string | null; expiry_date?: string | null; title?: string | null } = {};
   if (issueDate !== undefined) updates.issue_date = issueDate;
@@ -732,6 +778,7 @@ async function updateStaffDocument(formData: FormData) {
   if (error) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al actualizar: " + error.message)}`);
   }
+
   revalidatePath(`/staff/${employeeId}`);
   redirect(`/staff/${employeeId}?ok=document_updated`);
 }
@@ -1029,19 +1076,21 @@ export default async function StaffDetailPage({
       ? "Documento subido correctamente."
       : okRaw === "document_updated"
         ? "Documento actualizado."
-        : okRaw === "shift_created"
-          ? "Turno creado."
-          : okRaw === "shift_updated"
-            ? "Turno actualizado."
-            : okRaw === "shift_deleted"
-              ? "Turno eliminado."
-              : okRaw === "area_assignment_saved"
-                ? "Asignación de área guardada."
-                : okRaw === "inventory_location_assignment_saved"
-                  ? "Asignacion de LOC guardada."
-                  : okRaw === "kiosk_pin_saved"
-                    ? "PIN de quiosco guardado."
-                    : okRaw;
+        : okRaw === "document_deleted"
+          ? "Documento eliminado."
+          : okRaw === "shift_created"
+            ? "Turno creado."
+            : okRaw === "shift_updated"
+              ? "Turno actualizado."
+              : okRaw === "shift_deleted"
+                ? "Turno eliminado."
+                : okRaw === "area_assignment_saved"
+                  ? "Asignación de área guardada."
+                  : okRaw === "inventory_location_assignment_saved"
+                    ? "Asignacion de LOC guardada."
+                    : okRaw === "kiosk_pin_saved"
+                      ? "PIN de quiosco guardado."
+                      : okRaw;
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
   const { id } = await params;
 
