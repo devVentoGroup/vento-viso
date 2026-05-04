@@ -159,6 +159,40 @@ const PHOTO_MIME_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
 };
 
+const DOCUMENT_BUCKET = "documents";
+const STAFF_DOCUMENT_STORAGE_PREFIX = "viso";
+const STAFF_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
+
+function sanitizeStaffDocumentFileName(value: string) {
+  const cleaned = value.trim().replace(/[\/\\]/g, "_").replace(/\s+/g, "_");
+  return cleaned || "documento.pdf";
+}
+
+function normalizePdfMime(value: string) {
+  const mime = value.trim().toLowerCase() || "application/pdf";
+  if (mime === "application/pdf" || mime === "application/x-pdf") return mime;
+  return "";
+}
+
+function asPositiveInteger(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") return 0;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return 0;
+  return parsed;
+}
+
+function isSafeStaffDocumentPath(storagePath: string, employeeId: string) {
+  const expectedPrefix = `${STAFF_DOCUMENT_STORAGE_PREFIX}/${employeeId}/`;
+  return (
+    storagePath.startsWith(expectedPrefix) &&
+    storagePath.length > expectedPrefix.length &&
+    storagePath.length <= 500 &&
+    !storagePath.includes("..") &&
+    !storagePath.includes("//") &&
+    storagePath.toLowerCase().endsWith(".pdf")
+  );
+}
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -555,17 +589,13 @@ async function uploadStaffDocument(formData: FormData) {
   const documentTypeId = asText(formData.get("document_type_id"));
   const issueDate = asText(formData.get("issue_date"));
   const expiryDate = asText(formData.get("expiry_date"));
-  const file = formData.get("file") as File | null;
+  const storagePath = asText(formData.get("storage_path"));
+  const fileName = sanitizeStaffDocumentFileName(asText(formData.get("file_name")) || "documento.pdf");
+  const fileSizeBytes = asPositiveInteger(formData.get("file_size_bytes"));
+  const mime = normalizePdfMime(asText(formData.get("file_mime")) || "application/pdf");
 
   if (!employeeId || !documentTypeId) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent("Faltan empleado o tipo de documento.")}`);
-  }
-  if (!file || !(file instanceof File) || file.size === 0) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Selecciona un archivo PDF.")}`);
-  }
-  const mime = file.type ?? "application/pdf";
-  if (!mime.toLowerCase().includes("pdf")) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Solo se permiten archivos PDF.")}`);
   }
 
   await requireAppAccess({
@@ -573,7 +603,36 @@ async function uploadStaffDocument(formData: FormData) {
     returnTo: `/staff/${employeeId}`,
     permissionCode: "staff.documents.manage",
   });
+
   const supabase = createAdminClient();
+
+  const failAndCleanup = async (message: string): Promise<never> => {
+    if (storagePath && isSafeStaffDocumentPath(storagePath, employeeId)) {
+      await supabase.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
+    }
+
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(message)}`);
+  };
+
+  if (!storagePath || !isSafeStaffDocumentPath(storagePath, employeeId)) {
+    await failAndCleanup("Ruta de archivo inválida.");
+  }
+
+  if (!fileName.toLowerCase().endsWith(".pdf")) {
+    await failAndCleanup("Solo se permiten archivos PDF.");
+  }
+
+  if (!mime) {
+    await failAndCleanup("Solo se permiten archivos PDF.");
+  }
+
+  if (fileSizeBytes <= 0) {
+    await failAndCleanup("El archivo está vacío o no tiene tamaño válido.");
+  }
+
+  if (fileSizeBytes > STAFF_DOCUMENT_MAX_BYTES) {
+    await failAndCleanup("El PDF supera el límite permitido de 20 MB.");
+  }
 
   const { data: docType } = await supabase
     .from("document_types")
@@ -582,43 +641,31 @@ async function uploadStaffDocument(formData: FormData) {
     .maybeSingle();
 
   if (!docType) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Tipo de documento no encontrado.")}`);
+    return await failAndCleanup("Tipo de documento no encontrado.");
   }
 
   let issueDateValue: string | null = null;
   let expiryDateValue: string | null = null;
+
   if (docType.requires_expiry) {
     if (!issueDate) {
-      redirect(`/staff/${employeeId}?error=${encodeURIComponent("Indica la fecha de expedición.")}`);
+      await failAndCleanup("Indica la fecha de expedición.");
     }
+
     let expiry: string | null = expiryDate || null;
+
     if (!expiry && docType.validity_months != null) {
       const d = new Date(issueDate);
       d.setMonth(d.getMonth() + Number(docType.validity_months));
       expiry = d.toISOString().slice(0, 10);
     }
+
     if (!expiry) {
-      redirect(`/staff/${employeeId}?error=${encodeURIComponent("Indica la fecha de vencimiento.")}`);
+      await failAndCleanup("Indica la fecha de vencimiento.");
     }
+
     issueDateValue = issueDate;
     expiryDateValue = expiry;
-  }
-
-  const safeName = (file.name ?? "documento.pdf").replace(/\s+/g, "_");
-  const storagePath = `viso/${employeeId}/${Date.now()}_${safeName}`;
-
-  const arrayBuffer = await file.arrayBuffer();
-
-  const { error: uploadError } = await supabase.storage
-    .from("documents")
-    .upload(storagePath, arrayBuffer, {
-      contentType: mime,
-      cacheControl: "3600",
-      upsert: false,
-    });
-
-  if (uploadError) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al subir el archivo: " + uploadError.message)}`);
   }
 
   const insertPayload = {
@@ -629,8 +676,8 @@ async function uploadStaffDocument(formData: FormData) {
     title: docType.name ?? "Documento",
     description: null,
     storage_path: storagePath,
-    file_name: file.name ?? "documento.pdf",
-    file_size_bytes: file.size,
+    file_name: fileName,
+    file_size_bytes: fileSizeBytes,
     file_mime: mime,
     document_type_id: documentTypeId,
     issue_date: issueDateValue,
@@ -641,7 +688,7 @@ async function uploadStaffDocument(formData: FormData) {
   const { error: insertError } = await supabase.from("documents").insert(insertPayload);
 
   if (insertError) {
-    await supabase.storage.from("documents").remove([storagePath]);
+    await supabase.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
     redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al registrar el documento: " + insertError.message)}`);
   }
 
@@ -1794,13 +1841,13 @@ export default async function StaffDetailPage({
                       </div>
                     </TableCell>
                     <TableCell className="align-top">
-                        <select form={formId} name="site_id" className="ui-input min-w-[180px]" defaultValue={shift.site_id} required>
-                          {siteRows.map((siteRow) => (
-                            <option key={siteRow.id} value={siteRow.id}>
-                              {siteRow.name ?? siteRow.code ?? siteRow.id}
-                            </option>
-                          ))}
-                        </select>
+                      <select form={formId} name="site_id" className="ui-input min-w-[180px]" defaultValue={shift.site_id} required>
+                        {siteRows.map((siteRow) => (
+                          <option key={siteRow.id} value={siteRow.id}>
+                            {siteRow.name ?? siteRow.code ?? siteRow.id}
+                          </option>
+                        ))}
+                      </select>
                       <div className="ui-caption mt-2">{site?.name ?? site?.code ?? shift.site_id}</div>
                     </TableCell>
                     <TableCell className="align-top">
@@ -1814,13 +1861,13 @@ export default async function StaffDetailPage({
                       />
                     </TableCell>
                     <TableCell className="align-top">
-                        <select form={formId} name="status" className="ui-input min-w-[150px]" defaultValue={shift.status}>
-                          <option value="scheduled">Programado</option>
-                          <option value="confirmed">Confirmado</option>
-                          <option value="completed">Completado</option>
-                          <option value="cancelled">Cancelado</option>
-                          <option value="no_show">No asistio</option>
-                        </select>
+                      <select form={formId} name="status" className="ui-input min-w-[150px]" defaultValue={shift.status}>
+                        <option value="scheduled">Programado</option>
+                        <option value="confirmed">Confirmado</option>
+                        <option value="completed">Completado</option>
+                        <option value="cancelled">Cancelado</option>
+                        <option value="no_show">No asistio</option>
+                      </select>
                     </TableCell>
                     <TableCell className="align-top">
                       <input form={formId} name="notes" className="ui-input min-w-[220px]" defaultValue={shift.notes ?? ""} />

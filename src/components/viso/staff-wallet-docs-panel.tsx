@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
+import { createClient } from "@/lib/supabase/client";
 
 export type DocRow = {
   id: string;
@@ -63,6 +64,36 @@ function formatDate(s: string | null) {
   }
 }
 
+const DOCUMENT_BUCKET = "documents";
+const STAFF_DOCUMENT_STORAGE_PREFIX = "viso";
+const STAFF_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
+
+function sanitizeDocumentFileName(value: string) {
+  const raw = value.trim() || "documento.pdf";
+  const cleaned = raw
+    .replace(/[\/\\]/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/[^\w.\-()]/g, "_");
+
+  if (!cleaned) return "documento.pdf";
+  return cleaned.toLowerCase().endsWith(".pdf") ? cleaned : `${cleaned}.pdf`;
+}
+
+function getPdfMime(file: File) {
+  const mime = file.type.trim().toLowerCase();
+  if (!mime) return "application/pdf";
+  if (mime === "application/pdf" || mime === "application/x-pdf") return mime;
+  return "";
+}
+
+function getUploadNonce() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return Math.random().toString(36).slice(2);
+}
+
 function UploadDocumentForm({
   employeeId,
   documentTypes,
@@ -77,12 +108,84 @@ function UploadDocumentForm({
   onCancel: () => void;
 }) {
   const [selectedTypeId, setSelectedTypeId] = useState<string>("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const selectedType = documentTypes.find((dt) => dt.id === selectedTypeId);
   const needsExpiry = selectedType?.requires_expiry === true;
 
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    setUploadError("");
+
+    if (!form.reportValidity()) return;
+
+    const file = fileInputRef.current?.files?.[0] ?? null;
+
+    if (!file) {
+      setUploadError("Selecciona un archivo PDF.");
+      return;
+    }
+
+    const mime = getPdfMime(file);
+
+    if (!mime || !file.name.toLowerCase().endsWith(".pdf")) {
+      setUploadError("Solo se permiten archivos PDF.");
+      return;
+    }
+
+    if (file.size <= 0) {
+      setUploadError("El archivo está vacío.");
+      return;
+    }
+
+    if (file.size > STAFF_DOCUMENT_MAX_BYTES) {
+      setUploadError("El PDF supera el límite permitido de 20 MB.");
+      return;
+    }
+
+    setIsUploading(true);
+
+    const formData = new FormData(form);
+    const safeName = sanitizeDocumentFileName(file.name);
+    const storagePath = `${STAFF_DOCUMENT_STORAGE_PREFIX}/${employeeId}/${Date.now()}_${getUploadNonce()}_${safeName}`;
+
+    const supabase = createClient();
+
+    const { error: uploadError } = await supabase.storage.from(DOCUMENT_BUCKET).upload(storagePath, file, {
+      contentType: mime,
+      cacheControl: "3600",
+      upsert: false,
+    });
+
+    if (uploadError) {
+      setIsUploading(false);
+      setUploadError(`Error al subir el archivo: ${uploadError.message}`);
+      return;
+    }
+
+    const metadataFormData = new FormData();
+    metadataFormData.set("employee_id", employeeId);
+    metadataFormData.set("document_type_id", String(formData.get("document_type_id") ?? ""));
+    metadataFormData.set("issue_date", String(formData.get("issue_date") ?? ""));
+    metadataFormData.set("expiry_date", String(formData.get("expiry_date") ?? ""));
+    metadataFormData.set("storage_path", storagePath);
+    metadataFormData.set("file_name", file.name || safeName);
+    metadataFormData.set("file_size_bytes", String(file.size));
+    metadataFormData.set("file_mime", mime);
+
+    await uploadDocumentAction(metadataFormData);
+
+    setIsUploading(false);
+  }
+
   return (
-    <form action={uploadDocumentAction} method="post" encType="multipart/form-data" className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <input type="hidden" name="employee_id" value={employeeId} />
+
+      {uploadError ? <div className="ui-alert ui-alert--error">{uploadError}</div> : null}
+
       <div>
         <label htmlFor="doc-type" className="ui-label block mb-1">
           Tipo de documento
@@ -93,6 +196,7 @@ function UploadDocumentForm({
           className="ui-input w-full"
           value={selectedTypeId}
           onChange={(e) => setSelectedTypeId(e.target.value)}
+          disabled={isUploading}
           required
         >
           <option value="">Selecciona un tipo</option>
@@ -103,22 +207,38 @@ function UploadDocumentForm({
           ))}
         </select>
       </div>
+
       {needsExpiry && (
         <>
           <div>
             <label htmlFor="issue_date" className="ui-label block mb-1">
               Fecha de expedición
             </label>
-            <input id="issue_date" type="date" name="issue_date" className="ui-input w-full" required={needsExpiry} />
+            <input
+              id="issue_date"
+              type="date"
+              name="issue_date"
+              className="ui-input w-full"
+              disabled={isUploading}
+              required={needsExpiry}
+            />
           </div>
           <div>
             <label htmlFor="expiry_date" className="ui-label block mb-1">
               Fecha de vencimiento
             </label>
-            <input id="expiry_date" type="date" name="expiry_date" className="ui-input w-full" required={needsExpiry} />
+            <input
+              id="expiry_date"
+              type="date"
+              name="expiry_date"
+              className="ui-input w-full"
+              disabled={isUploading}
+              required={needsExpiry}
+            />
           </div>
         </>
       )}
+
       <div>
         <label htmlFor="file" className="ui-label block mb-1">
           Archivo PDF
@@ -130,14 +250,17 @@ function UploadDocumentForm({
           name="file"
           accept=".pdf,application/pdf"
           className="ui-input w-full"
+          disabled={isUploading}
           required
         />
+        <p className="ui-caption mt-1">Máximo 20 MB.</p>
       </div>
+
       <div className="flex gap-2">
-        <button type="submit" className="ui-btn ui-btn--brand">
-          Subir
+        <button type="submit" className="ui-btn ui-btn--brand" disabled={isUploading}>
+          {isUploading ? "Subiendo..." : "Subir"}
         </button>
-        <button type="button" onClick={onCancel} className="ui-btn ui-btn--ghost">
+        <button type="button" onClick={onCancel} className="ui-btn ui-btn--ghost" disabled={isUploading}>
           Cancelar
         </button>
       </div>
@@ -320,10 +443,10 @@ export function StaffWalletDocsPanel({
                 d.status === "approved" &&
                 d.document_type?.name?.toLowerCase().includes("contrato laboral")
             ) && (
-              <p className="mt-2 text-sm text-[var(--ui-muted)]">
-                Tienes un contrato aprobado: para que figure como vigente, la <strong>fecha de expedición</strong> debe ser hoy o una fecha pasada, y la de vencimiento hoy o futura. Revisa las fechas del documento en la lista de arriba.
-              </p>
-            )}
+                <p className="mt-2 text-sm text-[var(--ui-muted)]">
+                  Tienes un contrato aprobado: para que figure como vigente, la <strong>fecha de expedición</strong> debe ser hoy o una fecha pasada, y la de vencimiento hoy o futura. Revisa las fechas del documento en la lista de arriba.
+                </p>
+              )}
           </div>
         )}
       </div>
