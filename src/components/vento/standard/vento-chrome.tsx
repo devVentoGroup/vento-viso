@@ -59,6 +59,12 @@ const NAV_GROUPS: NavGroup[] = [
         description: "Resumen general",
         icon: "dashboard",
       },
+      {
+        href: "/accounting",
+        label: "Contabilidad",
+        description: "Costos e impuestos",
+        icon: "accounting",
+      },
     ],
   },
   {
@@ -145,7 +151,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-type IconName = "dashboard" | "users" | "calendar" | "store" | "sparkles" | "package" | "menu" | "fileText" | "briefcase" | "phone";
+type IconName = "dashboard" | "accounting" | "users" | "calendar" | "store" | "sparkles" | "package" | "menu" | "fileText" | "briefcase" | "phone";
 
 function Icon({ name }: { name?: IconName }) {
   const common = "none";
@@ -157,6 +163,20 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M13 4h7v5h-7z" />
           <path d="M13 11h7v9h-7z" />
           <path d="M4 13h7v7H4z" />
+        </svg>
+      );
+    case "accounting":
+      return (
+        <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
+          <path d="M4 7h16" />
+          <path d="M6 7v13" />
+          <path d="M18 7v13" />
+          <path d="M4 20h16" />
+          <path d="M8 11h2" />
+          <path d="M8 15h2" />
+          <path d="M14 11h2" />
+          <path d="M14 15h2" />
+          <path d="M8 4h8" />
         </svg>
       );
     case "users":
