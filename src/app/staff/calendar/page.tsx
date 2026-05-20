@@ -15,7 +15,7 @@ type SearchParams = {
 
 type SiteRow = { id: string; name: string | null };
 type EmployeeRow = { id: string; full_name: string | null; site_id: string | null };
-type WalletEligibilityRow = {
+type ContractCalendarRow = {
   employee_id: string;
   contract_active: boolean;
   contract_start_date: string | null;
@@ -217,7 +217,7 @@ export default async function StaffMasterCalendarPage({
   const selectedView = selectedViewRaw === "month" || selectedViewRaw === "list" ? selectedViewRaw : "both";
   const monthKey = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`;
 
-  const [sitesRes, employeesRes, walletRes, maintenanceRes, assetProfilesRes] = await Promise.all([
+  const [sitesRes, employeesRes, contractRes, maintenanceRes, assetProfilesRes] = await Promise.all([
     supabase.from("sites").select("id,name").eq("is_active", true).order("name"),
     supabase.from("employees").select("id,full_name,site_id").eq("is_active", true),
     supabase.rpc("employee_wallet_eligibility"),
@@ -235,7 +235,7 @@ export default async function StaffMasterCalendarPage({
 
   const sites = (sitesRes.data ?? []) as SiteRow[];
   const employees = (employeesRes.data ?? []) as EmployeeRow[];
-  const walletRows = (walletRes.data ?? []) as WalletEligibilityRow[];
+  const contractRows = (contractRes.data ?? []) as ContractCalendarRow[];
   const maintenanceRows = (maintenanceRes.data ?? []) as MaintenanceEventRow[];
   const assetProfiles = (assetProfilesRes.data ?? []) as AssetProfileRow[];
 
@@ -272,7 +272,7 @@ export default async function StaffMasterCalendarPage({
     }
   }
 
-  walletRows.forEach((row) => {
+  contractRows.forEach((row) => {
     const employee = employeeById.get(row.employee_id);
     const siteId = String(employee?.site_id ?? "");
     if (!employee) return;

@@ -9,7 +9,7 @@ import {
   type StaffEmployeePermission,
   type StaffPermissionOption,
 } from "@/components/viso/staff-permissions-panel";
-import { StaffWalletDocsPanel } from "@/components/viso/staff-wallet-docs-panel";
+import { StaffDocumentsPanel } from "@/components/viso/staff-documents-panel";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -610,7 +610,7 @@ async function uploadStaffDocument(formData: FormData) {
   const documentTypeId = asText(formData.get("document_type_id"));
   const issueDate = asText(formData.get("issue_date"));
   const expiryDate = asText(formData.get("expiry_date"));
-  const storagePath = asText(formData.get("storage_path"));
+  const file = formData.get("file");
   const fileName = sanitizeStaffDocumentFileName(asText(formData.get("file_name")) || "documento.pdf");
   const fileSizeBytes = asPositiveInteger(formData.get("file_size_bytes"));
   const mime = normalizePdfMime(asText(formData.get("file_mime")) || "application/pdf");
@@ -626,6 +626,7 @@ async function uploadStaffDocument(formData: FormData) {
   });
 
   const supabase = createAdminClient();
+  let storagePath = "";
 
   const failAndCleanup = async (message: string): Promise<never> => {
     if (storagePath && isSafeStaffDocumentPath(storagePath, employeeId)) {
@@ -635,9 +636,12 @@ async function uploadStaffDocument(formData: FormData) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent(message)}`);
   };
 
-  if (!storagePath || !isSafeStaffDocumentPath(storagePath, employeeId)) {
-    await failAndCleanup("Ruta de archivo inválida.");
+  const uploadedFile = file instanceof File ? file : null;
+
+  if (!uploadedFile) {
+    return await failAndCleanup("Selecciona un archivo PDF.");
   }
+  const validFile = uploadedFile;
 
   if (!fileName.toLowerCase().endsWith(".pdf")) {
     await failAndCleanup("Solo se permiten archivos PDF.");
@@ -653,6 +657,10 @@ async function uploadStaffDocument(formData: FormData) {
 
   if (fileSizeBytes > STAFF_DOCUMENT_MAX_BYTES) {
     await failAndCleanup("El PDF supera el límite permitido de 20 MB.");
+  }
+
+  if (validFile.size !== fileSizeBytes) {
+    await failAndCleanup("El tamaño del archivo no coincide.");
   }
 
   const { data: docType } = await supabase
@@ -687,6 +695,24 @@ async function uploadStaffDocument(formData: FormData) {
 
     issueDateValue = issueDate;
     expiryDateValue = expiry;
+  }
+
+  storagePath = `${STAFF_DOCUMENT_STORAGE_PREFIX}/${employeeId}/${Date.now()}_${crypto.randomUUID()}_${fileName}`;
+
+  if (!isSafeStaffDocumentPath(storagePath, employeeId)) {
+    await failAndCleanup("Ruta de archivo inválida.");
+  }
+
+  const { error: uploadError } = await supabase.storage
+    .from(DOCUMENT_BUCKET)
+    .upload(storagePath, validFile, {
+      contentType: mime,
+      cacheControl: "3600",
+      upsert: false,
+    });
+
+  if (uploadError) {
+    await failAndCleanup("Error al subir el archivo: " + uploadError.message);
   }
 
   const insertPayload = {
@@ -1228,7 +1254,6 @@ export default async function StaffDetailPage({
       .eq("target_employee_id", id)
       .order("updated_at", { ascending: false }),
     supabase.rpc("employee_wallet_eligibility", { p_employee_id: id }).maybeSingle(),
-    supabase.from("employee_wallet_cards").select("id,status,serial_number,last_issued_at,last_revoked_at,revocation_reason").eq("employee_id", id).maybeSingle(),
     supabase.from("document_types").select("id,name,requires_expiry,validity_months").eq("is_active", true).order("name", { ascending: true }),
     supabase
       .from("app_permissions")
@@ -1316,10 +1341,9 @@ export default async function StaffDetailPage({
 
   const docsResult = restResults[0] as { data?: unknown[] | null } | undefined;
   const eligibilityResult = restResults[1] as { data?: unknown } | undefined;
-  const walletCardResult = restResults[2] as { data?: unknown } | undefined;
-  const documentTypesResult = restResults[3] as { data?: { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null }[] | null } | undefined;
-  const availablePermissionsResult = restResults[4] as { data?: unknown[] | null } | undefined;
-  const employeePermissionsResult = restResults[5] as { data?: unknown[] | null } | undefined;
+  const documentTypesResult = restResults[2] as { data?: { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null }[] | null } | undefined;
+  const availablePermissionsResult = restResults[3] as { data?: unknown[] | null } | undefined;
+  const employeePermissionsResult = restResults[4] as { data?: unknown[] | null } | undefined;
   const documentTypesForSelect = (documentTypesResult?.data ?? []) as { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null }[];
   type RawPermissionOption = {
     id: string;
@@ -1382,18 +1406,11 @@ export default async function StaffDetailPage({
     contract_end_date: string | null;
     documents_complete: boolean;
     missing_required_document_type_ids: string[] | null;
-    wallet_eligible: boolean;
-    wallet_status: string;
-  } | null;
-  const walletCard = (walletCardResult?.data ?? null) as {
-    id: string;
-    status: string;
-    serial_number: string | null;
-    last_issued_at: string | null;
-    last_revoked_at: string | null;
-    revocation_reason: string | null;
   } | null;
   const documentTypeNamesById: Record<string, string> = {};
+  documentTypesForSelect.forEach((dt) => {
+    documentTypeNamesById[dt.id] = dt.name ?? dt.id;
+  });
   staffDocsNormalized.forEach((d) => {
     const dt = d.document_type;
     if (dt && typeof dt === "object" && "id" in dt && "name" in dt) {
@@ -1402,7 +1419,7 @@ export default async function StaffDetailPage({
   });
   if (eligibility?.missing_required_document_type_ids) {
     eligibility.missing_required_document_type_ids.forEach((uuid) => {
-      if (!documentTypeNamesById[uuid]) documentTypeNamesById[uuid] = uuid;
+      if (!documentTypeNamesById[uuid]) documentTypeNamesById[uuid] = "Documento requerido sin nombre";
     });
   }
 
@@ -1434,12 +1451,11 @@ export default async function StaffDetailPage({
         uploadPhotoAction={uploadStaffPhoto}
       />
 
-      <StaffWalletDocsPanel
+      <StaffDocumentsPanel
         employeeId={emp.id}
         employeeName={emp.full_name}
         documents={staffDocsNormalized}
         eligibility={eligibility}
-        walletCard={walletCard}
         documentTypeNamesById={documentTypeNamesById}
         documentTypes={documentTypesForSelect}
         uploadDocumentAction={uploadStaffDocument}

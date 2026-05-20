@@ -108,9 +108,9 @@ export default async function StaffPage({
 
   let linksByEmployee = new Map<string, EmployeeSiteLink[]>();
   let attendanceByEmployee = new Map<string, AttendanceStatusRow>();
-  const walletEligibilityByEmployee = new Map<
+  const cardReadinessByEmployee = new Map<
     string,
-    { contract_active: boolean; documents_complete: boolean; wallet_eligible: boolean; wallet_status: string }
+    { contract_active: boolean; documents_complete: boolean }
   >();
 
   if (employeeIds.length > 0) {
@@ -141,12 +141,10 @@ export default async function StaffPage({
       return map;
     }, new Map<string, AttendanceStatusRow>());
 
-    (eligibilityRes?.data ?? []).forEach((row: { employee_id: string; contract_active: boolean; documents_complete: boolean; wallet_eligible: boolean; wallet_status: string }) => {
-      walletEligibilityByEmployee.set(row.employee_id, {
+    (eligibilityRes?.data ?? []).forEach((row: { employee_id: string; contract_active: boolean; documents_complete: boolean }) => {
+      cardReadinessByEmployee.set(row.employee_id, {
         contract_active: row.contract_active,
         documents_complete: row.documents_complete,
-        wallet_eligible: row.wallet_eligible,
-        wallet_status: row.wallet_status ?? "eligible",
       });
     });
   }
@@ -277,7 +275,8 @@ export default async function StaffPage({
 
                 const attendance = attendanceByEmployee.get(employee.id);
                 const attendanceChip = attendanceLabel(attendance);
-                const wallet = walletEligibilityByEmployee.get(employee.id);
+                const cardReadiness = cardReadinessByEmployee.get(employee.id);
+                const cardReady = Boolean(cardReadiness?.contract_active && cardReadiness?.documents_complete);
 
                 return (
                   <TableRow key={employee.id}>
@@ -295,19 +294,19 @@ export default async function StaffPage({
                       </div>
                     </TableCell>
                     <TableCell>
-                      {wallet ? (
+                      {cardReadiness ? (
                         <div className="flex flex-wrap gap-1">
-                          <span className={`ui-chip ${wallet.contract_active ? "ui-chip--success" : ""}`} title="Contrato activo">
-                            {wallet.contract_active ? "Contrato OK" : "Sin contrato"}
+                          <span className={`ui-chip ${cardReadiness.contract_active ? "ui-chip--success" : ""}`} title="Contrato activo">
+                            {cardReadiness.contract_active ? "Contrato OK" : "Sin contrato"}
                           </span>
                           <span
-                            className={`ui-chip ${wallet.documents_complete ? "ui-chip--success" : ""}`}
+                            className={`ui-chip ${cardReadiness.documents_complete ? "ui-chip--success" : ""}`}
                             title="Valida documentos requeridos por sede/rol (no total de archivos subidos)."
                           >
-                            {wallet.documents_complete ? "Req docs OK" : "Falta req docs"}
+                            {cardReadiness.documents_complete ? "Docs OK" : "Faltan docs"}
                           </span>
-                          <span className={`ui-chip ${wallet.wallet_eligible ? "ui-chip--brand" : ""}`} title="Carnet wallet">
-                            {wallet.wallet_status === "issued" ? "Emitido" : wallet.wallet_eligible ? "Elegible" : wallet.wallet_status}
+                          <span className={`ui-chip ${cardReady ? "ui-chip--brand" : ""}`} title="Carnet laboral interno">
+                            {cardReady ? "Carnet listo" : "Carnet pendiente"}
                           </span>
                         </div>
                       ) : (

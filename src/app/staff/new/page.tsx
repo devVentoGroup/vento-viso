@@ -18,6 +18,7 @@ export default async function StaffInvitePage() {
   const { supabase } = await requireAppAccess({
     appId: "viso",
     returnTo: "/staff/new",
+    permissionCode: "staff.manage",
   });
 
   const { data: sites } = await supabase

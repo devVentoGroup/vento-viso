@@ -2,7 +2,6 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
-import { createClient } from "@/lib/supabase/client";
 
 export type DocRow = {
   id: string;
@@ -21,18 +20,7 @@ export type EligibilityRow = {
   contract_end_date: string | null;
   documents_complete: boolean;
   missing_required_document_type_ids: string[] | null;
-  wallet_eligible: boolean;
-  wallet_status: string;
 };
-
-export type WalletCardRow = {
-  id: string;
-  status: string;
-  serial_number: string | null;
-  last_issued_at: string | null;
-  last_revoked_at: string | null;
-  revocation_reason: string | null;
-} | null;
 
 export type DocumentTypeOption = {
   id: string;
@@ -41,12 +29,11 @@ export type DocumentTypeOption = {
   validity_months: number | null;
 };
 
-type StaffWalletDocsPanelProps = {
+type StaffDocumentsPanelProps = {
   employeeId: string;
   employeeName: string | null;
   documents: DocRow[];
   eligibility: EligibilityRow | null;
-  walletCard: WalletCardRow;
   documentTypeNamesById: Record<string, string>;
   documentTypes: DocumentTypeOption[];
   uploadDocumentAction: (formData: FormData) => Promise<void>;
@@ -71,8 +58,6 @@ function formatDate(s: string | null) {
   }
 }
 
-const DOCUMENT_BUCKET = "documents";
-const STAFF_DOCUMENT_STORAGE_PREFIX = "viso";
 const STAFF_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
 
 function sanitizeDocumentFileName(value: string) {
@@ -91,14 +76,6 @@ function getPdfMime(file: File) {
   if (!mime) return "application/pdf";
   if (mime === "application/pdf" || mime === "application/x-pdf") return mime;
   return "";
-}
-
-function getUploadNonce() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-
-  return Math.random().toString(36).slice(2);
 }
 
 function UploadDocumentForm({
@@ -155,34 +132,12 @@ function UploadDocumentForm({
     setIsUploading(true);
 
     const formData = new FormData(form);
-    const safeName = sanitizeDocumentFileName(file.name);
-    const storagePath = `${STAFF_DOCUMENT_STORAGE_PREFIX}/${employeeId}/${Date.now()}_${getUploadNonce()}_${safeName}`;
+    formData.set("employee_id", employeeId);
+    formData.set("file_name", file.name || sanitizeDocumentFileName(file.name));
+    formData.set("file_size_bytes", String(file.size));
+    formData.set("file_mime", mime);
 
-    const supabase = createClient();
-
-    const { error: uploadError } = await supabase.storage.from(DOCUMENT_BUCKET).upload(storagePath, file, {
-      contentType: mime,
-      cacheControl: "3600",
-      upsert: false,
-    });
-
-    if (uploadError) {
-      setIsUploading(false);
-      setUploadError(`Error al subir el archivo: ${uploadError.message}`);
-      return;
-    }
-
-    const metadataFormData = new FormData();
-    metadataFormData.set("employee_id", employeeId);
-    metadataFormData.set("document_type_id", String(formData.get("document_type_id") ?? ""));
-    metadataFormData.set("issue_date", String(formData.get("issue_date") ?? ""));
-    metadataFormData.set("expiry_date", String(formData.get("expiry_date") ?? ""));
-    metadataFormData.set("storage_path", storagePath);
-    metadataFormData.set("file_name", file.name || safeName);
-    metadataFormData.set("file_size_bytes", String(file.size));
-    metadataFormData.set("file_mime", mime);
-
-    await uploadDocumentAction(metadataFormData);
+    await uploadDocumentAction(formData);
 
     setIsUploading(false);
   }
@@ -291,19 +246,20 @@ function toDateInputValue(s: string | null) {
   }
 }
 
-export function StaffWalletDocsPanel({
+export function StaffDocumentsPanel({
   employeeId,
   documents,
   eligibility,
-  walletCard,
   documentTypeNamesById,
   documentTypes,
   uploadDocumentAction,
   canUploadDocuments = false,
   canEditDocuments = false,
   updateDocumentAction,
-}: StaffWalletDocsPanelProps) {
-  const missingNames = (eligibility?.missing_required_document_type_ids ?? []).map((id) => documentTypeNamesById[id] ?? id);
+}: StaffDocumentsPanelProps) {
+  const missingNames = (eligibility?.missing_required_document_type_ids ?? []).map(
+    (id) => documentTypeNamesById[id] ?? "Documento requerido sin nombre",
+  );
   const [showUpload, setShowUpload] = useState(false);
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -501,43 +457,22 @@ export function StaffWalletDocsPanel({
       </div>
 
       <div>
-        <h4 className="ui-label mb-2">Elegibilidad para carnet en Wallet</h4>
-        {eligibility?.wallet_eligible ? (
+        <h4 className="ui-label mb-2">Estado para carnet laboral</h4>
+        {eligibility?.contract_active && eligibility?.documents_complete ? (
           <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-            <span className="ui-chip ui-chip--success">Elegible</span>
-            <p className="ui-caption mt-1">Cumple contrato activo y documentos requeridos. Puede agregar el carnet desde ANIMA.</p>
+            <span className="ui-chip ui-chip--success">Listo</span>
+            <p className="ui-caption mt-1">Cumple contrato activo y documentos requeridos. El trabajador puede ver su carnet dentro de ANIMA.</p>
           </div>
         ) : (
           <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-            <span className="ui-chip">No elegible</span>
-            <ul className="mt-2 list-inside list-disc text-sm text-[var(--ui-muted)]">
+            <span className="ui-chip">Pendiente</span>
+            <ul className="mt-2 list-inside list-disc text-sm text-[var(--ui-muted)] space-y-1">
               {!eligibility?.contract_active && <li>Sin contrato vigente</li>}
               {!eligibility?.documents_complete && missingNames.length > 0 && (
                 <li>Faltan documentos requeridos: {missingNames.join(", ")}</li>
               )}
-              {eligibility?.contract_active && eligibility?.documents_complete && !eligibility?.wallet_eligible && (
-                <li>Empleado inactivo</li>
-              )}
+              {!eligibility?.documents_complete && missingNames.length === 0 && <li>Faltan documentos requeridos por configurar o cargar.</li>}
             </ul>
-          </div>
-        )}
-      </div>
-
-      <div>
-        <h4 className="ui-label mb-2">Carnet laboral</h4>
-        {walletCard ? (
-          <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 space-y-2">
-            <p>
-              Estado: <span className={`ui-chip ${walletCard.status === "issued" ? "ui-chip--success" : walletCard.status === "revoked" ? "ui-chip--danger" : ""}`}>{walletCard.status}</span>
-            </p>
-            {walletCard.last_issued_at && <p className="ui-caption">Última emisión: {formatDate(walletCard.last_issued_at)}</p>}
-            {walletCard.last_revoked_at && <p className="ui-caption">Revocado: {formatDate(walletCard.last_revoked_at)}</p>}
-            {walletCard.revocation_reason && <p className="ui-caption">Motivo: {walletCard.revocation_reason}</p>}
-            <p className="ui-caption">Emitir y revocar el carnet desde aquí (acciones en desarrollo).</p>
-          </div>
-        ) : (
-          <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-            <p className="ui-caption">Aún no hay registro de carnet. Cuando el trabajador sea elegible y agregue el carnet desde ANIMA, aquí se mostrará el estado.</p>
           </div>
         )}
       </div>

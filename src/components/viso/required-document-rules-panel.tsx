@@ -95,7 +95,7 @@ export function RequiredDocumentRulesPanel({
     return (
       <div className="ui-panel ui-panel--accent-brand">
         <h3 className="ui-h3">Documentos requeridos y carnet laboral</h3>
-        <p className="ui-caption mt-1">Asocia una sede al negocio para configurar documentos requeridos para el carnet.</p>
+        <p className="ui-caption mt-1">Asocia una sede al negocio para configurar qué documentos debe tener cada trabajador.</p>
       </div>
     );
   }
@@ -104,7 +104,7 @@ export function RequiredDocumentRulesPanel({
     <div className="ui-panel ui-panel--accent-brand space-y-4">
       <h3 className="ui-h3">Documentos requeridos y carnet laboral</h3>
       <p className="ui-caption">
-        Para que un trabajador sea elegible para el carnet en Wallet debe tener contrato activo y todos los documentos marcados como requeridos para su sede/rol.
+        Estos documentos definen qué le falta a cada trabajador. El carnet laboral interno queda listo cuando tiene contrato vigente y todos los documentos requeridos cargados.
       </p>
 
       {contractType && (
