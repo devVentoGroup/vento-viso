@@ -96,7 +96,9 @@ async function createMenuItem(formData: FormData) {
   const siteId = asText(formData.get("site_id"));
   const productId = asText(formData.get("product_id"));
 
-  if (!code || !name || !siteId || !productId) {
+  const commercialCategoryId = asText(formData.get("commercial_category_id"));
+
+  if (!code || !name || !siteId || !productId || !commercialCategoryId) {
     redirect("/menu/new?error=" + encodeURIComponent("Faltan campos obligatorios."));
   }
 
@@ -116,7 +118,7 @@ async function createMenuItem(formData: FormData) {
     site_id: siteId,
     product_id: productId,
     description: asText(formData.get("description")) || null,
-    commercial_category_id: asText(formData.get("commercial_category_id")) || null,
+    commercial_category_id: commercialCategoryId,
     category_label: asText(formData.get("category_label")) || null,
     image_url: asText(formData.get("image_url")) || null,
     price_amount: asNonNegativeNumber(formData.get("price_amount")),

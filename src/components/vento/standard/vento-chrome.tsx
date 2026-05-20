@@ -124,6 +124,12 @@ const NAV_GROUPS: NavGroup[] = [
         icon: "menu",
       },
       {
+        href: "/commercial-categories",
+        label: "Categorías comerciales",
+        description: "Orden por satélite",
+        icon: "menu",
+      },
+      {
         href: "/delivery-rates",
         label: "Domicilios",
         description: "Tarifas por distancia",

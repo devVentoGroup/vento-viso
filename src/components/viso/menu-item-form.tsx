@@ -301,8 +301,9 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
               className="ui-input"
               value={commercialCategoryId}
               onChange={(event) => setCommercialCategoryId(event.target.value)}
+              required
             >
-              <option value="">Crear/usar texto nuevo</option>
+              <option value="">Selecciona categoria comercial</option>
               {visibleCategories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {(category.name ?? category.code ?? "Sin nombre") +
@@ -312,15 +313,19 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
             </select>
             <input
               name="category_label"
+              type="hidden"
               className="ui-input"
-              value={categoryLabel}
-              onChange={(event) => setCategoryLabel(event.target.value)}
-              placeholder="Nueva categoria comercial"
-              disabled={Boolean(commercialCategoryId)}
+              value={selectedCategory?.name ?? categoryLabel}
+              readOnly
             />
             <p className="ui-caption">
-              Las categorias comerciales son por sede y no cambian las categorias operacionales.
+              Las categorias comerciales se crean antes por sede y no cambian las categorias operacionales.
             </p>
+            {siteId && visibleCategories.length === 0 ? (
+              <p className="ui-caption">
+                Esta sede no tiene categorias comerciales. Crea categorias en Viso &gt; Categorias comerciales.
+              </p>
+            ) : null}
           </label>
           <label className="space-y-2">
             <span className="ui-label">Producto core (venta)</span>
