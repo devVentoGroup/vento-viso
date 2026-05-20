@@ -34,12 +34,6 @@ function asBool(value: FormDataEntryValue | null) {
   return value === "on" || value === "true";
 }
 
-function asInteger(value: FormDataEntryValue | null, fallback = 0) {
-  const parsed = Number(asText(value));
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.round(parsed);
-}
-
 function safeDecode(value: string | null | undefined) {
   if (!value) return "";
   try {
@@ -74,12 +68,33 @@ async function saveCategory(formData: FormData) {
     redirect("/commercial-categories?error=" + encodeURIComponent("Sede y nombre son obligatorios."));
   }
 
+  let sortOrder = 0;
+  if (id) {
+    const { data: existing } = await supabase
+      .schema("pass")
+      .from("commercial_categories")
+      .select("sort_order")
+      .eq("id", id)
+      .maybeSingle();
+    sortOrder = Number(existing?.sort_order ?? 0);
+  } else {
+    const { data: latest } = await supabase
+      .schema("pass")
+      .from("commercial_categories")
+      .select("sort_order")
+      .eq("site_id", siteId)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    sortOrder = Number(latest?.sort_order ?? -10) + 10;
+  }
+
   const payload = {
     site_id: siteId,
     name,
     code,
     description: asText(formData.get("description")) || null,
-    sort_order: asInteger(formData.get("sort_order"), 0),
+    sort_order: sortOrder,
     is_active: asBool(formData.get("is_active")),
   };
 
@@ -179,7 +194,7 @@ export default async function CommercialCategoriesPage({
 
       <div className="ui-panel space-y-4">
         <h2 className="ui-h3">Crear categoria</h2>
-        <form action={saveCategory} className="grid gap-4 lg:grid-cols-[1fr_1fr_120px_auto]">
+        <form action={saveCategory} className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
           <label className="space-y-2">
             <span className="ui-label">Sede</span>
             <select name="site_id" className="ui-input" required>
@@ -194,10 +209,6 @@ export default async function CommercialCategoriesPage({
           <label className="space-y-2">
             <span className="ui-label">Nombre</span>
             <input name="name" className="ui-input" placeholder="Bebidas frías" required />
-          </label>
-          <label className="space-y-2">
-            <span className="ui-label">Orden</span>
-            <input name="sort_order" type="number" className="ui-input" defaultValue={0} />
           </label>
           <div className="flex items-end">
             <input type="hidden" name="is_active" value="on" />
@@ -232,7 +243,6 @@ export default async function CommercialCategoriesPage({
                     <TableHead>
                       <TableRow>
                         <TableHeaderCell>Categoria</TableHeaderCell>
-                        <TableHeaderCell>Orden</TableHeaderCell>
                         <TableHeaderCell>Estado</TableHeaderCell>
                         <TableHeaderCell></TableHeaderCell>
                       </TableRow>
@@ -247,9 +257,6 @@ export default async function CommercialCategoriesPage({
                               <input name="name" className="ui-input h-10" defaultValue={category.name} required />
                               <input name="description" className="ui-input h-10" defaultValue={category.description ?? ""} placeholder="Descripcion opcional" />
                             </form>
-                          </TableCell>
-                          <TableCell>
-                            <input form={`category-${category.id}`} name="sort_order" type="number" className="ui-input h-10 w-24" defaultValue={category.sort_order ?? 0} />
                           </TableCell>
                           <TableCell>
                             <label className="flex items-center gap-2 text-sm">
