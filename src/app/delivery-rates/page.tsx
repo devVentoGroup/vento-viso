@@ -70,7 +70,15 @@ function formatCop(value: number | string | null | undefined) {
 
 function siteName(row: SatelliteRow, sitesById: Map<string, SiteRow>) {
   const site = sitesById.get(row.site_id) ?? null;
-  return row.name ?? site?.name ?? site?.code ?? "Satélite";
+  return site?.name ?? site?.code ?? row.name ?? "Satélite";
+}
+
+function commercialName(row: SatelliteRow, sitesById: Map<string, SiteRow>) {
+  const site = sitesById.get(row.site_id) ?? null;
+  const operationalName = site?.name ?? site?.code ?? "";
+  const name = row.name ?? "";
+  if (!name || name === operationalName) return "";
+  return name;
 }
 
 async function saveDeliveryRate(formData: FormData) {
@@ -195,7 +203,10 @@ export default async function DeliveryRatesPage({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold text-[var(--ui-text)]">{siteName(satellite, sitesById)}</h2>
-                    <p className="ui-caption">Cobertura configurada hasta {siteRates.at(-1)?.distance_km ?? 0} km.</p>
+                    <p className="ui-caption">
+                      {commercialName(satellite, sitesById) ? `${commercialName(satellite, sitesById)} · ` : ""}
+                      Cobertura configurada hasta {siteRates.at(-1)?.distance_km ?? 0} km.
+                    </p>
                   </div>
                 </div>
 
