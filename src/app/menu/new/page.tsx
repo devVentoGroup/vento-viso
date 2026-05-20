@@ -16,6 +16,14 @@ type SellOptionRow = {
   recipe_cost_amount: number | string | null;
 };
 
+type CommercialCategoryRow = {
+  id: string;
+  site_id: string;
+  name: string | null;
+  code: string | null;
+  is_active: boolean | null;
+};
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -107,6 +115,7 @@ async function createMenuItem(formData: FormData) {
     site_id: siteId,
     product_id: productId,
     description: asText(formData.get("description")) || null,
+    commercial_category_id: asText(formData.get("commercial_category_id")) || null,
     category_label: asText(formData.get("category_label")) || null,
     image_url: asText(formData.get("image_url")) || null,
     price_amount: asNonNegativeNumber(formData.get("price_amount")),
@@ -155,10 +164,17 @@ export default async function NewMenuItemPage({
     .select("id,code,name,is_active")
     .order("name", { ascending: true });
 
-  const { data: sellOptionsRaw } = await supabase
-    .schema("pass").from("sell_products_by_site")
-    .select("site_id,product_id,name,sku,base_price,recipe_cost_amount")
-    .order("name", { ascending: true });
+  const [{ data: sellOptionsRaw }, { data: categoriesRaw }] = await Promise.all([
+    supabase
+      .schema("pass").from("sell_products_by_site")
+      .select("site_id,product_id,name,sku,base_price,recipe_cost_amount")
+      .order("name", { ascending: true }),
+    supabase
+      .schema("pass").from("commercial_categories")
+      .select("id,site_id,name,code,is_active")
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
+  ]);
 
   const productsMap = new Map<
     string,
@@ -236,6 +252,7 @@ export default async function NewMenuItemPage({
         action={createMenuItem}
         sites={sites ?? []}
         products={products}
+        categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
         initial={{
           code: "",
           name: "",
@@ -247,6 +264,7 @@ export default async function NewMenuItemPage({
           is_active: true,
           is_featured: false,
           site_id: sites?.[0]?.id ?? "",
+          commercial_category_id: "",
           category_label: "",
           image_url: "",
           badges_csv: "",

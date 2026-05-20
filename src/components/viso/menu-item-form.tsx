@@ -20,6 +20,14 @@ type ProductOption = {
   default_price?: number | null;
 };
 
+type CommercialCategoryOption = {
+  id: string;
+  site_id: string;
+  name: string | null;
+  code: string | null;
+  is_active?: boolean | null;
+};
+
 type MenuItemFormValues = {
   id?: string;
   code: string;
@@ -32,6 +40,7 @@ type MenuItemFormValues = {
   is_active: boolean;
   is_featured: boolean;
   site_id: string;
+  commercial_category_id: string;
   category_label: string;
   image_url: string;
   badges_csv: string;
@@ -45,6 +54,7 @@ type MenuItemFormProps = {
   mode: "create" | "edit";
   sites: SiteOption[];
   products: ProductOption[];
+  categories: CommercialCategoryOption[];
   initial: MenuItemFormValues;
   action: (formData: FormData) => void | Promise<void>;
 };
@@ -72,7 +82,7 @@ function asCop(value: string) {
   }).format(parsed);
 }
 
-export function MenuItemForm({ mode, sites, products, initial, action }: MenuItemFormProps) {
+export function MenuItemForm({ mode, sites, products, categories, initial, action }: MenuItemFormProps) {
   const [code, setCode] = useState(initial.code);
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
@@ -81,6 +91,7 @@ export function MenuItemForm({ mode, sites, products, initial, action }: MenuIte
   const [compareAtAmount, setCompareAtAmount] = useState(initial.compare_at_amount);
   const [sortOrder, setSortOrder] = useState(initial.sort_order);
   const [siteId, setSiteId] = useState(initial.site_id || sites[0]?.id || "");
+  const [commercialCategoryId, setCommercialCategoryId] = useState(initial.commercial_category_id);
   const [categoryLabel, setCategoryLabel] = useState(initial.category_label);
   const [badgesCsv, setBadgesCsv] = useState(initial.badges_csv);
   const [imageUrl, setImageUrl] = useState(initial.image_url);
@@ -105,6 +116,23 @@ export function MenuItemForm({ mode, sites, products, initial, action }: MenuIte
   const selectedProduct = useMemo(() => {
     return visibleProducts.find((product) => product.id === productId) ?? null;
   }, [visibleProducts, productId]);
+
+  const visibleCategories = useMemo(() => {
+    return categories.filter((category) => {
+      if (category.is_active === false) return false;
+      return category.site_id === siteId;
+    });
+  }, [categories, siteId]);
+
+  const selectedCategory = useMemo(() => {
+    return visibleCategories.find((category) => category.id === commercialCategoryId) ?? null;
+  }, [commercialCategoryId, visibleCategories]);
+
+  useEffect(() => {
+    if (!commercialCategoryId) return;
+    const stillValid = visibleCategories.some((category) => category.id === commercialCategoryId);
+    if (!stillValid) setCommercialCategoryId("");
+  }, [commercialCategoryId, visibleCategories]);
 
   const suggestedPrice = useMemo(() => {
     if (!selectedProduct) return null;
@@ -267,14 +295,32 @@ export function MenuItemForm({ mode, sites, products, initial, action }: MenuIte
             />
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Categoria visible</span>
+            <span className="ui-label">Categoria comercial</span>
+            <select
+              name="commercial_category_id"
+              className="ui-input"
+              value={commercialCategoryId}
+              onChange={(event) => setCommercialCategoryId(event.target.value)}
+            >
+              <option value="">Crear/usar texto nuevo</option>
+              {visibleCategories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {(category.name ?? category.code ?? "Sin nombre") +
+                    (category.is_active === false ? " [inactiva]" : "")}
+                </option>
+              ))}
+            </select>
             <input
               name="category_label"
               className="ui-input"
               value={categoryLabel}
               onChange={(event) => setCategoryLabel(event.target.value)}
-              placeholder="Sandwiches"
+              placeholder="Nueva categoria comercial"
+              disabled={Boolean(commercialCategoryId)}
             />
+            <p className="ui-caption">
+              Las categorias comerciales son por sede y no cambian las categorias operacionales.
+            </p>
           </label>
           <label className="space-y-2">
             <span className="ui-label">Producto core (venta)</span>
@@ -436,7 +482,7 @@ export function MenuItemForm({ mode, sites, products, initial, action }: MenuIte
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <span className="ui-chip">{getPreviewCategory(categoryLabel)}</span>
+              <span className="ui-chip">{getPreviewCategory(selectedCategory?.name ?? categoryLabel)}</span>
               {badgesCsv
                 .split(",")
                 .map((badge) => badge.trim())

@@ -25,6 +25,7 @@ type CatalogItemRow = {
   description: string | null;
   site_id: string;
   product_id: string | null;
+  commercial_category_id: string | null;
   category_label: string | null;
   image_url: string | null;
   price_amount: number;
@@ -35,6 +36,14 @@ type CatalogItemRow = {
   badges: string[] | null;
   fulfillment_modes: string[] | null;
   metadata: Record<string, unknown> | null;
+};
+
+type CommercialCategoryRow = {
+  id: string;
+  site_id: string;
+  name: string | null;
+  code: string | null;
+  is_active: boolean | null;
 };
 
 function asText(value: FormDataEntryValue | null) {
@@ -131,6 +140,7 @@ async function updateMenuItem(formData: FormData) {
       site_id: siteId,
       product_id: productId,
       description: asText(formData.get("description")) || null,
+      commercial_category_id: asText(formData.get("commercial_category_id")) || null,
       category_label: asText(formData.get("category_label")) || null,
       image_url: asText(formData.get("image_url")) || null,
       price_amount: asNonNegativeNumber(formData.get("price_amount")),
@@ -216,13 +226,18 @@ export default async function MenuItemDetailPage({
     returnTo: `/menu/${id}`,
   });
 
-  const [{ data: item }, { data: sites }] = await Promise.all([
+  const [{ data: item }, { data: sites }, { data: categoriesRaw }] = await Promise.all([
     supabase
       .schema("pass").from("catalog_items")
-      .select("id,code,name,description,site_id,product_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
+      .select("id,code,name,description,site_id,product_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
       .eq("id", id)
       .maybeSingle(),
     supabase.from("sites").select("id,code,name,is_active").order("name", { ascending: true }),
+    supabase
+      .schema("pass").from("commercial_categories")
+      .select("id,site_id,name,code,is_active")
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
   ]);
 
   const { data: sellOptionsRaw } = await supabase
@@ -320,6 +335,7 @@ export default async function MenuItemDetailPage({
         action={updateMenuItem}
         sites={sites ?? []}
         products={products}
+        categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
         initial={{
           id: row.id,
           code: row.code,
@@ -332,6 +348,7 @@ export default async function MenuItemDetailPage({
           is_active: row.is_active,
           is_featured: row.is_featured,
           site_id: row.site_id,
+          commercial_category_id: row.commercial_category_id ?? "",
           category_label: row.category_label ?? "",
           image_url: row.image_url ?? "",
           badges_csv: (row.badges ?? []).join(", "),
