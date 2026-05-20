@@ -68,11 +68,10 @@ async function saveCategory(formData: FormData) {
   const id = asText(formData.get("id"));
   const siteId = asText(formData.get("site_id"));
   const name = asText(formData.get("name"));
-  const requestedCode = asText(formData.get("code"));
-  const code = requestedCode || slugify(name);
+  const code = slugify(name);
 
   if (!siteId || !name || !code) {
-    redirect("/commercial-categories?error=" + encodeURIComponent("Sede, nombre y codigo son obligatorios."));
+    redirect("/commercial-categories?error=" + encodeURIComponent("Sede y nombre son obligatorios."));
   }
 
   const payload = {
@@ -180,7 +179,7 @@ export default async function CommercialCategoriesPage({
 
       <div className="ui-panel space-y-4">
         <h2 className="ui-h3">Crear categoria</h2>
-        <form action={saveCategory} className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr_120px_auto]">
+        <form action={saveCategory} className="grid gap-4 lg:grid-cols-[1fr_1fr_120px_auto]">
           <label className="space-y-2">
             <span className="ui-label">Sede</span>
             <select name="site_id" className="ui-input" required>
@@ -195,10 +194,6 @@ export default async function CommercialCategoriesPage({
           <label className="space-y-2">
             <span className="ui-label">Nombre</span>
             <input name="name" className="ui-input" placeholder="Bebidas frías" required />
-          </label>
-          <label className="space-y-2">
-            <span className="ui-label">Código opcional</span>
-            <input name="code" className="ui-input" placeholder="bebidas-frias" />
           </label>
           <label className="space-y-2">
             <span className="ui-label">Orden</span>
@@ -237,7 +232,6 @@ export default async function CommercialCategoriesPage({
                     <TableHead>
                       <TableRow>
                         <TableHeaderCell>Categoria</TableHeaderCell>
-                        <TableHeaderCell>Codigo</TableHeaderCell>
                         <TableHeaderCell>Orden</TableHeaderCell>
                         <TableHeaderCell>Estado</TableHeaderCell>
                         <TableHeaderCell></TableHeaderCell>
@@ -253,9 +247,6 @@ export default async function CommercialCategoriesPage({
                               <input name="name" className="ui-input h-10" defaultValue={category.name} required />
                               <input name="description" className="ui-input h-10" defaultValue={category.description ?? ""} placeholder="Descripcion opcional" />
                             </form>
-                          </TableCell>
-                          <TableCell>
-                            <input form={`category-${category.id}`} name="code" className="ui-input h-10" defaultValue={category.code} required />
                           </TableCell>
                           <TableCell>
                             <input form={`category-${category.id}`} name="sort_order" type="number" className="ui-input h-10 w-24" defaultValue={category.sort_order ?? 0} />
