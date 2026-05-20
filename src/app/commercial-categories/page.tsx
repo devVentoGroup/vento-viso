@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
@@ -167,6 +168,11 @@ export default async function CommercialCategoriesPage({
       <PageHeader
         title="Categorías comerciales"
         subtitle="Crea categorias por sede para ordenar el menu de compras en Vento Pass. No son categorias operacionales ni canjes de fidelización."
+        actions={
+          <Link href="/menu" className="ui-btn ui-btn--ghost">
+            Volver al menú
+          </Link>
+        }
       />
 
       {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}

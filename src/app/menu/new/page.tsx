@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 
 import { MenuItemForm } from "@/components/viso/menu-item-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
@@ -249,7 +250,15 @@ export default async function NewMenuItemPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Crear item comercial" subtitle="Catalogo de compras por satélite. Las categorias comerciales se crean por sede." />
+      <PageHeader
+        title="Crear item comercial"
+        subtitle="Catalogo de compras por satélite. Las categorias comerciales se crean por sede."
+        actions={
+          <Link href="/menu" className="ui-btn ui-btn--ghost">
+            Volver
+          </Link>
+        }
+      />
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       <MenuItemForm
         mode="create"
