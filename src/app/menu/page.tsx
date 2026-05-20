@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { requireAppAccess } from "@/lib/auth/guard";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,8 @@ type MenuItemRow = {
   code: string;
   name: string;
   category_label: string | null;
+  commercial_category_id: string | null;
+  commercial_category?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
   price_amount: number;
   is_active: boolean;
   is_featured: boolean;
@@ -54,14 +57,15 @@ export default async function MenuPage({
   const okMsg = sp.ok ? safeDecode(sp.ok) : "";
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
 
-  const { supabase } = await requireAppAccess({
+  await requireAppAccess({
     appId: "viso",
     returnTo: "/menu",
   });
+  const supabase = createAdminClient();
 
   const { data } = await supabase
     .schema("pass").from("catalog_items")
-    .select("id,code,name,category_label,price_amount,is_active,is_featured,metadata,site:sites(id,name,code)")
+    .select("id,code,name,category_label,commercial_category_id,commercial_category:commercial_categories(id,name,code),price_amount,is_active,is_featured,metadata,site:sites(id,name,code)")
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
 
@@ -70,11 +74,11 @@ export default async function MenuPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Menu comercial"
-        subtitle="Catalogo digital de compra para satelites. Separado de rewards."
+        title="Menú comercial"
+        subtitle="Catalogo digital de compra por satélite. Usa categorias comerciales propias y no las categorias operacionales ni los canjes de fidelización."
         actions={
           <Link href="/menu/new" className="ui-btn ui-btn--brand">
-            Crear item
+            Crear item comercial
           </Link>
         }
       />
@@ -84,7 +88,7 @@ export default async function MenuPage({
 
       <div className="ui-panel">
         {rows.length === 0 ? (
-          <div className="ui-empty">No hay items de menu configurados.</div>
+          <div className="ui-empty">No hay items comerciales configurados.</div>
         ) : (
           <Table>
             <TableHead>
@@ -102,6 +106,9 @@ export default async function MenuPage({
             <TableBody>
               {rows.map((row) => {
                 const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site ?? null;
+                const commercialCategory = Array.isArray(row.commercial_category)
+                  ? row.commercial_category[0] ?? null
+                  : row.commercial_category ?? null;
                 const recipeCost = readNumericMeta(row.metadata, "recipe_cost_amount");
                 const marginAmount = readNumericMeta(row.metadata, "margin_amount");
                 const marginPct = readNumericMeta(row.metadata, "margin_pct");
@@ -113,7 +120,7 @@ export default async function MenuPage({
                       <div className="ui-caption">{row.code}</div>
                       {row.is_featured ? <div className="ui-caption">Destacado</div> : null}
                     </TableCell>
-                    <TableCell>{row.category_label || "-"}</TableCell>
+                    <TableCell>{commercialCategory?.name || row.category_label || "-"}</TableCell>
                     <TableCell>{formatCop(row.price_amount)}</TableCell>
                     <TableCell>{recipeCost == null ? "-" : formatCop(recipeCost)}</TableCell>
                     <TableCell>

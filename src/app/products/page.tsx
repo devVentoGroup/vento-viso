@@ -86,11 +86,11 @@ export default async function ProductsPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Productos"
-        subtitle="Items de canje que veran los clientes en Vento Pass."
+        title="Productos de fidelización"
+        subtitle="Items de canje por puntos que veran los clientes en Vento Pass. No hacen parte del catalogo comercial de compras."
         actions={
           <Link href="/products/new" className="ui-btn ui-btn--brand">
-            Crear producto
+            Crear producto de fidelización
           </Link>
         }
       />
@@ -100,7 +100,7 @@ export default async function ProductsPage({
 
       {rows.length === 0 ? (
         <div className="ui-panel">
-          <div className="ui-empty">No hay productos configurados.</div>
+          <div className="ui-empty">No hay productos de fidelización configurados.</div>
         </div>
       ) : (
         <div className="space-y-8">
@@ -165,4 +165,3 @@ export default async function ProductsPage({
     </div>
   );
 }
-

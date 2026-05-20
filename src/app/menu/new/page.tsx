@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { MenuItemForm } from "@/components/viso/menu-item-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -154,10 +155,11 @@ export default async function NewMenuItemPage({
   const sp = (await searchParams) ?? {};
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
 
-  const { supabase } = await requireAppAccess({
+  await requireAppAccess({
     appId: "viso",
     returnTo: "/menu/new",
   });
+  const supabase = createAdminClient();
 
   const { data: sites } = await supabase
     .from("sites")
@@ -245,7 +247,7 @@ export default async function NewMenuItemPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Crear item de menu" subtitle="Catalogo comercial para compra en satelites." />
+      <PageHeader title="Crear item comercial" subtitle="Catalogo de compras por satélite. Las categorias comerciales se crean por sede." />
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       <MenuItemForm
         mode="create"

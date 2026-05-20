@@ -113,15 +113,21 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         href: "/products",
-        label: "Productos",
-        description: "Catalogo de recompensas",
+        label: "Productos fidelización",
+        description: "Canjes y recompensas",
         icon: "package",
       },
       {
         href: "/menu",
-        label: "Menu",
+        label: "Menú comercial",
         description: "Catalogo comercial",
         icon: "menu",
+      },
+      {
+        href: "/delivery-rates",
+        label: "Domicilios",
+        description: "Tarifas por distancia",
+        icon: "store",
       },
       {
         href: "/vacancies",

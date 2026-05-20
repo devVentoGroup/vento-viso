@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { MenuItemForm } from "@/components/viso/menu-item-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -221,10 +222,11 @@ export default async function MenuItemDetailPage({
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
   const { id } = await params;
 
-  const { supabase } = await requireAppAccess({
+  await requireAppAccess({
     appId: "viso",
     returnTo: `/menu/${id}`,
   });
+  const supabase = createAdminClient();
 
   const [{ data: item }, { data: sites }, { data: categoriesRaw }] = await Promise.all([
     supabase
@@ -322,7 +324,7 @@ export default async function MenuItemDetailPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Editar item de menu"
+        title="Editar item comercial"
         subtitle="Ajusta disponibilidad, precio y visual del catalogo comercial."
         actions={<Link href="/menu" className="ui-btn ui-btn--ghost">Volver</Link>}
       />
