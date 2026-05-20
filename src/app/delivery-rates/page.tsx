@@ -12,7 +12,12 @@ type SatelliteRow = {
   site_id: string;
   name: string | null;
   is_active: boolean | null;
-  sites?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
+};
+
+type SiteRow = {
+  id: string;
+  name: string | null;
+  code: string | null;
 };
 
 type RateRow = {
@@ -63,8 +68,8 @@ function formatCop(value: number | string | null | undefined) {
   }).format(Number.isFinite(parsed) ? parsed : 0);
 }
 
-function siteName(row: SatelliteRow) {
-  const site = Array.isArray(row.sites) ? row.sites[0] ?? null : row.sites ?? null;
+function siteName(row: SatelliteRow, sitesById: Map<string, SiteRow>) {
+  const site = sitesById.get(row.site_id) ?? null;
   return row.name ?? site?.name ?? site?.code ?? "Satélite";
 }
 
@@ -139,7 +144,7 @@ export default async function DeliveryRatesPage({
     supabase
       .schema("pass")
       .from("pass_satellites")
-      .select("site_id,name,is_active,sites(id,name,code)")
+      .select("site_id,name,is_active")
       .eq("is_active", true)
       .order("name", { ascending: true }),
     supabase
@@ -151,8 +156,13 @@ export default async function DeliveryRatesPage({
   ]);
 
   const satellites = (satellitesRaw ?? []) as SatelliteRow[];
+  const siteIds = satellites.map((satellite) => satellite.site_id).filter(Boolean);
+  const { data: sitesRaw, error: sitesError } = siteIds.length
+    ? await supabase.from("sites").select("id,name,code").in("id", siteIds)
+    : { data: [], error: null };
   const rates = (ratesRaw ?? []) as RateRow[];
-  const effectiveError = errorMsg || satellitesError?.message || ratesError?.message || "";
+  const sitesById = new Map(((sitesRaw ?? []) as SiteRow[]).map((site) => [site.id, site]));
+  const effectiveError = errorMsg || satellitesError?.message || ratesError?.message || sitesError?.message || "";
 
   const ratesBySite = new Map<string, RateRow[]>();
   for (const rate of rates) {
@@ -184,7 +194,7 @@ export default async function DeliveryRatesPage({
               <div key={satellite.site_id} className="ui-panel space-y-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold text-[var(--ui-text)]">{siteName(satellite)}</h2>
+                    <h2 className="text-lg font-semibold text-[var(--ui-text)]">{siteName(satellite, sitesById)}</h2>
                     <p className="ui-caption">Cobertura configurada hasta {siteRates.at(-1)?.distance_km ?? 0} km.</p>
                   </div>
                 </div>
