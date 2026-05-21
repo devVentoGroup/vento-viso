@@ -547,14 +547,15 @@ export default async function StaffMasterCalendarPage({
       </section>
 
       <section className="ui-panel">
-        <form className="grid gap-3 md:grid-cols-[200px_220px_180px_180px_1fr] md:items-end">
-          <label className="space-y-1">
-            <span className="ui-label">Mes</span>
-            <input name="month" type="month" defaultValue={monthKey} className="ui-input" />
-          </label>
-          <label className="space-y-1">
-            <span className="ui-label">Sede</span>
-            <select name="site_id" defaultValue={selectedSiteId} className="ui-input">
+        <form className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[200px_minmax(180px,1fr)_180px_180px]">
+            <label className="space-y-1">
+              <span className="ui-label">Mes</span>
+              <input name="month" type="month" defaultValue={monthKey} className="ui-input" />
+            </label>
+            <label className="space-y-1">
+              <span className="ui-label">Sede</span>
+              <select name="site_id" defaultValue={selectedSiteId} className="ui-input">
               <option value="">Todas</option>
               {sites.map((site) => (
                 <option key={site.id} value={site.id}>
@@ -562,10 +563,10 @@ export default async function StaffMasterCalendarPage({
                 </option>
               ))}
             </select>
-          </label>
-          <label className="space-y-1">
-            <span className="ui-label">Tipo</span>
-            <select name="type" defaultValue={selectedType || "all"} className="ui-input">
+            </label>
+            <label className="space-y-1">
+              <span className="ui-label">Tipo</span>
+              <select name="type" defaultValue={selectedType || "all"} className="ui-input">
               <option value="all">Todos</option>
               <option value="holiday">Festivos</option>
               <option value="mother_day">Día de la Madre</option>
@@ -573,19 +574,32 @@ export default async function StaffMasterCalendarPage({
               <option value="contract_end">Vence contrato</option>
               <option value="maintenance">Mantenimiento</option>
             </select>
-          </label>
-          <label className="space-y-1">
-            <span className="ui-label">Vista</span>
-            <select name="view" defaultValue={selectedView} className="ui-input">
+            </label>
+            <label className="space-y-1">
+              <span className="ui-label">Vista</span>
+              <select name="view" defaultValue={selectedView} className="ui-input">
               <option value="both">Mes + lista</option>
               <option value="month">Solo mes</option>
               <option value="list">Solo lista</option>
             </select>
-          </label>
-          <div className="flex items-center gap-2">
-            <button type="submit" className="ui-btn ui-btn--brand">Aplicar</button>
-            <Link href={`/staff/calendar?month=${prevMonthKey}${baseQuery ? `&${baseQuery}` : ""}`} className="ui-btn ui-btn--ghost">← Mes anterior</Link>
-            <Link href={`/staff/calendar?month=${nextMonthKey}${baseQuery ? `&${baseQuery}` : ""}`} className="ui-btn ui-btn--ghost">Mes siguiente →</Link>
+            </label>
+          </div>
+          <div className="flex flex-col gap-2 border-t border-[var(--ui-border)] pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+            <Link
+              href={`/staff/calendar?month=${prevMonthKey}${baseQuery ? `&${baseQuery}` : ""}`}
+              className="ui-btn ui-btn--ghost justify-center whitespace-nowrap sm:min-w-36"
+            >
+              ← Mes anterior
+            </Link>
+            <Link
+              href={`/staff/calendar?month=${nextMonthKey}${baseQuery ? `&${baseQuery}` : ""}`}
+              className="ui-btn ui-btn--ghost justify-center whitespace-nowrap sm:min-w-36"
+            >
+              Mes siguiente →
+            </Link>
+            <button type="submit" className="ui-btn ui-btn--brand justify-center whitespace-nowrap sm:min-w-28">
+              Aplicar
+            </button>
           </div>
         </form>
       </section>
