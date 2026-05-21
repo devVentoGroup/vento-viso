@@ -92,7 +92,7 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
   const [sortOrder, setSortOrder] = useState(initial.sort_order);
   const [siteId, setSiteId] = useState(initial.site_id || sites[0]?.id || "");
   const [commercialCategoryId, setCommercialCategoryId] = useState(initial.commercial_category_id);
-  const [categoryLabel, setCategoryLabel] = useState(initial.category_label);
+  const [categoryLabel] = useState(initial.category_label);
   const [badgesCsv, setBadgesCsv] = useState(initial.badges_csv);
   const [imageUrl, setImageUrl] = useState(initial.image_url);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
@@ -225,7 +225,105 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
       <input type="hidden" name="id" value={initial.id ?? ""} />
 
       <div className="ui-panel space-y-6">
-        <div className="ui-h3">Datos del item</div>
+        <div>
+          <div className="ui-h3">1. Sede de venta</div>
+          <p className="ui-caption">Primero elige la sede; las categorias y productos se filtran con esa seleccion.</p>
+        </div>
+        <label className="space-y-2">
+          <span className="ui-label">Negocio / sede</span>
+          <select
+            name="site_id"
+            className="ui-input"
+            value={siteId}
+            onChange={(event) => setSiteId(event.target.value)}
+            required
+          >
+            <option value="">Selecciona una sede</option>
+            {sites.map((site) => (
+              <option key={site.id} value={site.id}>
+                {(site.name ?? site.code ?? "Sin nombre") + (site.is_active === false ? " (inactiva)" : "")}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="ui-panel space-y-6">
+        <div>
+          <div className="ui-h3">2. Categoria y producto</div>
+          <p className="ui-caption">Selecciona la categoria de venta y el producto habilitado para la sede.</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="space-y-2">
+            <span className="ui-label">Categoria comercial</span>
+            <select
+              name="commercial_category_id"
+              className="ui-input"
+              value={commercialCategoryId}
+              onChange={(event) => setCommercialCategoryId(event.target.value)}
+              required
+            >
+              <option value="">Selecciona categoria comercial</option>
+              {visibleCategories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {(category.name ?? category.code ?? "Sin nombre") +
+                    (category.is_active === false ? " [inactiva]" : "")}
+                </option>
+              ))}
+            </select>
+            <input
+              name="category_label"
+              type="hidden"
+              className="ui-input"
+              value={selectedCategory?.name ?? categoryLabel}
+              readOnly
+            />
+            <p className="ui-caption">
+              Las categorias comerciales se crean antes por sede y no cambian las categorias operacionales.
+            </p>
+            {siteId && visibleCategories.length === 0 ? (
+              <p className="ui-caption">
+                Esta sede no tiene categorias comerciales. Crea categorias en Viso &gt; Categorias comerciales.
+              </p>
+            ) : null}
+          </label>
+          <label className="space-y-2">
+            <span className="ui-label">Producto core (venta)</span>
+            <select
+              name="product_id"
+              className="ui-input"
+              value={productId}
+              onChange={(event) => setProductId(event.target.value)}
+              required
+            >
+              <option value="">Selecciona producto de venta</option>
+              {visibleProducts.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {(product.name ?? "Sin nombre") +
+                    (product.sku ? ` (${product.sku})` : "") +
+                    (product.is_active === false ? " [inactivo]" : "")}
+                </option>
+              ))}
+            </select>
+            {siteId && visibleProducts.length === 0 ? (
+              <p className="ui-caption">
+                No hay productos de venta habilitados para esta sede.
+              </p>
+            ) : null}
+            {selectedProduct && suggestedPrice != null ? (
+              <p className="ui-caption">
+                El precio sugerido se toma del producto maestro para esta sede.
+              </p>
+            ) : null}
+          </label>
+        </div>
+      </div>
+
+      <div className="ui-panel space-y-6">
+        <div>
+          <div className="ui-h3">3. Datos del item</div>
+          <p className="ui-caption">Ajusta el texto, precio e imagen que vera el cliente en el menu comercial.</p>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2">
             <span className="ui-label">Codigo</span>
@@ -295,68 +393,6 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
             />
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Categoria comercial</span>
-            <select
-              name="commercial_category_id"
-              className="ui-input"
-              value={commercialCategoryId}
-              onChange={(event) => setCommercialCategoryId(event.target.value)}
-              required
-            >
-              <option value="">Selecciona categoria comercial</option>
-              {visibleCategories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {(category.name ?? category.code ?? "Sin nombre") +
-                    (category.is_active === false ? " [inactiva]" : "")}
-                </option>
-              ))}
-            </select>
-            <input
-              name="category_label"
-              type="hidden"
-              className="ui-input"
-              value={selectedCategory?.name ?? categoryLabel}
-              readOnly
-            />
-            <p className="ui-caption">
-              Las categorias comerciales se crean antes por sede y no cambian las categorias operacionales.
-            </p>
-            {siteId && visibleCategories.length === 0 ? (
-              <p className="ui-caption">
-                Esta sede no tiene categorias comerciales. Crea categorias en Viso &gt; Categorias comerciales.
-              </p>
-            ) : null}
-          </label>
-          <label className="space-y-2">
-            <span className="ui-label">Producto core (venta)</span>
-            <select
-              name="product_id"
-              className="ui-input"
-              value={productId}
-              onChange={(event) => setProductId(event.target.value)}
-              required
-            >
-              <option value="">Selecciona producto de venta</option>
-              {visibleProducts.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {(product.name ?? "Sin nombre") +
-                    (product.sku ? ` (${product.sku})` : "") +
-                    (product.is_active === false ? " [inactivo]" : "")}
-                </option>
-              ))}
-            </select>
-            {siteId && visibleProducts.length === 0 ? (
-              <p className="ui-caption">
-                No hay productos de venta habilitados para esta sede.
-              </p>
-            ) : null}
-            {selectedProduct && suggestedPrice != null ? (
-              <p className="ui-caption">
-                El precio sugerido se toma del producto maestro para esta sede.
-              </p>
-            ) : null}
-          </label>
-          <label className="space-y-2">
             <span className="ui-label">Orden</span>
             <input
               name="sort_order"
@@ -365,23 +401,6 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
               value={sortOrder}
               onChange={(event) => setSortOrder(event.target.value)}
             />
-          </label>
-          <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Negocio / sede</span>
-            <select
-              name="site_id"
-              className="ui-input"
-              value={siteId}
-              onChange={(event) => setSiteId(event.target.value)}
-              required
-            >
-              <option value="">Selecciona una sede</option>
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {(site.name ?? site.code ?? "Sin nombre") + (site.is_active === false ? " (inactiva)" : "")}
-                </option>
-              ))}
-            </select>
           </label>
           <label className="space-y-2 sm:col-span-2">
             <span className="ui-label">Badges (separados por coma)</span>

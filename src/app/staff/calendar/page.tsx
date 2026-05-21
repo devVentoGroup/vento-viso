@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
@@ -11,6 +13,8 @@ type SearchParams = {
   site_id?: string;
   type?: string;
   view?: string;
+  ok?: string;
+  error?: string;
 };
 
 type SiteRow = { id: string; name: string | null };
@@ -41,8 +45,18 @@ type AssetProfileRow = {
   maintenance_cycle_months: number | null;
   maintenance_cycle_anchor_date: string | null;
 };
+type ManualCalendarEventRow = {
+  id: string;
+  event_date: string;
+  title: string;
+  detail: string | null;
+  event_type: string;
+  site_id: string | null;
+  priority: "high" | "medium" | "low";
+  is_active: boolean | null;
+};
 
-type CalendarEventType = "holiday" | "mother_day" | "contract_start" | "contract_end" | "maintenance";
+type CalendarEventType = "holiday" | "mother_day" | "commercial" | "operations" | "other" | "contract_start" | "contract_end" | "maintenance";
 type CalendarEvent = {
   date: string;
   type: CalendarEventType;
@@ -148,6 +162,9 @@ function getMothersDayCucuta(year: number): string {
 function eventTypeLabel(value: CalendarEventType): string {
   if (value === "holiday") return "Festivo";
   if (value === "mother_day") return "Día Madre";
+  if (value === "commercial") return "Comercial";
+  if (value === "operations") return "Operacion";
+  if (value === "other") return "Manual";
   if (value === "contract_start") return "Contrato";
   if (value === "contract_end") return "Contrato";
   return "Mantenimiento";
@@ -156,6 +173,9 @@ function eventTypeLabel(value: CalendarEventType): string {
 function eventTypePillClass(value: CalendarEventType): string {
   if (value === "holiday") return "bg-indigo-50 text-indigo-700 border-indigo-200";
   if (value === "mother_day") return "bg-pink-50 text-pink-700 border-pink-200";
+  if (value === "commercial") return "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200";
+  if (value === "operations") return "bg-cyan-50 text-cyan-700 border-cyan-200";
+  if (value === "other") return "bg-slate-100 text-slate-700 border-slate-200";
   if (value === "contract_start") return "bg-emerald-50 text-emerald-700 border-emerald-200";
   if (value === "contract_end") return "bg-rose-50 text-rose-700 border-rose-200";
   return "bg-amber-50 text-amber-700 border-amber-200";
@@ -195,12 +215,76 @@ function getMaintenanceProductName(
   return products.name ?? fallbackProductId;
 }
 
+function asText(value: FormDataEntryValue | null) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asNullableText(value: FormDataEntryValue | null) {
+  const text = asText(value);
+  return text || null;
+}
+
+function normalizeManualEventType(value: string): CalendarEventType {
+  if (value === "holiday") return "holiday";
+  if (value === "mother_day") return "mother_day";
+  if (value === "commercial") return "commercial";
+  if (value === "operations") return "operations";
+  if (value === "maintenance") return "maintenance";
+  return "other";
+}
+
+function normalizePriority(value: string): "high" | "medium" | "low" {
+  if (value === "high" || value === "low") return value;
+  return "medium";
+}
+
+function safeDecode(value: string | null | undefined) {
+  if (!value) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+async function saveManualEvent(formData: FormData) {
+  "use server";
+  const supabase = createAdminClient();
+  const eventDate = asText(formData.get("event_date"));
+  const title = asText(formData.get("title"));
+  const eventType = normalizeManualEventType(asText(formData.get("event_type")));
+  const priority = normalizePriority(asText(formData.get("priority")));
+
+  if (!eventDate || !/^\d{4}-\d{2}-\d{2}$/.test(eventDate) || !title) {
+    redirect("/staff/calendar?error=" + encodeURIComponent("Completa fecha y titulo del evento manual."));
+  }
+
+  const { error } = await supabase.from("staff_manual_calendar_events").insert({
+    event_date: eventDate,
+    title,
+    detail: asNullableText(formData.get("detail")),
+    event_type: eventType,
+    priority,
+    site_id: asNullableText(formData.get("site_id")),
+    is_active: true,
+  });
+
+  if (error) {
+    redirect("/staff/calendar?error=" + encodeURIComponent(error.message));
+  }
+
+  revalidatePath("/staff/calendar");
+  redirect(`/staff/calendar?month=${eventDate.slice(0, 7)}&ok=${encodeURIComponent("Fecha agregada al calendario maestro.")}`);
+}
+
 export default async function StaffMasterCalendarPage({
   searchParams,
 }: {
   searchParams?: Promise<SearchParams>;
 }) {
   const sp = (await searchParams) ?? {};
+  const okMsg = safeDecode(sp.ok);
+  const errorMsg = safeDecode(sp.error);
 
   await requireAppAccess({
     appId: "viso",
@@ -217,7 +301,7 @@ export default async function StaffMasterCalendarPage({
   const selectedView = selectedViewRaw === "month" || selectedViewRaw === "list" ? selectedViewRaw : "both";
   const monthKey = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`;
 
-  const [sitesRes, employeesRes, contractRes, maintenanceRes, assetProfilesRes] = await Promise.all([
+  const [sitesRes, employeesRes, contractRes, maintenanceRes, assetProfilesRes, manualEventsRes] = await Promise.all([
     supabase.from("sites").select("id,name").eq("is_active", true).order("name"),
     supabase.from("employees").select("id,full_name,site_id").eq("is_active", true),
     supabase.rpc("employee_wallet_eligibility"),
@@ -231,6 +315,12 @@ export default async function StaffMasterCalendarPage({
       .from("product_asset_profiles")
       .select("product_id,physical_location,maintenance_cycle_enabled,maintenance_cycle_months,maintenance_cycle_anchor_date")
       .eq("maintenance_cycle_enabled", true),
+    supabase
+      .from("staff_manual_calendar_events")
+      .select("id,event_date,title,detail,event_type,site_id,priority,is_active")
+      .gte("event_date", toIsoDate(monthStart))
+      .lte("event_date", toIsoDate(monthEnd))
+      .order("event_date"),
   ]);
 
   const sites = (sitesRes.data ?? []) as SiteRow[];
@@ -238,10 +328,24 @@ export default async function StaffMasterCalendarPage({
   const contractRows = (contractRes.data ?? []) as ContractCalendarRow[];
   const maintenanceRows = (maintenanceRes.data ?? []) as MaintenanceEventRow[];
   const assetProfiles = (assetProfilesRes.data ?? []) as AssetProfileRow[];
+  const manualEvents = (manualEventsRes.data ?? []) as ManualCalendarEventRow[];
 
   const employeeById = new Map(employees.map((row) => [row.id, row]));
 
   const events: CalendarEvent[] = [];
+
+  manualEvents.forEach((row) => {
+    if (row.is_active === false) return;
+    if (selectedSiteId && row.site_id && row.site_id !== selectedSiteId) return;
+    events.push({
+      date: row.event_date,
+      type: normalizeManualEventType(row.event_type),
+      title: row.title,
+      detail: row.detail ?? "Evento manual",
+      siteId: row.site_id,
+      priority: normalizePriority(row.priority),
+    });
+  });
 
   const years = new Set([monthDate.getFullYear()]);
   const prevMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() - 1, 1);
@@ -382,6 +486,65 @@ export default async function StaffMasterCalendarPage({
           </div>
         }
       />
+
+      {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
+      {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
+
+      <section className="ui-panel space-y-4">
+        <div>
+          <h2 className="ui-h3">Agregar fecha manual</h2>
+          <p className="ui-caption">
+            Usa este bloque para fechas locales o comerciales que no salen del calendario nacional, por ejemplo Dia de la Madre en Cucuta.
+          </p>
+        </div>
+        <form action={saveManualEvent} className="grid gap-3 lg:grid-cols-[160px_1fr_170px_160px_180px_auto] lg:items-end">
+          <label className="space-y-1">
+            <span className="ui-label">Fecha</span>
+            <input name="event_date" type="date" className="ui-input" required />
+          </label>
+          <label className="space-y-1">
+            <span className="ui-label">Titulo</span>
+            <input name="title" className="ui-input" placeholder="Dia de la Madre - Cucuta" required />
+          </label>
+          <label className="space-y-1">
+            <span className="ui-label">Tipo</span>
+            <select name="event_type" defaultValue="commercial" className="ui-input">
+              <option value="commercial">Comercial</option>
+              <option value="mother_day">Dia de la Madre</option>
+              <option value="holiday">Festivo/local</option>
+              <option value="operations">Operacion</option>
+              <option value="maintenance">Mantenimiento</option>
+              <option value="other">Manual</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="ui-label">Prioridad</span>
+            <select name="priority" defaultValue="high" className="ui-input">
+              <option value="high">Alta</option>
+              <option value="medium">Media</option>
+              <option value="low">Baja</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="ui-label">Sede</span>
+            <select name="site_id" className="ui-input">
+              <option value="">Todas</option>
+              {sites.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name ?? site.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit" className="ui-btn ui-btn--brand">
+            Agregar
+          </button>
+          <label className="space-y-1 lg:col-span-6">
+            <span className="ui-label">Detalle</span>
+            <input name="detail" className="ui-input" placeholder="Contexto opcional para operaciones, marketing o personal." />
+          </label>
+        </form>
+      </section>
 
       <section className="ui-panel">
         <form className="grid gap-3 md:grid-cols-[200px_220px_180px_180px_1fr] md:items-end">

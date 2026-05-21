@@ -47,12 +47,6 @@ type CommercialCategoryRow = {
   is_active: boolean | null;
 };
 
-type SatelliteRow = {
-  id: string;
-  site_id: string | null;
-  is_active: boolean | null;
-};
-
 type SiteRow = {
   id: string;
   code: string | null;
@@ -122,25 +116,6 @@ async function ensureSellProductForSite(
   return "";
 }
 
-async function ensureCommercialSite(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  siteId: string,
-) {
-  const { data, error } = await supabase
-    .schema("pass")
-    .from("pass_satellites")
-    .select("id")
-    .eq("site_id", siteId)
-    .eq("is_active", true)
-    .maybeSingle();
-
-  if (error || !data) {
-    return "Esta sede no tiene ventas Pass activas. Activa o crea el negocio en VISO > Negocios antes de usar items comerciales.";
-  }
-
-  return "";
-}
-
 async function updateMenuItem(formData: FormData) {
   "use server";
   const supabase = await createClient();
@@ -155,11 +130,6 @@ async function updateMenuItem(formData: FormData) {
 
   if (!id || !code || !name || !siteId || !productId || !commercialCategoryId) {
     redirect(`/menu/${id}?error=${encodeURIComponent("Faltan campos obligatorios.")}`);
-  }
-
-  const siteValidation = await ensureCommercialSite(supabase, siteId);
-  if (siteValidation) {
-    redirect(`/menu/${id}?error=${encodeURIComponent(siteValidation)}`);
   }
 
   const { metadata, error: metadataError } = parseMetadata(asText(formData.get("metadata_extra")));
@@ -267,18 +237,13 @@ export default async function MenuItemDetailPage({
   });
   const supabase = createAdminClient();
 
-  const [{ data: item }, { data: sitesRaw }, { data: satellitesRaw }, { data: categoriesRaw }] = await Promise.all([
+  const [{ data: item }, { data: sitesRaw }, { data: categoriesRaw }] = await Promise.all([
     supabase
       .schema("pass").from("catalog_items")
       .select("id,code,name,description,site_id,product_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
       .eq("id", id)
       .maybeSingle(),
     supabase.from("sites").select("id,code,name,is_active").eq("is_active", true).order("name", { ascending: true }),
-    supabase
-      .schema("pass")
-      .from("pass_satellites")
-      .select("id,site_id,is_active")
-      .eq("is_active", true),
     supabase
       .schema("pass").from("commercial_categories")
       .select("id,site_id,name,code,is_active")
@@ -363,12 +328,7 @@ export default async function MenuItemDetailPage({
   }
 
   const row = item as CatalogItemRow;
-  const salesSiteIds = new Set(
-    ((satellitesRaw ?? []) as SatelliteRow[])
-      .map((satellite) => satellite.site_id)
-      .filter(Boolean) as string[],
-  );
-  const sites = ((sitesRaw ?? []) as SiteRow[]).filter((site) => salesSiteIds.has(site.id) || site.id === row.site_id);
+  const sites = (sitesRaw ?? []) as SiteRow[];
   const metadata = (row.metadata ?? {}) as Record<string, unknown>;
 
   return (
