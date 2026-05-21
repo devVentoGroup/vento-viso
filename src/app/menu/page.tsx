@@ -66,14 +66,46 @@ export default async function MenuPage({
   const supabase = createAdminClient();
 
   const { data, error: menuError } = await supabase
-    .schema("pass").from("catalog_items")
-    .select("id,code,name,site_id,product_id,category_label,commercial_category_id,commercial_category:commercial_categories(id,name,code),price_amount,is_active,is_featured,metadata,site:sites(id,name,code)")
+    .schema("pass")
+    .from("catalog_items")
+    .select("id,code,name,site_id,product_id,category_label,commercial_category_id,commercial_category:commercial_categories(id,name,code),price_amount,is_active,is_featured,metadata")
     .not("product_id", "is", null)
     .not("commercial_category_id", "is", null)
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
 
-  const rows = menuError ? [] : ((data ?? []) as MenuItemRow[]);
+  const siteIds = Array.from(
+    new Set(
+      ((data ?? []) as MenuItemRow[])
+        .map((row) => row.site_id)
+        .filter(Boolean),
+    ),
+  );
+
+  const { data: sitesRaw, error: sitesError } = siteIds.length
+    ? await supabase
+        .from("sites")
+        .select("id,name,code")
+        .in("id", siteIds)
+    : { data: [], error: null };
+
+  const siteById = new Map(
+    (sitesRaw ?? []).map((site) => [
+      site.id,
+      {
+        id: site.id,
+        name: site.name,
+        code: site.code,
+      },
+    ]),
+  );
+
+  const rows = menuError
+    ? []
+    : ((data ?? []) as MenuItemRow[]).map((row) => ({
+        ...row,
+        site: siteById.get(row.site_id) ?? null,
+      }));
 
   return (
     <div className="space-y-6">
@@ -92,6 +124,11 @@ export default async function MenuPage({
       {menuError ? (
         <div className="ui-alert ui-alert--error">
           No se pudo cargar el menú comercial: {menuError.message}
+        </div>
+      ) : null}
+      {sitesError ? (
+        <div className="ui-alert ui-alert--error">
+          No se pudieron cargar las sedes del menú comercial: {sitesError.message}
         </div>
       ) : null}
 
