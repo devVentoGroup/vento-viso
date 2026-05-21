@@ -35,6 +35,12 @@ type CategoryRow = {
   is_active: boolean | null;
 };
 
+type CategoryItemReferenceRow = {
+  commercial_category_id: string | null;
+  price_amount: number | string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -68,6 +74,25 @@ function siteLabel(site: SiteRow | undefined, business?: BusinessRow | null) {
   if (!businessName || businessName === siteName) return siteName;
 
   return `${businessName} · ${siteName}`;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function isRealCommercialCatalogItem(row: CategoryItemReferenceRow) {
+  return (
+    toNumber(row.price_amount) > 0 ||
+    (
+      row.metadata?.source_app === "viso" &&
+      row.metadata?.source_module === "menu_comercial"
+    )
+  );
 }
 
 async function saveCategory(formData: FormData) {
@@ -239,24 +264,24 @@ export default async function CommercialCategoriesPage({
   const [{ data: sitesRaw, error: sitesError }, { data: categoriesRaw, error: categoriesError }] =
     businessSiteIds.length > 0
       ? await Promise.all([
-          supabase
-            .from("sites")
-            .select("id,name,code,is_active,is_public")
-            .eq("is_active", true)
-            .in("id", businessSiteIds),
-          supabase
-            .schema("pass")
-            .from("commercial_categories")
-            .select("id,site_id,code,name,description,sort_order,is_active")
-            .in("site_id", businessSiteIds)
-            .order("site_id", { ascending: true })
-            .order("sort_order", { ascending: true })
-            .order("name", { ascending: true }),
-        ])
+        supabase
+          .from("sites")
+          .select("id,name,code,is_active,is_public")
+          .eq("is_active", true)
+          .in("id", businessSiteIds),
+        supabase
+          .schema("pass")
+          .from("commercial_categories")
+          .select("id,site_id,code,name,description,sort_order,is_active")
+          .in("site_id", businessSiteIds)
+          .order("site_id", { ascending: true })
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true }),
+      ])
       : [
-          { data: [], error: null },
-          { data: [], error: null },
-        ];
+        { data: [], error: null },
+        { data: [], error: null },
+      ];
 
   const siteOrderById = new Map(
     businessSiteIds.map((siteId, index) => [siteId, index]),
@@ -269,6 +294,36 @@ export default async function CommercialCategoriesPage({
   );
 
   const categories = (categoriesRaw ?? []) as CategoryRow[];
+  const categoryIds = categories.map((category) => category.id);
+
+  const { data: categoryItemsRaw, error: categoryItemsError } = categoryIds.length
+    ? await supabase
+        .schema("pass")
+        .from("catalog_items")
+        .select("commercial_category_id,price_amount,metadata")
+        .in("commercial_category_id", categoryIds)
+    : { data: [], error: null };
+
+  const assignedCategoryIds = new Set<string>();
+  const realCommercialCategoryIds = new Set<string>();
+
+  for (const row of (categoryItemsRaw ?? []) as CategoryItemReferenceRow[]) {
+    const categoryId = row.commercial_category_id;
+    if (!categoryId) continue;
+
+    assignedCategoryIds.add(categoryId);
+
+    if (isRealCommercialCatalogItem(row)) {
+      realCommercialCategoryIds.add(categoryId);
+    }
+  }
+
+  const visibleCategories = categories.filter((category) => {
+    const hasAssignedItems = assignedCategoryIds.has(category.id);
+    const hasRealCommercialItems = realCommercialCategoryIds.has(category.id);
+
+    return !hasAssignedItems || hasRealCommercialItems;
+  });
 
   const businessBySiteId = new Map(
     businesses
@@ -281,10 +336,11 @@ export default async function CommercialCategoriesPage({
     businessesError?.message ||
     sitesError?.message ||
     categoriesError?.message ||
+    categoryItemsError?.message ||
     "";
 
   const categoriesBySite = new Map<string, CategoryRow[]>();
-  for (const category of categories) {
+  for (const category of visibleCategories) {
     if (!categoriesBySite.has(category.site_id)) categoriesBySite.set(category.site_id, []);
     categoriesBySite.get(category.site_id)!.push(category);
   }
