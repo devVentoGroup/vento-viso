@@ -134,6 +134,12 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
     if (!stillValid) setCommercialCategoryId("");
   }, [commercialCategoryId, visibleCategories]);
 
+  useEffect(() => {
+    if (!productId) return;
+    const stillValid = visibleProducts.some((product) => product.id === productId);
+    if (!stillValid) setProductId("");
+  }, [productId, visibleProducts]);
+
   const suggestedPrice = useMemo(() => {
     if (!selectedProduct) return null;
     if (siteId) {
@@ -250,8 +256,11 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
 
       <div className="ui-panel space-y-6">
         <div>
-          <div className="ui-h3">2. Categoria y producto</div>
-          <p className="ui-caption">Selecciona la categoria de venta y el producto habilitado para la sede.</p>
+          <div className="ui-h3">2. Categoría comercial y producto base</div>
+          <p className="ui-caption">
+            Selecciona la categoría visible del menú y el producto operacional base habilitado para esta sede.
+            Esto no usa categorías operacionales de NEXO ni productos de fidelización.
+          </p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2">
@@ -263,7 +272,7 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
               onChange={(event) => setCommercialCategoryId(event.target.value)}
               required
             >
-              <option value="">Selecciona categoria comercial</option>
+              <option value="">Selecciona categoría comercial del menú</option>
               {visibleCategories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {(category.name ?? category.code ?? "Sin nombre") +
@@ -279,7 +288,7 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
               readOnly
             />
             <p className="ui-caption">
-              Las categorias comerciales se crean antes por sede y no cambian las categorias operacionales.
+              Esta categoría es solo para el menú comercial de Pass. No modifica categorías operacionales de NEXO.
             </p>
             {siteId && visibleCategories.length === 0 ? (
               <p className="ui-caption">
@@ -288,7 +297,7 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
             ) : null}
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Producto core (venta)</span>
+            <span className="ui-label">Producto operacional base</span>
             <select
               name="product_id"
               className="ui-input"
@@ -296,7 +305,7 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
               onChange={(event) => setProductId(event.target.value)}
               required
             >
-              <option value="">Selecciona producto de venta</option>
+              <option value="">Selecciona producto operacional habilitado</option>
               {visibleProducts.map((product) => (
                 <option key={product.id} value={product.id}>
                   {(product.name ?? "Sin nombre") +
@@ -307,12 +316,12 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
             </select>
             {siteId && visibleProducts.length === 0 ? (
               <p className="ui-caption">
-                No hay productos de venta habilitados para esta sede.
+                No hay productos operacionales habilitados para crear ítems comerciales en esta sede.
               </p>
             ) : null}
             {selectedProduct && suggestedPrice != null ? (
               <p className="ui-caption">
-                El precio sugerido se toma del producto maestro para esta sede.
+                El precio sugerido viene de la configuración base de esta sede, pero puedes definir un precio comercial propio.
               </p>
             ) : null}
           </label>
@@ -322,7 +331,9 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
       <div className="ui-panel space-y-6">
         <div>
           <div className="ui-h3">3. Datos del item</div>
-          <p className="ui-caption">Ajusta el texto, precio e imagen que vera el cliente en el menu comercial.</p>
+          <p className="ui-caption">
+            Define cómo verá el cliente este producto en Pass: nombre comercial, descripción, precio e imagen por sede.
+          </p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2">
@@ -358,11 +369,11 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
             />
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Precio</span>
+            <span className="ui-label">Precio comercial</span>
             <input
               name="price_amount"
               type="number"
-              min={0}
+              min={1}
               step="100"
               className="ui-input"
               value={priceAmount}
@@ -446,7 +457,7 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
         <div className="ui-h3">Imagen y metadata</div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Imagen URL</span>
+            <span className="ui-label">Imagen comercial URL</span>
             <input
               name="image_url"
               className="ui-input"
@@ -456,7 +467,7 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
             />
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Subir imagen</span>
+            <span className="ui-label">Subir imagen comercial</span>
             <input
               type="file"
               accept="image/*"
@@ -506,7 +517,9 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <span className="ui-chip">{getPreviewCategory(selectedCategory?.name ?? categoryLabel)}</span>
+              <span className="ui-chip">
+                {getPreviewCategory(selectedCategory?.name ?? selectedCategory?.code ?? categoryLabel)}
+              </span>
               {badgesCsv
                 .split(",")
                 .map((badge) => badge.trim())

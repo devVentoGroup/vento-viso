@@ -76,23 +76,125 @@ function parseMetadata(extraRaw: string) {
   }
 }
 
-async function ensureSellProductForSite(
+function toOptionalNumber(value: number | string | null | undefined) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+type MenuReferencesValidation = {
+  error: string;
+  categoryLabel: string;
+  basePriceAmount: number | null;
+  recipeCostAmount: number | null;
+};
+
+async function validateCommercialMenuReferences(
   supabase: Awaited<ReturnType<typeof createClient>>,
   productId: string,
   siteId: string,
-) {
-  const { data: sellOption, error: sellOptionError } = await supabase
-    .schema("pass").from("sell_products_by_site")
-    .select("product_id")
-    .eq("product_id", productId)
-    .eq("site_id", siteId)
-    .maybeSingle();
+  commercialCategoryId: string,
+): Promise<MenuReferencesValidation> {
+  const [
+    { data: sellOption, error: sellOptionError },
+    { data: commercialCategory, error: commercialCategoryError },
+    { data: existingItem, error: existingItemError },
+  ] = await Promise.all([
+    supabase
+      .schema("pass")
+      .from("sell_products_by_site")
+      .select("product_id,base_price,recipe_cost_amount")
+      .eq("product_id", productId)
+      .eq("site_id", siteId)
+      .maybeSingle(),
+    supabase
+      .schema("pass")
+      .from("commercial_categories")
+      .select("id,name,code,site_id,is_active")
+      .eq("id", commercialCategoryId)
+      .eq("site_id", siteId)
+      .eq("is_active", true)
+      .maybeSingle(),
+    supabase
+      .schema("pass")
+      .from("catalog_items")
+      .select("id,name")
+      .eq("product_id", productId)
+      .eq("site_id", siteId)
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
-  if (sellOptionError || !sellOption) {
-    return "El producto no esta habilitado para esta sede.";
+  if (sellOptionError) {
+    return {
+      error: `No se pudo validar el producto operacional: ${sellOptionError.message}`,
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
   }
 
-  return "";
+  if (!sellOption) {
+    return {
+      error: "El producto operacional no esta habilitado para esta sede.",
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
+  }
+
+  if (commercialCategoryError) {
+    return {
+      error: `No se pudo validar la categoria comercial: ${commercialCategoryError.message}`,
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
+  }
+
+  if (!commercialCategory) {
+    return {
+      error: "La categoria comercial seleccionada no existe, esta inactiva o no pertenece a esta sede.",
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
+  }
+
+  if (existingItemError) {
+    return {
+      error: `No se pudo validar si el item ya existe: ${existingItemError.message}`,
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
+  }
+
+  if (existingItem) {
+    return {
+      error: "Ya existe un item comercial para este producto en esta sede. Edita el item existente en lugar de crear otro.",
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
+  }
+
+  const categoryLabel = commercialCategory.name || commercialCategory.code || "";
+
+  if (!categoryLabel) {
+    return {
+      error: "La categoria comercial seleccionada no tiene nombre ni codigo.",
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
+  }
+
+  return {
+    error: "",
+    categoryLabel,
+    basePriceAmount: toOptionalNumber(sellOption.base_price),
+    recipeCostAmount: toOptionalNumber(sellOption.recipe_cost_amount),
+  };
 }
 
 async function createMenuItem(formData: FormData) {
@@ -110,15 +212,43 @@ async function createMenuItem(formData: FormData) {
     redirect("/menu/new?error=" + encodeURIComponent("Faltan campos obligatorios."));
   }
 
+  const priceAmount = asNonNegativeNumber(formData.get("price_amount"));
+
+  if (priceAmount <= 0) {
+    redirect("/menu/new?error=" + encodeURIComponent("El precio comercial debe ser mayor a 0."));
+  }
+
+  const compareAtAmountRaw = asText(formData.get("compare_at_amount"));
+  const compareAtAmount = compareAtAmountRaw
+    ? asNonNegativeNumber(formData.get("compare_at_amount"))
+    : null;
+
+  const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
+
   const { metadata, error: metadataError } = parseMetadata(asText(formData.get("metadata_extra")));
   if (metadataError) {
     redirect("/menu/new?error=" + encodeURIComponent(metadataError));
   }
 
-  const productValidation = await ensureSellProductForSite(supabase, productId, siteId);
-  if (productValidation) {
-    redirect("/menu/new?error=" + encodeURIComponent(productValidation));
+  const referencesValidation = await validateCommercialMenuReferences(
+    supabase,
+    productId,
+    siteId,
+    commercialCategoryId,
+  );
+
+  if (referencesValidation.error) {
+    redirect("/menu/new?error=" + encodeURIComponent(referencesValidation.error));
   }
+
+  const commercialMetadata = {
+    ...metadata,
+    source_app: "viso",
+    source_module: "menu_comercial",
+    operational_product_id: productId,
+    base_price_amount: referencesValidation.basePriceAmount,
+    recipe_cost_amount: referencesValidation.recipeCostAmount,
+  };
 
   const { error } = await supabase.schema("pass").from("catalog_items").insert({
     code,
@@ -127,18 +257,16 @@ async function createMenuItem(formData: FormData) {
     product_id: productId,
     description: asText(formData.get("description")) || null,
     commercial_category_id: commercialCategoryId,
-    category_label: asText(formData.get("category_label")) || null,
+    category_label: referencesValidation.categoryLabel,
     image_url: asText(formData.get("image_url")) || null,
-    price_amount: asNonNegativeNumber(formData.get("price_amount")),
-    compare_at_amount: asText(formData.get("compare_at_amount"))
-      ? asNonNegativeNumber(formData.get("compare_at_amount"))
-      : null,
-    sort_order: Math.round(asNonNegativeNumber(formData.get("sort_order"))),
+    price_amount: priceAmount,
+    compare_at_amount: compareAtAmount,
+    sort_order: sortOrder,
     is_active: asBool(formData.get("is_active")),
     is_featured: asBool(formData.get("is_featured")),
     badges: parseBadgesCsv(asText(formData.get("badges_csv"))),
     fulfillment_modes: parseFulfillmentModes(formData),
-    metadata,
+    metadata: commercialMetadata,
   });
 
   if (error) {
@@ -184,8 +312,10 @@ export default async function NewMenuItemPage({
       .select("site_id,product_id,name,sku,base_price,recipe_cost_amount")
       .order("name", { ascending: true }),
     supabase
-      .schema("pass").from("commercial_categories")
+      .schema("pass")
+      .from("commercial_categories")
       .select("id,site_id,name,code,is_active")
+      .eq("is_active", true)
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true }),
   ]);

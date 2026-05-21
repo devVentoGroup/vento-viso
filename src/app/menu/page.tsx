@@ -11,6 +11,8 @@ type MenuItemRow = {
   id: string;
   code: string;
   name: string;
+  site_id: string;
+  product_id: string | null;
   category_label: string | null;
   commercial_category_id: string | null;
   commercial_category?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
@@ -63,13 +65,15 @@ export default async function MenuPage({
   });
   const supabase = createAdminClient();
 
-  const { data } = await supabase
+  const { data, error: menuError } = await supabase
     .schema("pass").from("catalog_items")
-    .select("id,code,name,category_label,commercial_category_id,commercial_category:commercial_categories(id,name,code),price_amount,is_active,is_featured,metadata,site:sites(id,name,code)")
+    .select("id,code,name,site_id,product_id,category_label,commercial_category_id,commercial_category:commercial_categories(id,name,code),price_amount,is_active,is_featured,metadata,site:sites(id,name,code)")
+    .not("product_id", "is", null)
+    .not("commercial_category_id", "is", null)
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
 
-  const rows = (data ?? []) as MenuItemRow[];
+  const rows = menuError ? [] : ((data ?? []) as MenuItemRow[]);
 
   return (
     <div className="space-y-6">
@@ -85,9 +89,16 @@ export default async function MenuPage({
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
+      {menuError ? (
+        <div className="ui-alert ui-alert--error">
+          No se pudo cargar el menú comercial: {menuError.message}
+        </div>
+      ) : null}
 
       <div className="ui-panel">
-        {rows.length === 0 ? (
+        {menuError ? (
+          <div className="ui-empty">Corrige el error de consulta para ver los ítems comerciales.</div>
+        ) : rows.length === 0 ? (
           <div className="ui-empty">No hay items comerciales configurados.</div>
         ) : (
           <Table>
