@@ -16,6 +16,12 @@ type SiteRow = {
   is_active: boolean | null;
 };
 
+type SatelliteRow = {
+  id: string;
+  site_id: string | null;
+  is_active: boolean | null;
+};
+
 type CategoryRow = {
   id: string;
   site_id: string;
@@ -56,6 +62,22 @@ function siteLabel(site: SiteRow | undefined) {
   return site?.name ?? site?.code ?? "Sin sede";
 }
 
+async function ensureCommercialSite(supabase: ReturnType<typeof createAdminClient>, siteId: string) {
+  const { data, error } = await supabase
+    .schema("pass")
+    .from("pass_satellites")
+    .select("id")
+    .eq("site_id", siteId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !data) {
+    return "Esta sede no tiene ventas Pass activas. Activa o crea el negocio en VISO > Negocios antes de usar categorias comerciales.";
+  }
+
+  return "";
+}
+
 async function saveCategory(formData: FormData) {
   "use server";
   const supabase = createAdminClient();
@@ -66,6 +88,11 @@ async function saveCategory(formData: FormData) {
 
   if (!siteId || !name || !code) {
     redirect("/commercial-categories?error=" + encodeURIComponent("Sede y nombre son obligatorios."));
+  }
+
+  const siteValidation = await ensureCommercialSite(supabase, siteId);
+  if (siteValidation) {
+    redirect("/commercial-categories?error=" + encodeURIComponent(siteValidation));
   }
 
   let sortOrder = 0;
@@ -155,8 +182,17 @@ export default async function CommercialCategoriesPage({
   });
 
   const supabase = createAdminClient();
-  const [{ data: sitesRaw, error: sitesError }, { data: categoriesRaw, error: categoriesError }] = await Promise.all([
-    supabase.from("sites").select("id,name,code,is_active").order("name", { ascending: true }),
+  const [
+    { data: sitesRaw, error: sitesError },
+    { data: satellitesRaw, error: satellitesError },
+    { data: categoriesRaw, error: categoriesError },
+  ] = await Promise.all([
+    supabase.from("sites").select("id,name,code,is_active").eq("is_active", true).order("name", { ascending: true }),
+    supabase
+      .schema("pass")
+      .from("pass_satellites")
+      .select("id,site_id,is_active")
+      .eq("is_active", true),
     supabase
       .schema("pass")
       .from("commercial_categories")
@@ -166,10 +202,14 @@ export default async function CommercialCategoriesPage({
       .order("name", { ascending: true }),
   ]);
 
-  const sites = ((sitesRaw ?? []) as SiteRow[]).filter((site) => site.is_active !== false);
+  const salesSiteIds = new Set(
+    ((satellitesRaw ?? []) as SatelliteRow[])
+      .map((satellite) => satellite.site_id)
+      .filter(Boolean) as string[],
+  );
+  const sites = ((sitesRaw ?? []) as SiteRow[]).filter((site) => salesSiteIds.has(site.id));
   const categories = (categoriesRaw ?? []) as CategoryRow[];
-  const sitesById = new Map(sites.map((site) => [site.id, site]));
-  const effectiveError = errorMsg || sitesError?.message || categoriesError?.message || "";
+  const effectiveError = errorMsg || sitesError?.message || satellitesError?.message || categoriesError?.message || "";
 
   const categoriesBySite = new Map<string, CategoryRow[]>();
   for (const category of categories) {

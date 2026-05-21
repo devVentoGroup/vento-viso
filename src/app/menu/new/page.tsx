@@ -26,6 +26,19 @@ type CommercialCategoryRow = {
   is_active: boolean | null;
 };
 
+type SatelliteRow = {
+  id: string;
+  site_id: string | null;
+  is_active: boolean | null;
+};
+
+type SiteRow = {
+  id: string;
+  code: string | null;
+  name: string | null;
+  is_active: boolean | null;
+};
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -88,6 +101,25 @@ async function ensureSellProductForSite(
   return "";
 }
 
+async function ensureCommercialSite(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  siteId: string,
+) {
+  const { data, error } = await supabase
+    .schema("pass")
+    .from("pass_satellites")
+    .select("id")
+    .eq("site_id", siteId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !data) {
+    return "Esta sede no tiene ventas Pass activas. Activa o crea el negocio en VISO > Negocios antes de crear items comerciales.";
+  }
+
+  return "";
+}
+
 async function createMenuItem(formData: FormData) {
   "use server";
   const supabase = await createClient();
@@ -101,6 +133,11 @@ async function createMenuItem(formData: FormData) {
 
   if (!code || !name || !siteId || !productId || !commercialCategoryId) {
     redirect("/menu/new?error=" + encodeURIComponent("Faltan campos obligatorios."));
+  }
+
+  const siteValidation = await ensureCommercialSite(supabase, siteId);
+  if (siteValidation) {
+    redirect("/menu/new?error=" + encodeURIComponent(siteValidation));
   }
 
   const { metadata, error: metadataError } = parseMetadata(asText(formData.get("metadata_extra")));
@@ -164,10 +201,24 @@ export default async function NewMenuItemPage({
   });
   const supabase = createAdminClient();
 
-  const { data: sites } = await supabase
-    .from("sites")
-    .select("id,code,name,is_active")
-    .order("name", { ascending: true });
+  const [{ data: sitesRaw }, { data: satellitesRaw }] = await Promise.all([
+    supabase
+      .from("sites")
+      .select("id,code,name,is_active")
+      .eq("is_active", true)
+      .order("name", { ascending: true }),
+    supabase
+      .schema("pass")
+      .from("pass_satellites")
+      .select("id,site_id,is_active")
+      .eq("is_active", true),
+  ]);
+  const salesSiteIds = new Set(
+    ((satellitesRaw ?? []) as SatelliteRow[])
+      .map((satellite) => satellite.site_id)
+      .filter(Boolean) as string[],
+  );
+  const sites = ((sitesRaw ?? []) as SiteRow[]).filter((site) => salesSiteIds.has(site.id));
 
   const [{ data: sellOptionsRaw }, { data: categoriesRaw }] = await Promise.all([
     supabase
@@ -276,7 +327,7 @@ export default async function NewMenuItemPage({
           sort_order: "0",
           is_active: true,
           is_featured: false,
-          site_id: sites?.[0]?.id ?? "",
+          site_id: sites[0]?.id ?? "",
           commercial_category_id: "",
           category_label: "",
           image_url: "",
