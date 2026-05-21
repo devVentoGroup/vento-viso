@@ -50,6 +50,22 @@ function readNumericMeta(metadata: Record<string, unknown> | null | undefined, k
   return null;
 }
 
+function hasTextValue(value: unknown) {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (value == null) return false;
+  return String(value).trim().length > 0;
+}
+
+function isVisoCommercialMenuItem(row: MenuItemRow) {
+  return (
+    hasTextValue(row.product_id) &&
+    hasTextValue(row.commercial_category_id) &&
+    row.price_amount > 0 &&
+    row.metadata?.source_app === "viso" &&
+    row.metadata?.source_module === "menu_comercial"
+  );
+}
+
 export default async function MenuPage({
   searchParams,
 }: {
@@ -74,9 +90,13 @@ export default async function MenuPage({
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
 
+  const commercialRows = menuError
+    ? []
+    : ((data ?? []) as MenuItemRow[]).filter(isVisoCommercialMenuItem);
+
   const siteIds = Array.from(
     new Set(
-      ((data ?? []) as MenuItemRow[])
+      commercialRows
         .map((row) => row.site_id)
         .filter(Boolean),
     ),
@@ -84,9 +104,9 @@ export default async function MenuPage({
 
   const { data: sitesRaw, error: sitesError } = siteIds.length
     ? await supabase
-        .from("sites")
-        .select("id,name,code")
-        .in("id", siteIds)
+      .from("sites")
+      .select("id,name,code")
+      .in("id", siteIds)
     : { data: [], error: null };
 
   const siteById = new Map(
@@ -100,12 +120,10 @@ export default async function MenuPage({
     ]),
   );
 
-  const rows = menuError
-    ? []
-    : ((data ?? []) as MenuItemRow[]).map((row) => ({
-        ...row,
-        site: siteById.get(row.site_id) ?? null,
-      }));
+  const rows = commercialRows.map((row) => ({
+    ...row,
+    site: siteById.get(row.site_id) ?? null,
+  }));
 
   return (
     <div className="space-y-6">
