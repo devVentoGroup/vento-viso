@@ -16,6 +16,10 @@ type SiteRow = {
   is_active: boolean | null;
 };
 
+type SellProductBySiteRow = {
+  site_id: string | null;
+};
+
 type CategoryRow = {
   id: string;
   site_id: string;
@@ -101,9 +105,9 @@ async function saveCategory(formData: FormData) {
   const { error } = id
     ? await supabase.schema("pass").from("commercial_categories").update(payload).eq("id", id)
     : await supabase
-        .schema("pass")
-        .from("commercial_categories")
-        .upsert(payload, { onConflict: "site_id,code" });
+      .schema("pass")
+      .from("commercial_categories")
+      .upsert(payload, { onConflict: "site_id,code" });
 
   if (error) {
     redirect("/commercial-categories?error=" + encodeURIComponent(error.message));
@@ -122,14 +126,60 @@ async function deleteCategory(formData: FormData) {
     redirect("/commercial-categories?error=" + encodeURIComponent("Categoria invalida."));
   }
 
-  const { count } = await supabase
+  const [
+    { count: canonicalItemsCount, error: canonicalItemsError },
+    { count: pricedItemsCount, error: pricedItemsError },
+  ] = await Promise.all([
+    supabase
+      .schema("pass")
+      .from("catalog_items")
+      .select("id", { count: "exact", head: true })
+      .eq("commercial_category_id", id)
+      .eq("metadata->>source_app", "viso")
+      .eq("metadata->>source_module", "menu_comercial"),
+    supabase
+      .schema("pass")
+      .from("catalog_items")
+      .select("id", { count: "exact", head: true })
+      .eq("commercial_category_id", id)
+      .gt("price_amount", 0),
+  ]);
+
+  if (canonicalItemsError || pricedItemsError) {
+    redirect(
+      "/commercial-categories?error=" +
+      encodeURIComponent(
+        canonicalItemsError?.message ||
+        pricedItemsError?.message ||
+        "No se pudo validar si la categoria tiene items asignados.",
+      ),
+    );
+  }
+
+  if ((canonicalItemsCount ?? 0) > 0 || (pricedItemsCount ?? 0) > 0) {
+    redirect(
+      "/commercial-categories?error=" +
+      encodeURIComponent(
+        "No puedes eliminar una categoria con items comerciales reales asignados. Mueve o desactiva esos productos primero.",
+      ),
+    );
+  }
+
+  const { error: detachError } = await supabase
     .schema("pass")
     .from("catalog_items")
-    .select("id", { count: "exact", head: true })
+    .update({
+      commercial_category_id: null,
+      category_label: null,
+      is_active: false,
+    })
     .eq("commercial_category_id", id);
 
-  if ((count ?? 0) > 0) {
-    redirect("/commercial-categories?error=" + encodeURIComponent("No puedes eliminar una categoria con items asignados. Desactivala o mueve los productos primero."));
+  if (detachError) {
+    redirect(
+      "/commercial-categories?error=" +
+      encodeURIComponent(`No se pudieron desasignar los items legacy: ${detachError.message}`),
+    );
   }
 
   const { error } = await supabase.schema("pass").from("commercial_categories").delete().eq("id", id);
@@ -157,20 +207,52 @@ export default async function CommercialCategoriesPage({
   });
 
   const supabase = createAdminClient();
-  const [{ data: sitesRaw, error: sitesError }, { data: categoriesRaw, error: categoriesError }] = await Promise.all([
-    supabase.from("sites").select("id,name,code,is_active").eq("is_active", true).order("name", { ascending: true }),
-    supabase
-      .schema("pass")
-      .from("commercial_categories")
-      .select("id,site_id,code,name,description,sort_order,is_active")
-      .order("site_id", { ascending: true })
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true }),
-  ]);
+
+  const { data: sellProductsRaw, error: sellProductsError } = await supabase
+    .schema("pass")
+    .from("sell_products_by_site")
+    .select("site_id")
+    .not("site_id", "is", null);
+
+  const sellableSiteIds = Array.from(
+    new Set(
+      ((sellProductsRaw ?? []) as SellProductBySiteRow[])
+        .map((row) => row.site_id)
+        .filter((siteId): siteId is string => Boolean(siteId)),
+    ),
+  );
+
+  const [{ data: sitesRaw, error: sitesError }, { data: categoriesRaw, error: categoriesError }] =
+    sellableSiteIds.length > 0
+      ? await Promise.all([
+          supabase
+            .from("sites")
+            .select("id,name,code,is_active")
+            .eq("is_active", true)
+            .in("id", sellableSiteIds)
+            .order("name", { ascending: true }),
+          supabase
+            .schema("pass")
+            .from("commercial_categories")
+            .select("id,site_id,code,name,description,sort_order,is_active")
+            .in("site_id", sellableSiteIds)
+            .order("site_id", { ascending: true })
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
+        ])
+      : [
+          { data: [], error: null },
+          { data: [], error: null },
+        ];
 
   const sites = (sitesRaw ?? []) as SiteRow[];
   const categories = (categoriesRaw ?? []) as CategoryRow[];
-  const effectiveError = errorMsg || sitesError?.message || categoriesError?.message || "";
+  const effectiveError =
+    errorMsg ||
+    sellProductsError?.message ||
+    sitesError?.message ||
+    categoriesError?.message ||
+    "";
 
   const categoriesBySite = new Map<string, CategoryRow[]>();
   for (const category of categories) {
@@ -222,7 +304,7 @@ export default async function CommercialCategoriesPage({
 
       {sites.length === 0 ? (
         <div className="ui-panel">
-          <div className="ui-empty">No hay sedes activas.</div>
+          <div className="ui-empty">No hay sedes con productos vendibles habilitados.</div>
         </div>
       ) : (
         <div className="space-y-8">
