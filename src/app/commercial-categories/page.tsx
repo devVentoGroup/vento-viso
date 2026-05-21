@@ -14,9 +14,14 @@ type SiteRow = {
   name: string | null;
   code: string | null;
   is_active: boolean | null;
+  is_public?: boolean | null;
 };
 
-type SellProductBySiteRow = {
+type BusinessRow = {
+  id: string;
+  code: string | null;
+  name: string | null;
+  is_active: boolean | null;
   site_id: string | null;
 };
 
@@ -56,8 +61,13 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function siteLabel(site: SiteRow | undefined) {
-  return site?.name ?? site?.code ?? "Sin sede";
+function siteLabel(site: SiteRow | undefined, business?: BusinessRow | null) {
+  const siteName = site?.name ?? site?.code ?? "Sin sede";
+  const businessName = business?.name ?? business?.code ?? "";
+
+  if (!businessName || businessName === siteName) return siteName;
+
+  return `${businessName} · ${siteName}`;
 }
 
 async function saveCategory(formData: FormData) {
@@ -208,34 +218,37 @@ export default async function CommercialCategoriesPage({
 
   const supabase = createAdminClient();
 
-  const { data: sellProductsRaw, error: sellProductsError } = await supabase
+  const { data: businessesRaw, error: businessesError } = await supabase
     .schema("pass")
-    .from("sell_products_by_site")
-    .select("site_id")
-    .not("site_id", "is", null);
+    .from("pass_satellites")
+    .select("id,code,name,is_active,site_id")
+    .eq("is_active", true)
+    .not("site_id", "is", null)
+    .order("sort_order", { ascending: true });
 
-  const sellableSiteIds = Array.from(
+  const businesses = (businessesRaw ?? []) as BusinessRow[];
+
+  const businessSiteIds = Array.from(
     new Set(
-      ((sellProductsRaw ?? []) as SellProductBySiteRow[])
-        .map((row) => row.site_id)
+      businesses
+        .map((business) => business.site_id)
         .filter((siteId): siteId is string => Boolean(siteId)),
     ),
   );
 
   const [{ data: sitesRaw, error: sitesError }, { data: categoriesRaw, error: categoriesError }] =
-    sellableSiteIds.length > 0
+    businessSiteIds.length > 0
       ? await Promise.all([
           supabase
             .from("sites")
-            .select("id,name,code,is_active")
+            .select("id,name,code,is_active,is_public")
             .eq("is_active", true)
-            .in("id", sellableSiteIds)
-            .order("name", { ascending: true }),
+            .in("id", businessSiteIds),
           supabase
             .schema("pass")
             .from("commercial_categories")
             .select("id,site_id,code,name,description,sort_order,is_active")
-            .in("site_id", sellableSiteIds)
+            .in("site_id", businessSiteIds)
             .order("site_id", { ascending: true })
             .order("sort_order", { ascending: true })
             .order("name", { ascending: true }),
@@ -245,11 +258,27 @@ export default async function CommercialCategoriesPage({
           { data: [], error: null },
         ];
 
-  const sites = (sitesRaw ?? []) as SiteRow[];
+  const siteOrderById = new Map(
+    businessSiteIds.map((siteId, index) => [siteId, index]),
+  );
+
+  const sites = ((sitesRaw ?? []) as SiteRow[]).sort(
+    (a, b) =>
+      (siteOrderById.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+      (siteOrderById.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+  );
+
   const categories = (categoriesRaw ?? []) as CategoryRow[];
+
+  const businessBySiteId = new Map(
+    businesses
+      .filter((business) => Boolean(business.site_id))
+      .map((business) => [business.site_id as string, business]),
+  );
+
   const effectiveError =
     errorMsg ||
-    sellProductsError?.message ||
+    businessesError?.message ||
     sitesError?.message ||
     categoriesError?.message ||
     "";
@@ -284,7 +313,7 @@ export default async function CommercialCategoriesPage({
               <option value="">Selecciona sede</option>
               {sites.map((site) => (
                 <option key={site.id} value={site.id}>
-                  {siteLabel(site)}
+                  {siteLabel(site, businessBySiteId.get(site.id))}
                 </option>
               ))}
             </select>
@@ -304,7 +333,7 @@ export default async function CommercialCategoriesPage({
 
       {sites.length === 0 ? (
         <div className="ui-panel">
-          <div className="ui-empty">No hay sedes con productos vendibles habilitados.</div>
+          <div className="ui-empty">No hay negocios activos con sede asociada.</div>
         </div>
       ) : (
         <div className="space-y-8">
@@ -313,7 +342,7 @@ export default async function CommercialCategoriesPage({
             return (
               <div key={site.id} className="ui-panel space-y-4">
                 <h2 className="text-lg font-semibold text-[var(--ui-text)]">
-                  {siteLabel(site)}
+                  {siteLabel(site, businessBySiteId.get(site.id))}
                   <span className="ml-2 text-sm font-normal text-[var(--ui-muted)]">
                     ({siteCategories.length} {siteCategories.length === 1 ? "categoria" : "categorias"})
                   </span>
