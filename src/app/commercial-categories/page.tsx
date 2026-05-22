@@ -70,6 +70,23 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
+function parseBulkCategoryNames(value: string) {
+  const seenCodes = new Set<string>();
+  const categories: Array<{ name: string; code: string }> = [];
+
+  for (const rawLine of value.split(/\r?\n/)) {
+    const name = rawLine.trim();
+    const code = slugify(name);
+
+    if (!name || !code || seenCodes.has(code)) continue;
+
+    seenCodes.add(code);
+    categories.push({ name, code });
+  }
+
+  return categories;
+}
+
 function siteLabel(site: SiteRow | undefined) {
   return site?.name ?? site?.code ?? "Sin sede";
 }
@@ -189,6 +206,102 @@ async function saveCategory(formData: FormData) {
   revalidatePath("/commercial-categories");
   revalidatePath("/menu");
   redirect("/commercial-categories?ok=" + encodeURIComponent("Categoria guardada."));
+}
+
+async function saveCategoriesBulk(formData: FormData) {
+  "use server";
+
+  const supabase = createAdminClient();
+  const siteId = asText(formData.get("site_id"));
+  const rawNames = asText(formData.get("bulk_names"));
+  const rawLineCount = rawNames
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean).length;
+
+  const categoriesToCreate = parseBulkCategoryNames(rawNames);
+
+  if (!siteId || categoriesToCreate.length === 0) {
+    redirect(
+      "/commercial-categories?error=" +
+      encodeURIComponent("Selecciona una sede y pega al menos una categoria valida."),
+    );
+  }
+
+  const codes = categoriesToCreate.map((category) => category.code);
+
+  const { data: existingRaw, error: existingError } = await supabase
+    .schema("pass")
+    .from("commercial_categories")
+    .select("code")
+    .eq("site_id", siteId)
+    .in("code", codes);
+
+  if (existingError) {
+    redirect("/commercial-categories?error=" + encodeURIComponent(existingError.message));
+  }
+
+  const existingCodes = new Set(
+    ((existingRaw ?? []) as Array<{ code: string | null }>)
+      .map((category) => category.code)
+      .filter((code): code is string => Boolean(code)),
+  );
+
+  const newCategories = categoriesToCreate.filter(
+    (category) => !existingCodes.has(category.code),
+  );
+
+  if (newCategories.length === 0) {
+    redirect(
+      "/commercial-categories?ok=" +
+      encodeURIComponent("No se crearon categorias nuevas. Todas ya existian o estaban repetidas."),
+    );
+  }
+
+  const { data: latest, error: latestError } = await supabase
+    .schema("pass")
+    .from("commercial_categories")
+    .select("sort_order")
+    .eq("site_id", siteId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latestError) {
+    redirect("/commercial-categories?error=" + encodeURIComponent(latestError.message));
+  }
+
+  const baseSortOrder = Number(latest?.sort_order ?? 0);
+
+  const payload = newCategories.map((category, index) => ({
+    site_id: siteId,
+    name: category.name,
+    code: category.code,
+    description: null,
+    sort_order: baseSortOrder + (index + 1) * 10,
+    is_active: true,
+  }));
+
+  const { error } = await supabase
+    .schema("pass")
+    .from("commercial_categories")
+    .insert(payload);
+
+  if (error) {
+    redirect("/commercial-categories?error=" + encodeURIComponent(error.message));
+  }
+
+  const skippedCount = Math.max(0, rawLineCount - newCategories.length);
+
+  revalidatePath("/commercial-categories");
+  revalidatePath("/menu");
+
+  redirect(
+    "/commercial-categories?ok=" +
+    encodeURIComponent(
+      `Categorias creadas: ${newCategories.length}. Omitidas existentes o repetidas: ${skippedCount}.`,
+    ),
+  );
 }
 
 async function deleteCategory(formData: FormData) {
@@ -416,6 +529,45 @@ export default async function CommercialCategoriesPage({
             <input type="hidden" name="is_active" value="on" />
             <button type="submit" className="ui-btn ui-btn--brand w-full">
               Crear
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div className="ui-panel space-y-4">
+        <div>
+          <h2 className="ui-h3">Crear varias categorias</h2>
+          <p className="ui-caption">
+            Pega una categoria por linea. VISO creara las nuevas y omitira las que ya existan en la sede seleccionada.
+          </p>
+        </div>
+
+        <form action={saveCategoriesBulk} className="grid gap-4 lg:grid-cols-[280px_1fr_auto]">
+          <label className="space-y-2">
+            <span className="ui-label">Sede</span>
+            <select name="site_id" className="ui-input" required>
+              <option value="">Selecciona sede</option>
+              {sites.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {siteLabel(site)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-2">
+            <span className="ui-label">Categorias</span>
+            <textarea
+              name="bulk_names"
+              className="ui-input min-h-52"
+              placeholder="Una categoria por linea"
+              required
+            />
+          </label>
+
+          <div className="flex items-end">
+            <button type="submit" className="ui-btn ui-btn--brand w-full">
+              Crear lote
             </button>
           </div>
         </form>
