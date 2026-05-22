@@ -36,7 +36,10 @@ type CategoryRow = {
 };
 
 type CategoryItemReferenceRow = {
+  site_id: string | null;
+  product_id: string | null;
   commercial_category_id: string | null;
+  is_active: boolean | null;
   price_amount: number | string | null;
   metadata?: Record<string, unknown> | null;
 };
@@ -67,13 +70,8 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function siteLabel(site: SiteRow | undefined, business?: BusinessRow | null) {
-  const siteName = site?.name ?? site?.code ?? "Sin sede";
-  const businessName = business?.name ?? business?.code ?? "";
-
-  if (!businessName || businessName === siteName) return siteName;
-
-  return `${businessName} · ${siteName}`;
+function siteLabel(site: SiteRow | undefined) {
+  return site?.name ?? site?.code ?? "Sin sede";
 }
 
 function toNumber(value: unknown, fallback = 0) {
@@ -85,13 +83,53 @@ function toNumber(value: unknown, fallback = 0) {
   return fallback;
 }
 
+function getMetadataText(
+  metadata: Record<string, unknown> | null | undefined,
+  key: string,
+) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : "";
+}
+
 function isRealCommercialCatalogItem(row: CategoryItemReferenceRow) {
   return (
-    toNumber(row.price_amount) > 0 ||
-    (
-      row.metadata?.source_app === "viso" &&
-      row.metadata?.source_module === "menu_comercial"
-    )
+    Boolean(row.site_id) &&
+    Boolean(row.product_id) &&
+    Boolean(row.commercial_category_id) &&
+    row.is_active === true &&
+    toNumber(row.price_amount, 0) > 0 &&
+    getMetadataText(row.metadata, "source_app") === "viso" &&
+    getMetadataText(row.metadata, "source_module") === "menu_comercial"
+  );
+}
+
+const LEGACY_COMMERCIAL_CATEGORY_CODES = new Set([
+  "bebidas-listas-rtd",
+  "bebidas-listas",
+  "rtd",
+]);
+
+const LEGACY_COMMERCIAL_CATEGORY_NAMES = new Set([
+  "bebidas listas (rtd)",
+  "bebidas listas",
+  "bebidas listas rtd",
+]);
+
+function normalizeCategoryText(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function isLegacyCommercialCategory(category: CategoryRow) {
+  const code = normalizeCategoryText(category.code);
+  const name = normalizeCategoryText(category.name);
+
+  return (
+    LEGACY_COMMERCIAL_CATEGORY_CODES.has(code) ||
+    LEGACY_COMMERCIAL_CATEGORY_NAMES.has(name)
   );
 }
 
@@ -293,15 +331,17 @@ export default async function CommercialCategoriesPage({
       (siteOrderById.get(b.id) ?? Number.MAX_SAFE_INTEGER),
   );
 
-  const categories = (categoriesRaw ?? []) as CategoryRow[];
+  const categories = ((categoriesRaw ?? []) as CategoryRow[]).filter(
+    (category) => !isLegacyCommercialCategory(category),
+  );
   const categoryIds = categories.map((category) => category.id);
 
   const { data: categoryItemsRaw, error: categoryItemsError } = categoryIds.length
     ? await supabase
-        .schema("pass")
-        .from("catalog_items")
-        .select("commercial_category_id,price_amount,metadata")
-        .in("commercial_category_id", categoryIds)
+      .schema("pass")
+      .from("catalog_items")
+      .select("site_id,product_id,commercial_category_id,is_active,price_amount,metadata")
+      .in("commercial_category_id", categoryIds)
     : { data: [], error: null };
 
   const assignedCategoryIds = new Set<string>();
@@ -324,12 +364,6 @@ export default async function CommercialCategoriesPage({
 
     return !hasAssignedItems || hasRealCommercialItems;
   });
-
-  const businessBySiteId = new Map(
-    businesses
-      .filter((business) => Boolean(business.site_id))
-      .map((business) => [business.site_id as string, business]),
-  );
 
   const effectiveError =
     errorMsg ||
@@ -369,7 +403,7 @@ export default async function CommercialCategoriesPage({
               <option value="">Selecciona sede</option>
               {sites.map((site) => (
                 <option key={site.id} value={site.id}>
-                  {siteLabel(site, businessBySiteId.get(site.id))}
+                  {siteLabel(site)}
                 </option>
               ))}
             </select>
@@ -398,7 +432,7 @@ export default async function CommercialCategoriesPage({
             return (
               <div key={site.id} className="ui-panel space-y-4">
                 <h2 className="text-lg font-semibold text-[var(--ui-text)]">
-                  {siteLabel(site, businessBySiteId.get(site.id))}
+                  {siteLabel(site)}
                   <span className="ml-2 text-sm font-normal text-[var(--ui-muted)]">
                     ({siteCategories.length} {siteCategories.length === 1 ? "categoria" : "categorias"})
                   </span>
