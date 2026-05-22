@@ -26,14 +26,21 @@ export default async function VisoHomePage() {
   });
   const supabase = createAdminClient();
 
-  const [employeeCount, passUserCount, businessCount, productCount, vacancyCount] =
-    await Promise.all([
-      countRows(supabase, "employees"),
-      countRows(supabase, "users"),
-      countRows(supabase.schema("pass"), "pass_satellites"),
-      countRows(supabase.schema("pass"), "loyalty_rewards"),
-      countRows(supabase.schema("talento"), "vacancies"),
-    ]);
+  const [
+    employeeCount,
+    passUserCount,
+    businessCount,
+    collectionCount,
+    productCount,
+    vacancyCount,
+  ] = await Promise.all([
+    countRows(supabase, "employees"),
+    countRows(supabase, "users"),
+    countRows(supabase.schema("pass"), "pass_satellites"),
+    countRows(supabase.schema("pass"), "commercial_collections"),
+    countRows(supabase.schema("pass"), "loyalty_rewards"),
+    countRows(supabase.schema("talento"), "vacancies"),
+  ]);
 
   return (
     <div className="space-y-10 sm:space-y-12">
@@ -46,7 +53,7 @@ export default async function VisoHomePage() {
 
       <section className="space-y-4">
         <h2 className="ui-section-label">Resumen</h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <Link href="/staff" className="ui-card ui-card--accent-brand group">
             <div className="ui-caption text-[var(--ui-brand-600)] font-semibold">Trabajadores</div>
             <div className="mt-2 text-3xl font-bold tracking-tight text-[var(--ui-text)]">{employeeCount}</div>
@@ -61,6 +68,11 @@ export default async function VisoHomePage() {
             <div className="ui-caption text-[var(--ui-accent-amber)] font-semibold">Negocios</div>
             <div className="mt-2 text-3xl font-bold tracking-tight text-[var(--ui-text)]">{businessCount}</div>
             <p className="mt-2 text-sm leading-relaxed text-[var(--ui-muted)]">Sedes y configuración Pass.</p>
+          </Link>
+          <Link href="/commercial-collections" className="ui-card ui-card--accent-blue group">
+            <div className="ui-caption text-[var(--ui-accent-blue)] font-semibold">Colecciones</div>
+            <div className="mt-2 text-3xl font-bold tracking-tight text-[var(--ui-text)]">{collectionCount}</div>
+            <p className="mt-2 text-sm leading-relaxed text-[var(--ui-muted)]">Temporadas, campañas y menús especiales.</p>
           </Link>
           <div className="ui-card ui-card--accent-blue">
             <div className="ui-caption text-[var(--ui-accent-blue)] font-semibold">Productos</div>
@@ -89,6 +101,10 @@ export default async function VisoHomePage() {
           <Link href="/products/new" className="ui-panel-soft ui-panel-soft--accent-blue block">
             <div className="ui-title ui-title--accent-blue">Crear producto</div>
             <p className="mt-2 ui-body-muted">Agrega ítems que se muestran en Vento Pass.</p>
+          </Link>
+          <Link href="/commercial-collections" className="ui-panel-soft ui-panel-soft--accent-blue block">
+            <div className="ui-title ui-title--accent-blue">Colecciones comerciales</div>
+            <p className="mt-2 ui-body-muted">Organiza menú principal, temporadas, campañas y menús especiales.</p>
           </Link>
           <Link href="/vacancies/new" className="ui-panel-soft ui-panel-soft--accent-brand block">
             <div className="ui-title ui-title--accent-brand">Crear vacante</div>

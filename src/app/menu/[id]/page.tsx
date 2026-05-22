@@ -26,6 +26,7 @@ type CatalogItemRow = {
   description: string | null;
   site_id: string;
   product_id: string | null;
+  commercial_collection_id: string | null;
   commercial_category_id: string | null;
   category_label: string | null;
   image_url: string | null;
@@ -44,6 +45,16 @@ type CommercialCategoryRow = {
   site_id: string;
   name: string | null;
   code: string | null;
+  is_active: boolean | null;
+};
+
+type CommercialCollectionRow = {
+  id: string;
+  site_id: string;
+  name: string | null;
+  subtitle: string | null;
+  code: string | null;
+  kind: string | null;
   is_active: boolean | null;
 };
 
@@ -115,10 +126,12 @@ async function validateCommercialMenuReferences(
   productId: string,
   siteId: string,
   commercialCategoryId: string,
+  commercialCollectionId: string,
 ): Promise<MenuReferencesValidation> {
   const [
     { data: sellOption, error: sellOptionError },
     { data: commercialCategory, error: commercialCategoryError },
+    { data: commercialCollection, error: commercialCollectionError },
     { data: existingItem, error: existingItemError },
   ] = await Promise.all([
     supabase
@@ -133,6 +146,14 @@ async function validateCommercialMenuReferences(
       .from("commercial_categories")
       .select("id,name,code,site_id,is_active")
       .eq("id", commercialCategoryId)
+      .eq("site_id", siteId)
+      .eq("is_active", true)
+      .maybeSingle(),
+    supabase
+      .schema("pass")
+      .from("commercial_collections")
+      .select("id,name,code,site_id,kind,is_active")
+      .eq("id", commercialCollectionId)
       .eq("site_id", siteId)
       .eq("is_active", true)
       .maybeSingle(),
@@ -177,6 +198,24 @@ async function validateCommercialMenuReferences(
   if (!commercialCategory) {
     return {
       error: "La categoria comercial seleccionada no existe, esta inactiva o no pertenece a esta sede.",
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
+  }
+
+  if (commercialCollectionError) {
+    return {
+      error: `No se pudo validar la coleccion comercial: ${commercialCollectionError.message}`,
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
+  }
+
+  if (!commercialCollection) {
+    return {
+      error: "La coleccion comercial seleccionada no existe, esta inactiva o no pertenece a esta sede.",
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
@@ -230,9 +269,10 @@ async function updateMenuItem(formData: FormData) {
   const siteId = asText(formData.get("site_id"));
   const productId = asText(formData.get("product_id"));
 
+  const commercialCollectionId = asText(formData.get("commercial_collection_id"));
   const commercialCategoryId = asText(formData.get("commercial_category_id"));
 
-  if (!id || !code || !name || !siteId || !productId || !commercialCategoryId) {
+  if (!id || !code || !name || !siteId || !productId || !commercialCollectionId || !commercialCategoryId) {
     redirect(`/menu/${id}?error=${encodeURIComponent("Faltan campos obligatorios.")}`);
   }
 
@@ -260,6 +300,7 @@ async function updateMenuItem(formData: FormData) {
     productId,
     siteId,
     commercialCategoryId,
+    commercialCollectionId,
   );
 
   if (referencesValidation.error) {
@@ -271,6 +312,8 @@ async function updateMenuItem(formData: FormData) {
     source_app: "viso",
     source_module: "menu_comercial",
     operational_product_id: productId,
+    commercial_collection_id: commercialCollectionId,
+    commercial_category_id: commercialCategoryId,
     base_price_amount: referencesValidation.basePriceAmount,
     recipe_cost_amount: referencesValidation.recipeCostAmount,
   };
@@ -283,6 +326,7 @@ async function updateMenuItem(formData: FormData) {
       site_id: siteId,
       product_id: productId,
       description: asText(formData.get("description")) || null,
+      commercial_collection_id: commercialCollectionId,
       commercial_category_id: commercialCategoryId,
       category_label: referencesValidation.categoryLabel,
       image_url: asText(formData.get("image_url")) || null,
@@ -368,10 +412,10 @@ export default async function MenuItemDetailPage({
   });
   const supabase = createAdminClient();
 
-  const [{ data: item }, { data: sitesRaw }, { data: categoriesRaw }] = await Promise.all([
+  const [{ data: item }, { data: sitesRaw }, { data: categoriesRaw }, { data: collectionsRaw }] = await Promise.all([
     supabase
       .schema("pass").from("catalog_items")
-      .select("id,code,name,description,site_id,product_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
+      .select("id,code,name,description,site_id,product_id,commercial_collection_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
       .eq("id", id)
       .maybeSingle(),
     supabase.from("sites").select("id,code,name,is_active").eq("is_active", true).order("name", { ascending: true }),
@@ -379,6 +423,13 @@ export default async function MenuItemDetailPage({
       .schema("pass")
       .from("commercial_categories")
       .select("id,site_id,name,code,is_active")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
+    supabase
+      .schema("pass")
+      .from("commercial_collections")
+      .select("id,site_id,name,subtitle,code,kind,is_active")
       .eq("is_active", true)
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true }),
@@ -481,6 +532,7 @@ export default async function MenuItemDetailPage({
         sites={sites ?? []}
         products={products}
         categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
+        collections={(collectionsRaw ?? []) as CommercialCollectionRow[]}
         initial={{
           id: row.id,
           code: row.code,
@@ -493,6 +545,7 @@ export default async function MenuItemDetailPage({
           is_active: row.is_active,
           is_featured: row.is_featured,
           site_id: row.site_id,
+          commercial_collection_id: row.commercial_collection_id ?? "",
           commercial_category_id: row.commercial_category_id ?? "",
           category_label: row.category_label ?? "",
           image_url: row.image_url ?? "",

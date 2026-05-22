@@ -28,6 +28,16 @@ type CommercialCategoryOption = {
   is_active?: boolean | null;
 };
 
+type CommercialCollectionOption = {
+  id: string;
+  site_id: string;
+  name: string | null;
+  subtitle: string | null;
+  code: string | null;
+  kind: string | null;
+  is_active?: boolean | null;
+};
+
 type MenuItemFormValues = {
   id?: string;
   code: string;
@@ -40,6 +50,7 @@ type MenuItemFormValues = {
   is_active: boolean;
   is_featured: boolean;
   site_id: string;
+  commercial_collection_id?: string;
   commercial_category_id: string;
   category_label: string;
   image_url: string;
@@ -55,6 +66,7 @@ type MenuItemFormProps = {
   sites: SiteOption[];
   products: ProductOption[];
   categories: CommercialCategoryOption[];
+  collections?: CommercialCollectionOption[];
   initial: MenuItemFormValues;
   action: (formData: FormData) => void | Promise<void>;
 };
@@ -82,7 +94,15 @@ function asCop(value: string) {
   }).format(parsed);
 }
 
-export function MenuItemForm({ mode, sites, products, categories, initial, action }: MenuItemFormProps) {
+export function MenuItemForm({
+  mode,
+  sites,
+  products,
+  categories,
+  collections = [],
+  initial,
+  action,
+}: MenuItemFormProps) {
   const [code, setCode] = useState(initial.code);
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
@@ -91,6 +111,9 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
   const [compareAtAmount, setCompareAtAmount] = useState(initial.compare_at_amount);
   const [sortOrder, setSortOrder] = useState(initial.sort_order);
   const [siteId, setSiteId] = useState(initial.site_id || sites[0]?.id || "");
+  const [commercialCollectionId, setCommercialCollectionId] = useState(
+    initial.commercial_collection_id ?? "",
+  );
   const [commercialCategoryId, setCommercialCategoryId] = useState(initial.commercial_category_id);
   const [categoryLabel] = useState(initial.category_label);
   const [badgesCsv, setBadgesCsv] = useState(initial.badges_csv);
@@ -117,6 +140,17 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
     return visibleProducts.find((product) => product.id === productId) ?? null;
   }, [visibleProducts, productId]);
 
+  const visibleCollections = useMemo(() => {
+    return collections.filter((collection) => {
+      if (collection.is_active === false) return false;
+      return collection.site_id === siteId;
+    });
+  }, [collections, siteId]);
+
+  const selectedCollection = useMemo(() => {
+    return visibleCollections.find((collection) => collection.id === commercialCollectionId) ?? null;
+  }, [commercialCollectionId, visibleCollections]);
+
   const visibleCategories = useMemo(() => {
     return categories.filter((category) => {
       if (category.is_active === false) return false;
@@ -127,6 +161,12 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
   const selectedCategory = useMemo(() => {
     return visibleCategories.find((category) => category.id === commercialCategoryId) ?? null;
   }, [commercialCategoryId, visibleCategories]);
+
+  useEffect(() => {
+    if (!commercialCollectionId) return;
+    const stillValid = visibleCollections.some((collection) => collection.id === commercialCollectionId);
+    if (!stillValid) setCommercialCollectionId("");
+  }, [commercialCollectionId, visibleCollections]);
 
   useEffect(() => {
     if (!commercialCategoryId) return;
@@ -256,13 +296,43 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
 
       <div className="ui-panel space-y-6">
         <div>
-          <div className="ui-h3">2. Categoría comercial y producto base</div>
+          <div className="ui-h3">2. Colección, categoría comercial y producto base</div>
           <p className="ui-caption">
-            Selecciona la categoría visible del menú y el producto operacional base habilitado para esta sede.
+            Selecciona la colección comercial, la sección visible del menú y el producto operacional base habilitado para esta sede.
             Esto no usa categorías operacionales de NEXO ni productos de fidelización.
           </p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <label className="space-y-2">
+            <span className="ui-label">Colección comercial</span>
+            <select
+              name="commercial_collection_id"
+              className="ui-input"
+              value={commercialCollectionId}
+              onChange={(event) => setCommercialCollectionId(event.target.value)}
+              required={visibleCollections.length > 0}
+            >
+              <option value="">Selecciona colección comercial</option>
+              {visibleCollections.map((collection) => (
+                <option key={collection.id} value={collection.id}>
+                  {[
+                    collection.name ?? collection.code ?? "Sin nombre",
+                    collection.subtitle,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") + (collection.is_active === false ? " [inactiva]" : "")}
+                </option>
+              ))}
+            </select>
+            <p className="ui-caption">
+              La colección agrupa temporadas, campañas, menú principal o menús especiales.
+            </p>
+            {siteId && visibleCollections.length === 0 ? (
+              <p className="ui-caption">
+                Esta sede no tiene colecciones comerciales. Crea una en Viso &gt; Colecciones comerciales.
+              </p>
+            ) : null}
+          </label>
           <label className="space-y-2">
             <span className="ui-label">Categoria comercial</span>
             <select
@@ -517,6 +587,11 @@ export function MenuItemForm({ mode, sites, products, categories, initial, actio
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
+              {selectedCollection ? (
+                <span className="ui-chip ui-chip--brand">
+                  {selectedCollection.name ?? selectedCollection.code ?? "Colección"}
+                </span>
+              ) : null}
               <span className="ui-chip">
                 {getPreviewCategory(selectedCategory?.name ?? selectedCategory?.code ?? categoryLabel)}
               </span>

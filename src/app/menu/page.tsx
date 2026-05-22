@@ -14,7 +14,12 @@ type MenuItemRow = {
   site_id: string;
   product_id: string | null;
   category_label: string | null;
+  commercial_collection_id: string | null;
   commercial_category_id: string | null;
+  commercial_collection?:
+  | { id: string; name: string | null; subtitle: string | null; code: string | null; kind: string | null }
+  | { id: string; name: string | null; subtitle: string | null; code: string | null; kind: string | null }[]
+  | null;
   commercial_category?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
   price_amount: number;
   is_active: boolean;
@@ -84,7 +89,7 @@ export default async function MenuPage({
   const { data, error: menuError } = await supabase
     .schema("pass")
     .from("catalog_items")
-    .select("id,code,name,site_id,product_id,category_label,commercial_category_id,commercial_category:commercial_categories(id,name,code),price_amount,is_active,is_featured,metadata")
+    .select("id,code,name,site_id,product_id,category_label,commercial_collection_id,commercial_collection:commercial_collections(id,name,subtitle,code,kind),commercial_category_id,commercial_category:commercial_categories(id,name,code),price_amount,is_active,is_featured,metadata")
     .not("product_id", "is", null)
     .not("commercial_category_id", "is", null)
     .order("sort_order", { ascending: true })
@@ -131,9 +136,14 @@ export default async function MenuPage({
         title="Menú comercial"
         subtitle="Catalogo digital de compra por satélite. Usa categorias comerciales propias y no las categorias operacionales ni los canjes de fidelización."
         actions={
-          <Link href="/menu/new" className="ui-btn ui-btn--brand">
-            Crear item comercial
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/commercial-collections" className="ui-btn ui-btn--ghost">
+              Colecciones comerciales
+            </Link>
+            <Link href="/menu/new" className="ui-btn ui-btn--brand">
+              Crear item comercial
+            </Link>
+          </div>
         }
       />
 
@@ -160,6 +170,7 @@ export default async function MenuPage({
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Item</TableHeaderCell>
+                <TableHeaderCell>Coleccion</TableHeaderCell>
                 <TableHeaderCell>Categoria</TableHeaderCell>
                 <TableHeaderCell>Precio</TableHeaderCell>
                 <TableHeaderCell>Costo receta</TableHeaderCell>
@@ -172,6 +183,9 @@ export default async function MenuPage({
             <TableBody>
               {rows.map((row) => {
                 const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site ?? null;
+                const commercialCollection = Array.isArray(row.commercial_collection)
+                  ? row.commercial_collection[0] ?? null
+                  : row.commercial_collection ?? null;
                 const commercialCategory = Array.isArray(row.commercial_category)
                   ? row.commercial_category[0] ?? null
                   : row.commercial_category ?? null;
@@ -185,6 +199,18 @@ export default async function MenuPage({
                       <div className="font-semibold">{row.name}</div>
                       <div className="ui-caption">{row.code}</div>
                       {row.is_featured ? <div className="ui-caption">Destacado</div> : null}
+                    </TableCell>
+                    <TableCell>
+                      {commercialCollection ? (
+                        <div>
+                          <div>{commercialCollection.name || commercialCollection.code || "-"}</div>
+                          {commercialCollection.subtitle ? (
+                            <div className="ui-caption">{commercialCollection.subtitle}</div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="ui-caption">Sin coleccion</span>
+                      )}
                     </TableCell>
                     <TableCell>{commercialCategory?.name || row.category_label || "-"}</TableCell>
                     <TableCell>{formatCop(row.price_amount)}</TableCell>
