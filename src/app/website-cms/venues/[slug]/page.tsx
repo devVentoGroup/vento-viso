@@ -19,35 +19,19 @@ import {
 export const dynamic = "force-dynamic";
 
 type RestaurantRow = {
-  id: string;
-  slug: string;
-  title: string;
-  excerpt: string | null;
-  body: string | null;
-  location: string | null;
-  schedule_text: string | null;
-  image_url: string | null;
-  video_url: string | null;
-  action_label: string | null;
-  action_url: string | null;
-  sort_order: number;
-  is_published: boolean;
+  id: string; slug: string; title: string; excerpt: string | null;
+  body: string | null; location: string | null; schedule_text: string | null;
+  image_url: string | null; video_url: string | null;
+  action_label: string | null; action_url: string | null;
+  sort_order: number; is_published: boolean;
 };
 
 type BlockRow = {
-  id: string;
-  page_slug: string;
-  block_key: string;
-  block_type: string;
-  title: string | null;
-  subtitle: string | null;
-  body: string | null;
-  cta_label: string | null;
-  cta_url: string | null;
-  media_url: string | null;
-  media_type: "image" | "video" | null;
-  sort_order: number;
-  is_published: boolean;
+  id: string; page_slug: string; block_key: string; block_type: string;
+  title: string | null; subtitle: string | null; body: string | null;
+  cta_label: string | null; cta_url: string | null;
+  media_url: string | null; media_type: "image" | "video" | null;
+  sort_order: number; is_published: boolean;
 };
 
 function normalizeMediaType(value: string | null) {
@@ -65,22 +49,12 @@ function getFirstBlockByKeys(blocks: BlockRow[], keys: string[]) {
 
 async function updateRestaurantDetail(formData: FormData) {
   "use server";
-
   const restaurantId = asText(formData.get("restaurant_id"));
   const slug = asText(formData.get("slug"));
   const pageSlug = asText(formData.get("page_slug")) || getPrimaryRestaurantPageSlug(slug);
-
-  if (!restaurantId || !slug) {
-    redirect("/website-cms/venues?error=" + encodeURIComponent("Restaurante inválido."));
-  }
-
-  await requireAppAccess({
-    appId: "viso",
-    returnTo: `/website-cms/venues/${slug}`,
-  });
-
+  if (!restaurantId || !slug) redirect("/website-cms/venues?error=" + encodeURIComponent("Restaurante invalido."));
+  await requireAppAccess({ appId: "viso", returnTo: `/website-cms/venues/${slug}` });
   const supabase = createAdminClient();
-
   const restaurantPayload = {
     title: asText(formData.get("title")),
     excerpt: asNullableText(formData.get("excerpt")),
@@ -94,26 +68,12 @@ async function updateRestaurantDetail(formData: FormData) {
     sort_order: asNumber(formData.get("sort_order"), 0),
     is_published: asBool(formData.get("is_published")),
   };
-
-  if (!restaurantPayload.title) {
-    redirect(`/website-cms/venues/${slug}?error=${encodeURIComponent("El título del restaurante es obligatorio.")}`);
-  }
-
-  const { error: restaurantError } = await supabase
-    .from("website_items")
-    .update(restaurantPayload)
-    .eq("id", restaurantId)
-    .eq("category", "restaurant");
-
-  if (restaurantError) {
-    redirect(`/website-cms/venues/${slug}?error=${encodeURIComponent(restaurantError.message)}`);
-  }
-
+  if (!restaurantPayload.title) redirect(`/website-cms/venues/${slug}?error=${encodeURIComponent("El nombre del restaurante es obligatorio.")}`);
+  const { error: restaurantError } = await supabase.from("website_items").update(restaurantPayload).eq("id", restaurantId).eq("category", "restaurant");
+  if (restaurantError) redirect(`/website-cms/venues/${slug}?error=${encodeURIComponent(restaurantError.message)}`);
   const blocksToUpsert = [
     {
-      page_slug: pageSlug,
-      block_key: "detail_hero",
-      block_type: "detail_hero",
+      page_slug: pageSlug, block_key: "detail_hero", block_type: "detail_hero",
       title: asNullableText(formData.get("hero_title")),
       subtitle: asNullableText(formData.get("hero_subtitle")),
       body: asNullableText(formData.get("hero_body")),
@@ -121,44 +81,28 @@ async function updateRestaurantDetail(formData: FormData) {
       cta_url: asNullableText(formData.get("hero_cta_url")),
       media_url: asNullableText(formData.get("hero_media_url")),
       media_type: normalizeMediaType(asNullableText(formData.get("hero_media_type"))),
-      sort_order: asNumber(formData.get("hero_sort_order"), 10),
-      is_published: asBool(formData.get("hero_is_published")),
+      sort_order: 10, is_published: asBool(formData.get("hero_is_published")),
     },
     ...[1, 2, 3].map((index) => ({
-      page_slug: pageSlug,
-      block_key: `gallery_${index}`,
-      block_type: "gallery_media",
+      page_slug: pageSlug, block_key: `gallery_${index}`, block_type: "gallery_media",
       title: asNullableText(formData.get(`gallery_${index}_title`)),
-      subtitle: null,
-      body: null,
-      cta_label: null,
-      cta_url: null,
+      subtitle: null, body: null, cta_label: null, cta_url: null,
       media_url: asNullableText(formData.get(`gallery_${index}_media_url`)),
       media_type: normalizeMediaType(asNullableText(formData.get(`gallery_${index}_media_type`))),
-      sort_order: asNumber(formData.get(`gallery_${index}_sort_order`), 20 + index * 10),
+      sort_order: 20 + index * 10,
       is_published: asBool(formData.get(`gallery_${index}_is_published`)),
     })),
   ];
-
-  const { error: blocksError } = await supabase
-    .from("website_blocks")
-    .upsert(blocksToUpsert, { onConflict: "page_slug,block_key" });
-
-  if (blocksError) {
-    redirect(`/website-cms/venues/${slug}?error=${encodeURIComponent(blocksError.message)}`);
-  }
-
+  const { error: blocksError } = await supabase.from("website_blocks").upsert(blocksToUpsert, { onConflict: "page_slug,block_key" });
+  if (blocksError) redirect(`/website-cms/venues/${slug}?error=${encodeURIComponent(blocksError.message)}`);
   revalidatePath("/website-cms");
   revalidatePath("/website-cms/venues");
   revalidatePath(`/website-cms/venues/${slug}`);
-  revalidatePath("/website-cms/items");
-
-  redirect(`/website-cms/venues/${slug}?ok=${encodeURIComponent("Detalle del venue actualizado.")}`);
+  redirect(`/website-cms/venues/${slug}?ok=${encodeURIComponent("Cambios guardados correctamente.")}`);
 }
 
 export default async function WebsiteCmsVenueDetailPage({
-  params,
-  searchParams,
+  params, searchParams,
 }: {
   params: Promise<{ slug: string }>;
   searchParams?: Promise<{ ok?: string; error?: string }>;
@@ -167,60 +111,43 @@ export default async function WebsiteCmsVenueDetailPage({
   const sp = (await searchParams) ?? {};
   const okMsg = sp.ok ? safeDecode(sp.ok) : "";
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
-
-  await requireAppAccess({
-    appId: "viso",
-    returnTo: `/website-cms/venues/${slug}`,
-  });
-
+  await requireAppAccess({ appId: "viso", returnTo: `/website-cms/venues/${slug}` });
   const supabase = createAdminClient();
-
   const { data: restaurantData, error: restaurantError } = await supabase
     .from("website_items")
-    .select(
-      "id,slug,title,excerpt,body,location,schedule_text,image_url,video_url,action_label,action_url,sort_order,is_published",
-    )
-    .eq("category", "restaurant")
-    .eq("slug", slug)
-    .maybeSingle();
-
-  if (!restaurantData) {
-    redirect(`/website-cms/venues?error=${encodeURIComponent(restaurantError?.message ?? "Restaurante no encontrado.")}`);
-  }
-
+    .select("id,slug,title,excerpt,body,location,schedule_text,image_url,video_url,action_label,action_url,sort_order,is_published")
+    .eq("category", "restaurant").eq("slug", slug).maybeSingle();
+  if (!restaurantData) redirect(`/website-cms/venues?error=${encodeURIComponent(restaurantError?.message ?? "Restaurante no encontrado.")}`);
   const restaurant = restaurantData as RestaurantRow;
   const pageSlugCandidates = getRestaurantPageSlugCandidates(restaurant.slug);
   const { data: blocksData, error: blocksError } = await supabase
     .from("website_blocks")
     .select("id,page_slug,block_key,block_type,title,subtitle,body,cta_label,cta_url,media_url,media_type,sort_order,is_published")
-    .in("page_slug", pageSlugCandidates)
-    .order("sort_order", { ascending: true });
-
+    .in("page_slug", pageSlugCandidates).order("sort_order", { ascending: true });
   const blocks = (blocksData ?? []) as BlockRow[];
   const existingPageSlug = blocks[0]?.page_slug ?? null;
   const pageSlug = existingPageSlug ?? getPrimaryRestaurantPageSlug(restaurant.slug);
-
   const heroBlock = getFirstBlockByKeys(blocks, ["detail_hero"]);
   const gallery1 = getFirstBlockByKeys(blocks, ["gallery_1"]);
   const gallery2 = getFirstBlockByKeys(blocks, ["gallery_2"]);
   const gallery3 = getFirstBlockByKeys(blocks, ["gallery_3"]);
   const effectiveError = errorMsg || blocksError?.message || "";
+  const publicUrl = `https://ventogroup.co/restaurantes/${encodeURIComponent(restaurant.slug)}`;
+  const cardImageUrl = restaurant.image_url ?? null;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`Venue Detail · ${restaurant.title}`}
-        subtitle={`Slug: /${restaurant.slug} · page_slug de bloques: ${pageSlug}`}
+        title={restaurant.title}
+        subtitle={`ventogroup.co/restaurantes/${restaurant.slug}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <a
-              href={`https://ventogroup.co/restaurantes/${encodeURIComponent(restaurant.slug)}`}
-              target="_blank"
-              rel="noreferrer"
-              className="ui-btn ui-btn--ghost"
-            >
-              Ver página pública
+            <a href={publicUrl} target="_blank" rel="noreferrer" className="ui-btn ui-btn--ghost">
+              Ver en el sitio ↗
             </a>
+            <Link href={`/website-cms/items/${restaurant.id}`} className="ui-btn ui-btn--ghost">
+              Mas opciones
+            </Link>
             <Link href="/website-cms/venues" className="ui-btn ui-btn--ghost">
               Volver
             </Link>
@@ -231,184 +158,260 @@ export default async function WebsiteCmsVenueDetailPage({
       {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
+      {/* ── Previsualización de la tarjeta ─────────────────────────────── */}
+      <div className="ui-panel space-y-3">
+        <div>
+          <div className="ui-h3">Como se ve la tarjeta ahora</div>
+          <div className="ui-caption">Asi aparece este restaurante en la lista de ventogroup.co/restaurantes</div>
+        </div>
+        <div className="max-w-xs rounded-xl overflow-hidden border border-[var(--ui-border,#e5e7eb)] bg-white shadow-sm">
+          <div className="aspect-[4/3] bg-[#f3f0ed] flex items-center justify-center overflow-hidden">
+            {cardImageUrl
+              ? <img src={cardImageUrl} alt={restaurant.title} className="w-full h-full object-cover" />
+              : <span className="text-3xl opacity-30">🍽</span>}
+          </div>
+          <div className="p-4 space-y-1">
+            <div className="font-semibold text-sm leading-tight">{restaurant.title}</div>
+            {restaurant.location && <div className="text-xs text-[#888]">📍 {restaurant.location}</div>}
+            {restaurant.schedule_text && <div className="text-xs text-[#888]">🕐 {restaurant.schedule_text}</div>}
+            {restaurant.excerpt && <div className="text-xs text-[#555] mt-2 line-clamp-2">{restaurant.excerpt}</div>}
+            <div className="pt-2">
+              <span className="inline-block text-xs bg-[#18120f] text-white rounded px-3 py-1">
+                {restaurant.action_label || "Ver restaurante"}
+              </span>
+            </div>
+          </div>
+        </div>
+        {!cardImageUrl && (
+          <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            ⚠ Sin foto — sube una foto en la seccion de abajo para que aparezca en la tarjeta.
+          </div>
+        )}
+      </div>
+
       <form action={updateRestaurantDetail} className="space-y-6">
         <input type="hidden" name="restaurant_id" value={restaurant.id} />
         <input type="hidden" name="slug" value={restaurant.slug} />
         <input type="hidden" name="page_slug" value={pageSlug} />
 
-        <div className="ui-panel space-y-4">
-          <div className="ui-h3">Perfil del restaurante (website_items)</div>
+        {/* ── 1. Tarjeta en la lista ─────────────────────────────────────── */}
+        <div className="ui-panel space-y-5">
+          <div>
+            <div className="ui-h3">1. Tarjeta en la lista de restaurantes</div>
+            <div className="ui-caption">
+              Esto es lo que ve el visitante cuando entra a{" "}
+              <strong>ventogroup.co/restaurantes</strong>. Es la "portada" del restaurante.
+            </div>
+          </div>
+
+          <label className="space-y-1 block">
+            <span className="ui-label">Nombre del restaurante</span>
+            <input name="title" className="ui-input" defaultValue={restaurant.title} required />
+          </label>
+
+          <label className="space-y-1 block">
+            <span className="ui-label">Descripcion corta</span>
+            <span className="ui-caption block">Aparece debajo del nombre en la tarjeta. 1-2 lineas maximo.</span>
+            <textarea
+              name="excerpt"
+              className="ui-input min-h-20 py-3"
+              defaultValue={restaurant.excerpt ?? ""}
+              placeholder="Ej: Pizzas napolitanas de masa madre con ingredientes importados de Italia."
+            />
+          </label>
+
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-2 sm:col-span-2">
-              <span className="ui-label">Título</span>
-              <input name="title" className="ui-input" defaultValue={restaurant.title} required />
+            <label className="space-y-1">
+              <span className="ui-label">Ubicacion</span>
+              <span className="ui-caption block">Ciudad y barrio. Ej: Bogota - Zona G</span>
+              <input name="location" className="ui-input" defaultValue={restaurant.location ?? ""} placeholder="Cucuta - Centro" />
             </label>
-            <label className="space-y-2 sm:col-span-2">
-              <span className="ui-label">Extracto</span>
-              <textarea name="excerpt" className="ui-input min-h-24 py-3" defaultValue={restaurant.excerpt ?? ""} />
-            </label>
-            <label className="space-y-2 sm:col-span-2">
-              <span className="ui-label">Body / Features (usa bullets para features)</span>
-              <textarea
-                name="body"
-                className="ui-input min-h-36 py-3"
-                defaultValue={restaurant.body ?? ""}
-                placeholder={"Historia del venue...\n- Feature 1\n- Feature 2"}
-              />
-            </label>
-            <label className="space-y-2">
-              <span className="ui-label">Ubicación</span>
-              <input name="location" className="ui-input" defaultValue={restaurant.location ?? ""} />
-            </label>
-            <label className="space-y-2">
+            <label className="space-y-1">
               <span className="ui-label">Horario</span>
-              <input name="schedule_text" className="ui-input" defaultValue={restaurant.schedule_text ?? ""} />
+              <span className="ui-caption block">Ej: Lunes a sabado 12:00 - 22:00</span>
+              <input name="schedule_text" className="ui-input" defaultValue={restaurant.schedule_text ?? ""} placeholder="Lunes a sabado 12:00 - 22:00" />
             </label>
-            <label className="space-y-2">
-              <span className="ui-label">CTA label</span>
-              <input name="action_label" className="ui-input" defaultValue={restaurant.action_label ?? ""} />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1">
+              <span className="ui-label">Texto del boton</span>
+              <span className="ui-caption block">Lo que dice el boton en la tarjeta.</span>
+              <input name="action_label" className="ui-input" defaultValue={restaurant.action_label ?? ""} placeholder="Ver restaurante" />
             </label>
-            <label className="space-y-2">
-              <span className="ui-label">CTA URL</span>
-              <input name="action_url" className="ui-input" defaultValue={restaurant.action_url ?? ""} />
+            <label className="space-y-1">
+              <span className="ui-label">Link del boton</span>
+              <span className="ui-caption block">URL de reservas, menu o dejalo vacio para ir al detalle interno.</span>
+              <input name="action_url" className="ui-input" defaultValue={restaurant.action_url ?? ""} placeholder="https://reservas.ejemplo.com o dejar vacio" />
             </label>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <WebsiteMediaUploadField
-              label="Image URL"
+              label="Foto de la tarjeta"
               name="image_url"
               defaultValue={restaurant.image_url ?? ""}
               scope={`website/items/restaurant/${restaurant.slug}/images`}
               accept="image/*"
             />
             <WebsiteMediaUploadField
-              label="Video URL"
+              label="Video (opcional)"
               name="video_url"
               defaultValue={restaurant.video_url ?? ""}
               scope={`website/items/restaurant/${restaurant.slug}/videos`}
               accept="video/*"
             />
-            <label className="space-y-2">
-              <span className="ui-label">Orden</span>
-              <input name="sort_order" type="number" className="ui-input" defaultValue={restaurant.sort_order} />
-            </label>
-            <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
-              <input type="checkbox" name="is_published" defaultChecked={restaurant.is_published} />
-              Restaurante publicado
+          </div>
+
+          <div className="flex items-start gap-3 pt-2 border-t border-[var(--ui-border,#e5e7eb)]">
+            <input type="checkbox" name="is_published" id="is_published" defaultChecked={restaurant.is_published} className="mt-0.5" />
+            <label htmlFor="is_published" className="text-sm cursor-pointer">
+              <strong>Publicado en el sitio</strong>
+              <span className="block text-xs text-[var(--ui-text-muted,#888)] mt-0.5">
+                Desmarca para ocultar este restaurante del sitio web sin eliminarlo.
+              </span>
             </label>
           </div>
         </div>
 
-        <div className="ui-panel space-y-4">
-          <div className="ui-h3">Detalle hero (website_blocks.detail_hero)</div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-2 sm:col-span-2">
-              <span className="ui-label">Hero title</span>
-              <input name="hero_title" className="ui-input" defaultValue={heroBlock?.title ?? restaurant.title} />
-            </label>
-            <label className="space-y-2 sm:col-span-2">
-              <span className="ui-label">Hero subtitle</span>
-              <input name="hero_subtitle" className="ui-input" defaultValue={heroBlock?.subtitle ?? ""} />
-            </label>
-            <label className="space-y-2 sm:col-span-2">
-              <span className="ui-label">Hero body</span>
-              <textarea name="hero_body" className="ui-input min-h-28 py-3" defaultValue={heroBlock?.body ?? ""} />
-            </label>
-            <label className="space-y-2">
-              <span className="ui-label">Hero CTA label</span>
-              <input name="hero_cta_label" className="ui-input" defaultValue={heroBlock?.cta_label ?? restaurant.action_label ?? ""} />
-            </label>
-            <label className="space-y-2">
-              <span className="ui-label">Hero CTA URL</span>
-              <input name="hero_cta_url" className="ui-input" defaultValue={heroBlock?.cta_url ?? restaurant.action_url ?? ""} />
-            </label>
-            <div className="sm:col-span-2">
-              <WebsiteMediaUploadField
-                label="Hero media URL"
-                name="hero_media_url"
-                defaultValue={heroBlock?.media_url ?? restaurant.video_url ?? restaurant.image_url ?? ""}
-                scope={`website/venues/${restaurant.slug}/hero`}
-                accept="image/*,video/*"
-              />
+        {/* ── 2. Pagina de detalle del restaurante ───────────────────────── */}
+        <div className="ui-panel space-y-5">
+          <div>
+            <div className="ui-h3">2. Pagina de detalle del restaurante</div>
+            <div className="ui-caption">
+              Esto es lo que aparece cuando alguien hace clic en la tarjeta y entra a{" "}
+              <strong>ventogroup.co/restaurantes/{restaurant.slug}</strong>.
+              Aqui puedes poner una foto de mayor impacto, la historia del restaurante y el boton de reservas.
             </div>
-            <label className="space-y-2">
-              <span className="ui-label">Hero media type</span>
+          </div>
+
+          <div className="sm:col-span-2 space-y-1">
+            <WebsiteMediaUploadField
+              label="Foto o video principal del detalle"
+              name="hero_media_url"
+              defaultValue={heroBlock?.media_url ?? restaurant.video_url ?? restaurant.image_url ?? ""}
+              scope={`website/venues/${restaurant.slug}/hero`}
+              accept="image/*,video/*"
+            />
+            <div className="mt-2">
+              <span className="ui-label block mb-1">Tipo de archivo</span>
               <select name="hero_media_type" className="ui-input" defaultValue={heroBlock?.media_type ?? (restaurant.video_url ? "video" : "image")}>
                 <option value="">Sin media</option>
-                <option value="image">Imagen</option>
+                <option value="image">Foto</option>
                 <option value="video">Video</option>
               </select>
+            </div>
+          </div>
+
+          <label className="space-y-1 block">
+            <span className="ui-label">Titulo en la pagina de detalle</span>
+            <span className="ui-caption block">Normalmente el mismo nombre del restaurante. Se muestra grande en la pagina.</span>
+            <input name="hero_title" className="ui-input" defaultValue={heroBlock?.title ?? restaurant.title} />
+          </label>
+
+          <label className="space-y-1 block">
+            <span className="ui-label">Etiqueta pequeña (opcional)</span>
+            <span className="ui-caption block">Texto muy breve sobre el titulo. Ej: "Vento Group · Cucuta"</span>
+            <input name="hero_subtitle" className="ui-input" defaultValue={heroBlock?.subtitle ?? ""} placeholder="Vento Group · Cucuta" />
+          </label>
+
+          <label className="space-y-1 block">
+            <span className="ui-label">Historia y descripcion del restaurante</span>
+            <span className="ui-caption block">
+              Texto largo para la pagina de detalle. Puedes contar la historia del restaurante, su cocina, ambiente, etc.
+              Para agregar una lista de caracteristicas, pon cada una en una linea que empiece con "- ".
+            </span>
+            <textarea
+              name="hero_body"
+              className="ui-input min-h-36 py-3"
+              defaultValue={heroBlock?.body ?? ""}
+              placeholder={"Historia del restaurante...\n- Cocina italiana autentica\n- Ingredientes importados\n- Ambiente acogedor"}
+            />
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1">
+              <span className="ui-label">Texto del boton principal</span>
+              <span className="ui-caption block">Ej: Reservar, Ver menu, Llamar</span>
+              <input name="hero_cta_label" className="ui-input" defaultValue={heroBlock?.cta_label ?? restaurant.action_label ?? ""} placeholder="Reservar" />
             </label>
-            <label className="space-y-2">
-              <span className="ui-label">Hero sort order</span>
-              <input name="hero_sort_order" type="number" className="ui-input" defaultValue={heroBlock?.sort_order ?? 10} />
+            <label className="space-y-1">
+              <span className="ui-label">Link del boton principal</span>
+              <span className="ui-caption block">URL de reservas o menu.</span>
+              <input name="hero_cta_url" className="ui-input" defaultValue={heroBlock?.cta_url ?? restaurant.action_url ?? ""} placeholder="https://..." />
             </label>
-            <label className="flex items-center gap-2 text-sm text-[var(--ui-text)] sm:col-span-2">
-              <input type="checkbox" name="hero_is_published" defaultChecked={heroBlock?.is_published ?? true} />
-              Hero publicado
+          </div>
+
+          <div className="flex items-start gap-3 pt-2 border-t border-[var(--ui-border,#e5e7eb)]">
+            <input type="checkbox" name="hero_is_published" id="hero_is_published" defaultChecked={heroBlock?.is_published ?? true} className="mt-0.5" />
+            <label htmlFor="hero_is_published" className="text-sm cursor-pointer">
+              <strong>Mostrar esta seccion</strong>
+              <span className="block text-xs text-[var(--ui-text-muted,#888)] mt-0.5">
+                Si no tienes foto para el detalle todavia, puedes desmarcar esto hasta tenerla lista.
+              </span>
             </label>
           </div>
         </div>
 
-        <div className="ui-panel space-y-4">
-          <div className="ui-h3">Galería (gallery_1, gallery_2, gallery_3)</div>
+        {/* ── 3. Galeria de fotos ─────────────────────────────────────────── */}
+        <div className="ui-panel space-y-5">
+          <div>
+            <div className="ui-h3">3. Galeria de fotos</div>
+            <div className="ui-caption">
+              Hasta 3 fotos adicionales que aparecen en la galeria dentro de la pagina de detalle.
+              La primera foto (Foto destacada) aparece mas grande. Las otras dos aparecen al lado.
+            </div>
+          </div>
           <div className="grid gap-4 lg:grid-cols-3">
-            {[gallery1, gallery2, gallery3].map((block, index) => {
+            {([gallery1, gallery2, gallery3] as (BlockRow | null)[]).map((block, index) => {
               const slot = index + 1;
+              const label = slot === 1 ? "Foto destacada" : `Foto ${slot}`;
               return (
-                <div key={`gallery-slot-${slot}`} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 space-y-3">
-                  <div className="ui-label">Gallery {slot}</div>
-                  <label className="space-y-2 block">
-                    <span className="ui-label">Title</span>
-                    <input
-                      name={`gallery_${slot}_title`}
-                      className="ui-input"
-                      defaultValue={block?.title ?? `Gallery ${slot}`}
-                    />
-                  </label>
+                <div key={`gallery-slot-${slot}`} className="rounded-xl border border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-surface,#fafafa)] p-4 space-y-3">
+                  <div className="font-semibold text-sm">{label}</div>
                   <WebsiteMediaUploadField
-                    label="Media URL"
+                    label="Subir foto o video"
                     name={`gallery_${slot}_media_url`}
                     defaultValue={block?.media_url ?? ""}
                     scope={`website/venues/${restaurant.slug}/gallery-${slot}`}
                     accept="image/*,video/*"
                   />
-                  <label className="space-y-2 block">
-                    <span className="ui-label">Media type</span>
+                  <div>
+                    <span className="ui-label block mb-1">Tipo de archivo</span>
                     <select name={`gallery_${slot}_media_type`} className="ui-input" defaultValue={block?.media_type ?? "image"}>
-                      <option value="">Sin media</option>
-                      <option value="image">Imagen</option>
+                      <option value="">Sin archivo</option>
+                      <option value="image">Foto</option>
                       <option value="video">Video</option>
                     </select>
+                  </div>
+                  <label className="space-y-1 block">
+                    <span className="ui-label">Descripcion de la foto (opcional)</span>
+                    <input name={`gallery_${slot}_title`} className="ui-input" defaultValue={block?.title ?? ""} placeholder={`Foto ${slot} de ${restaurant.title}`} />
                   </label>
-                  <label className="space-y-2 block">
-                    <span className="ui-label">Sort order</span>
-                    <input
-                      name={`gallery_${slot}_sort_order`}
-                      type="number"
-                      className="ui-input"
-                      defaultValue={block?.sort_order ?? 20 + slot * 10}
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                    <input
-                      type="checkbox"
-                      name={`gallery_${slot}_is_published`}
-                      defaultChecked={block?.is_published ?? true}
-                    />
-                    Publicado
-                  </label>
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" name={`gallery_${slot}_is_published`} id={`gallery_${slot}_is_published`} defaultChecked={block?.is_published ?? true} />
+                    <label htmlFor={`gallery_${slot}_is_published`} className="text-sm cursor-pointer">Mostrar esta foto</label>
+                  </div>
                 </div>
               );
             })}
           </div>
         </div>
 
+        {/* ── 4. Orden en la lista ─────────────────────────────────────────── */}
+        <div className="ui-panel">
+          <div className="grid gap-4 sm:grid-cols-2 items-end">
+            <label className="space-y-1">
+              <span className="ui-label">Orden en la lista de restaurantes</span>
+              <span className="ui-caption block">Numero mas bajo = aparece primero. Ej: 1 aparece antes que 20.</span>
+              <input name="sort_order" type="number" className="ui-input" defaultValue={restaurant.sort_order} />
+            </label>
+          </div>
+        </div>
+
         <div className="flex flex-wrap items-center gap-3">
-          <button type="submit" className="ui-btn ui-btn--brand">
-            Guardar detalle del venue
-          </button>
-          <Link href="/website-cms/venues" className="ui-btn ui-btn--ghost">
-            Volver al listado
-          </Link>
+          <button type="submit" className="ui-btn ui-btn--brand">Guardar cambios</button>
+          <Link href="/website-cms/venues" className="ui-btn ui-btn--ghost">Cancelar</Link>
         </div>
       </form>
     </div>

@@ -9,6 +9,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { WEBSITE_ITEM_CATEGORIES, asBool, asNullableDate, asNullableText, asNumber, asText, safeDecode } from "@/lib/website-cms";
 import { CATEGORY_META } from "../category-meta";
 
+const CATEGORY_NAMES: Record<string, string> = {
+  restaurant: "Restaurante",
+  job: "Empleo",
+  service: "Servicio",
+  event: "Evento",
+  app: "App",
+};
+
 export const dynamic = "force-dynamic";
 
 type WebsiteItemRow = {
@@ -87,14 +95,14 @@ export default async function WebsiteItemEditPage({ params, searchParams }: { pa
     <div className="space-y-6">
       <PageHeader
         title={`Editar: ${row.title}`}
-        subtitle={`${row.category} — aparece en ${meta.pageLabel}`}
+        subtitle={`${CATEGORY_NAMES[row.category] ?? row.category} — aparece en ${meta.pageLabel}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {row.category === "restaurant" && (
-              <Link href={`/website-cms/venues/${encodeURIComponent(row.slug)}`} className="ui-btn ui-btn--ghost">Editar detalle (hero + galeria)</Link>
+              <Link href={`/website-cms/venues/${encodeURIComponent(row.slug)}`} className="ui-btn ui-btn--ghost">Galeria y fotos</Link>
             )}
             <Link href="/website-cms/venues" className="ui-btn ui-btn--ghost">Restaurantes</Link>
-            <Link href="/website-cms" className="ui-btn ui-btn--ghost">CMS</Link>
+            <Link href="/website-cms" className="ui-btn ui-btn--ghost">Volver</Link>
           </div>
         }
       />
@@ -130,27 +138,41 @@ export default async function WebsiteItemEditPage({ params, searchParams }: { pa
       <form action={updateWebsiteItem} className="space-y-6">
         <input type="hidden" name="id" value={row.id} />
 
+        {/* Titulo principal visible fuera del panel colapsado */}
         <div className="ui-panel space-y-4">
-          <div><div className="ui-h3">Identidad</div><div className="ui-caption">Slug y categoria raramente cambian.</div></div>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <label className="space-y-1 block">
+            <span className="ui-label">{meta.titleLabel}</span>
+            <span className="ui-caption block">{meta.titleHint}</span>
+            <input name="title" className="ui-input" defaultValue={row.title} required />
+          </label>
+        </div>
+
+        {/* Opciones avanzadas: categoria, slug y orden — colapsadas por defecto */}
+        <details className="ui-panel">
+          <summary className="list-none flex items-center justify-between cursor-pointer select-none py-1">
+            <span className="ui-caption font-medium text-[var(--ui-text-muted,#888)]">Opciones avanzadas (URL interna, tipo, orden en lista)</span>
+            <span className="text-xs text-[var(--ui-text-muted,#888)]">clic para ver</span>
+          </summary>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
             <label className="space-y-2">
-              <span className="ui-label">Categoria</span>
+              <span className="ui-label">Tipo de contenido</span>
+              <span className="ui-caption block">Raramente necesitas cambiarlo.</span>
               <select name="category" className="ui-input" defaultValue={row.category} required>
-                {WEBSITE_ITEM_CATEGORIES.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                {WEBSITE_ITEM_CATEGORIES.map((cat) => <option key={cat} value={cat}>{cat === "restaurant" ? "Restaurante" : cat === "job" ? "Empleo" : cat === "service" ? "Servicio" : cat === "event" ? "Evento" : cat === "app" ? "App" : cat}</option>)}
               </select>
             </label>
             <label className="space-y-1">
-              <span className="ui-label">Slug</span>
-              <span className="ui-caption block">Solo letras, numeros y guiones.</span>
+              <span className="ui-label">URL interna</span>
+              <span className="ui-caption block">Solo letras, numeros y guiones. Se genera automaticamente al crear.</span>
               <input name="slug" className="ui-input" defaultValue={row.slug} required />
             </label>
             <label className="space-y-1">
-              <span className="ui-label">{meta.titleLabel}</span>
-              <span className="ui-caption block">{meta.titleHint}</span>
-              <input name="title" className="ui-input" defaultValue={row.title} required />
+              <span className="ui-label">Orden en la lista</span>
+              <span className="ui-caption block">Numero mas bajo = aparece primero.</span>
+              <input name="sort_order" type="number" className="ui-input" defaultValue={row.sort_order} />
             </label>
           </div>
-        </div>
+        </details>
 
         <div className="ui-panel space-y-4">
           <div>
@@ -193,7 +215,7 @@ export default async function WebsiteItemEditPage({ params, searchParams }: { pa
         </div>
 
         <div className="ui-panel space-y-4">
-          <div><div className="ui-h3">Boton de accion (CTA)</div><div className="ui-caption">El boton en la tarjeta. Si lo dejas vacio se usa "Ver mas".</div></div>
+          <div><div className="ui-h3">Boton de accion</div><div className="ui-caption">El boton en la tarjeta. Si lo dejas vacio se usa "Ver mas".</div></div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-1">
               <span className="ui-label">Texto del boton</span>
@@ -210,11 +232,11 @@ export default async function WebsiteItemEditPage({ params, searchParams }: { pa
 
         <div className="ui-panel space-y-4">
           <div>
-            <div className="ui-h3">Foto, video y estado</div>
+            <div className="ui-h3">Foto y estado</div>
             <div className="ui-caption">
               La foto aparece en la tarjeta.{" "}
               {row.category === "restaurant"
-                ? <span>Para hero y galeria usa <Link href={`/website-cms/venues/${encodeURIComponent(row.slug)}`} className="underline">Venue Detail</Link>.</span>
+                ? <span>Para hero y galeria usa <Link href={`/website-cms/venues/${encodeURIComponent(row.slug)}`} className="underline">galeria y fotos</Link>.</span>
                 : "El video es opcional."}
             </div>
           </div>
@@ -222,13 +244,8 @@ export default async function WebsiteItemEditPage({ params, searchParams }: { pa
             <WebsiteMediaUploadField label="Foto principal" name="image_url" defaultValue={row.image_url ?? ""} scope={`website/items/${row.category}/${row.slug}/images`} accept="image/*" />
             <WebsiteMediaUploadField label="Video (opcional)" name="video_url" defaultValue={row.video_url ?? ""} scope={`website/items/${row.category}/${row.slug}/videos`} accept="video/*" />
           </div>
-          <div className="grid gap-4 sm:grid-cols-2 pt-2 border-t border-[var(--ui-border,#e5e7eb)]">
-            <label className="space-y-1">
-              <span className="ui-label">Orden en la lista</span>
-              <span className="ui-caption block">Numero menor = aparece primero.</span>
-              <input name="sort_order" type="number" className="ui-input" defaultValue={row.sort_order} />
-            </label>
-            <label className="flex items-start gap-3 pt-5 text-sm">
+          <div className="pt-2 border-t border-[var(--ui-border,#e5e7eb)]">
+            <label className="flex items-start gap-3 text-sm">
               <input type="checkbox" name="is_published" defaultChecked={row.is_published} className="mt-0.5" />
               <span>
                 <strong>Publicado</strong><br />

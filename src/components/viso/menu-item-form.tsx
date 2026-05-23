@@ -102,6 +102,24 @@ function asCop(value: string) {
   }).format(parsed);
 }
 
+function onlyDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function formatCopInput(value: string) {
+  const digits = onlyDigits(value);
+  if (!digits) return "";
+
+  const parsed = Number(digits);
+  if (!Number.isFinite(parsed)) return "";
+
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(parsed);
+}
+
 export function MenuItemForm({
   mode,
   sites,
@@ -478,16 +496,28 @@ export function MenuItemForm({
           </label>
           <label className="space-y-2">
             <span className="ui-label">Precio comercial</span>
-            <input
-              name="price_amount"
-              type="number"
-              min={1}
-              step="100"
-              className="ui-input"
-              value={priceAmount}
-              onChange={(event) => setPriceAmount(event.target.value)}
-              required
-            />
+
+            <input type="hidden" name="price_amount" value={priceAmount} />
+
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="numeric"
+                className="ui-input pl-12 font-semibold"
+                value={formatCopInput(priceAmount)}
+                onChange={(event) => setPriceAmount(onlyDigits(event.target.value))}
+                placeholder="$ 22.000"
+                required
+              />
+              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-[var(--ui-muted)]">
+                COP
+              </span>
+            </div>
+
+            <p className="ui-caption">
+              Escribe el precio en pesos colombianos. Ejemplo: 22000 se mostrará como {asCop("22000")}.
+            </p>
+
             {suggestedPrice != null ? (
               <p className="ui-caption">Precio sugerido para esta sede: {asCop(String(suggestedPrice))}</p>
             ) : null}
@@ -500,16 +530,26 @@ export function MenuItemForm({
           </label>
           <label className="space-y-2">
             <span className="ui-label">Precio tachado (opcional)</span>
-            <input
-              name="compare_at_amount"
-              type="number"
-              min={0}
-              step="100"
-              className="ui-input"
-              value={compareAtAmount}
-              onChange={(event) => setCompareAtAmount(event.target.value)}
-              placeholder="0"
-            />
+
+            <input type="hidden" name="compare_at_amount" value={compareAtAmount} />
+
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="numeric"
+                className="ui-input pl-12"
+                value={formatCopInput(compareAtAmount)}
+                onChange={(event) => setCompareAtAmount(onlyDigits(event.target.value))}
+                placeholder="$ 0"
+              />
+              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-[var(--ui-muted)]">
+                COP
+              </span>
+            </div>
+
+            <p className="ui-caption">
+              Úsalo solo si quieres mostrar un precio anterior tachado.
+            </p>
           </label>
           <label className="space-y-2 sm:col-span-2">
             <span className="ui-label">Badges (separados por coma)</span>
