@@ -112,13 +112,11 @@ export function MenuItemForm({
   initial,
   action,
 }: MenuItemFormProps) {
-  const [code, setCode] = useState(initial.code);
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
   const [productId, setProductId] = useState(initial.product_id);
   const [priceAmount, setPriceAmount] = useState(initial.price_amount);
   const [compareAtAmount, setCompareAtAmount] = useState(initial.compare_at_amount);
-  const [sortOrder, setSortOrder] = useState(initial.sort_order);
   const [siteId, setSiteId] = useState(initial.site_id || sites[0]?.id || "");
   const [commercialCollectionId, setCommercialCollectionId] = useState(
     initial.commercial_collection_id ?? "",
@@ -279,9 +277,6 @@ export function MenuItemForm({
     try {
       const formData = new FormData();
       formData.append("file", file);
-      if (code) {
-        formData.append("code", code);
-      }
       const response = await fetch(PRODUCT_UPLOAD_ENDPOINT, {
         method: "POST",
         body: formData,
@@ -314,6 +309,9 @@ export function MenuItemForm({
   return (
     <form action={action} className="space-y-8">
       <input type="hidden" name="id" value={initial.id ?? ""} />
+      <input type="hidden" name="code" value={initial.code} />
+      <input type="hidden" name="sort_order" value={initial.sort_order} />
+      <input type="hidden" name="metadata_extra" value={initial.metadata_extra} />
 
       <div className="ui-panel space-y-6">
         <div>
@@ -458,17 +456,6 @@ export function MenuItemForm({
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2">
-            <span className="ui-label">Codigo</span>
-            <input
-              name="code"
-              className="ui-input"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder="saudo-sandwich-pollo"
-              required
-            />
-          </label>
-          <label className="space-y-2">
             <span className="ui-label">Nombre</span>
             <input
               name="name"
@@ -524,16 +511,6 @@ export function MenuItemForm({
               placeholder="0"
             />
           </label>
-          <label className="space-y-2">
-            <span className="ui-label">Orden</span>
-            <input
-              name="sort_order"
-              type="number"
-              className="ui-input"
-              value={sortOrder}
-              onChange={(event) => setSortOrder(event.target.value)}
-            />
-          </label>
           <label className="space-y-2 sm:col-span-2">
             <span className="ui-label">Badges (separados por coma)</span>
             <input
@@ -575,7 +552,12 @@ export function MenuItemForm({
       </div>
 
       <div className="ui-panel space-y-6">
-        <div className="ui-h3">Imagen y metadata</div>
+        <div>
+          <div className="ui-h3">Imagen comercial</div>
+          <p className="ui-caption">
+            La metadata técnica del ítem se genera automáticamente desde la sede, colección, categoría y producto base.
+          </p>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2 sm:col-span-2">
             <span className="ui-label">Imagen comercial URL</span>
@@ -599,15 +581,6 @@ export function MenuItemForm({
           <div className="flex items-center text-sm">
             {uploadStatus === "uploading" ? "Subiendo imagen..." : uploadMessage}
           </div>
-          <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Metadata extra (JSON opcional)</span>
-            <textarea
-              name="metadata_extra"
-              className="ui-input min-h-28 py-3"
-              defaultValue={initial.metadata_extra}
-              placeholder='{"spicy_level":"medio"}'
-            />
-          </label>
         </div>
       </div>
 

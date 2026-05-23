@@ -80,22 +80,18 @@ function parseFulfillmentModes(formData: FormData) {
   return modes;
 }
 
-function parseMetadata(extraRaw: string) {
-  if (!extraRaw) return { metadata: {}, error: "" };
-  try {
-    const parsed = JSON.parse(extraRaw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return { metadata: parsed as Record<string, unknown>, error: "" };
-    }
-    return { metadata: {}, error: "Metadata extra debe ser un JSON object valido." };
-  } catch {
-    return { metadata: {}, error: "Metadata extra debe ser un JSON valido." };
-  }
-}
-
 function toOptionalNumber(value: number | string | null | undefined) {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function slugify(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 type MenuReferencesValidation = {
@@ -103,6 +99,9 @@ type MenuReferencesValidation = {
   categoryLabel: string;
   basePriceAmount: number | null;
   recipeCostAmount: number | null;
+  siteCode: string;
+  collectionCode: string;
+  productCode: string;
 };
 
 async function validateCommercialMenuReferences(
@@ -113,6 +112,7 @@ async function validateCommercialMenuReferences(
   commercialCollectionId: string,
 ): Promise<MenuReferencesValidation> {
   const [
+    { data: site, error: siteError },
     { data: sellOption, error: sellOptionError },
     { data: commercialCategory, error: commercialCategoryError },
     { data: commercialCollection, error: commercialCollectionError },
@@ -120,9 +120,14 @@ async function validateCommercialMenuReferences(
     { data: existingItem, error: existingItemError },
   ] = await Promise.all([
     supabase
+      .from("sites")
+      .select("id,code,name")
+      .eq("id", siteId)
+      .maybeSingle(),
+    supabase
       .schema("pass")
       .from("sell_products_by_site")
-      .select("product_id,base_price,recipe_cost_amount")
+      .select("product_id,name,sku,base_price,recipe_cost_amount")
       .eq("product_id", productId)
       .eq("site_id", siteId)
       .maybeSingle(),
@@ -160,12 +165,39 @@ async function validateCommercialMenuReferences(
       .maybeSingle(),
   ]);
 
+  if (siteError) {
+    return {
+      error: `No se pudo validar la sede: ${siteError.message}`,
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
+    };
+  }
+
+  if (!site) {
+    return {
+      error: "La sede seleccionada no existe.",
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
+    };
+  }
+
   if (sellOptionError) {
     return {
       error: `No se pudo validar el producto operacional: ${sellOptionError.message}`,
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -175,6 +207,9 @@ async function validateCommercialMenuReferences(
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -184,6 +219,9 @@ async function validateCommercialMenuReferences(
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -193,6 +231,9 @@ async function validateCommercialMenuReferences(
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -202,6 +243,9 @@ async function validateCommercialMenuReferences(
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -211,6 +255,9 @@ async function validateCommercialMenuReferences(
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -220,6 +267,9 @@ async function validateCommercialMenuReferences(
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -229,6 +279,9 @@ async function validateCommercialMenuReferences(
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -238,6 +291,9 @@ async function validateCommercialMenuReferences(
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -247,6 +303,9 @@ async function validateCommercialMenuReferences(
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -258,6 +317,9 @@ async function validateCommercialMenuReferences(
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
+      siteCode: "",
+      collectionCode: "",
+      productCode: "",
     };
   }
 
@@ -266,14 +328,76 @@ async function validateCommercialMenuReferences(
     categoryLabel,
     basePriceAmount: toOptionalNumber(sellOption.base_price),
     recipeCostAmount: toOptionalNumber(sellOption.recipe_cost_amount),
+    siteCode: site.code || site.name || siteId,
+    collectionCode: commercialCollection.code || commercialCollection.name || commercialCollectionId,
+    productCode: sellOption.sku || sellOption.name || productId,
   };
+}
+
+async function getAvailableCatalogItemCode(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  baseCode: string,
+) {
+  const normalizedBase = slugify(baseCode) || `item-${Date.now()}`;
+
+  const { data, error } = await supabase
+    .schema("pass")
+    .from("catalog_items")
+    .select("code")
+    .ilike("code", `${normalizedBase}%`);
+
+  if (error) {
+    throw new Error(`No se pudo validar el código automático: ${error.message}`);
+  }
+
+  const existingCodes = new Set(
+    ((data ?? []) as { code: string | null }[])
+      .map((row) => String(row.code ?? "").trim())
+      .filter(Boolean),
+  );
+
+  if (!existingCodes.has(normalizedBase)) {
+    return normalizedBase;
+  }
+
+  for (let index = 2; index <= 99; index += 1) {
+    const candidate = `${normalizedBase}-${index}`;
+    if (!existingCodes.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return `${normalizedBase}-${Date.now()}`;
+}
+
+async function getNextCatalogItemSortOrder(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  siteId: string,
+  commercialCollectionId: string,
+  commercialCategoryId: string,
+) {
+  const { data, error } = await supabase
+    .schema("pass")
+    .from("catalog_items")
+    .select("sort_order")
+    .eq("site_id", siteId)
+    .eq("commercial_collection_id", commercialCollectionId)
+    .eq("commercial_category_id", commercialCategoryId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`No se pudo calcular el orden automático: ${error.message}`);
+  }
+
+  return Number(data?.sort_order ?? 0) + 10;
 }
 
 async function createMenuItem(formData: FormData) {
   "use server";
   const supabase = await createClient();
 
-  const code = asText(formData.get("code"));
   const name = asText(formData.get("name"));
   const siteId = asText(formData.get("site_id"));
   const productId = asText(formData.get("product_id"));
@@ -281,7 +405,7 @@ async function createMenuItem(formData: FormData) {
   const commercialCollectionId = asText(formData.get("commercial_collection_id"));
   const commercialCategoryId = asText(formData.get("commercial_category_id"));
 
-  if (!code || !name || !siteId || !productId || !commercialCollectionId || !commercialCategoryId) {
+  if (!name || !siteId || !productId || !commercialCollectionId || !commercialCategoryId) {
     redirect("/menu/new?error=" + encodeURIComponent("Faltan campos obligatorios."));
   }
 
@@ -296,13 +420,6 @@ async function createMenuItem(formData: FormData) {
     ? asNonNegativeNumber(formData.get("compare_at_amount"))
     : null;
 
-  const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
-
-  const { metadata, error: metadataError } = parseMetadata(asText(formData.get("metadata_extra")));
-  if (metadataError) {
-    redirect("/menu/new?error=" + encodeURIComponent(metadataError));
-  }
-
   const referencesValidation = await validateCommercialMenuReferences(
     supabase,
     productId,
@@ -315,8 +432,33 @@ async function createMenuItem(formData: FormData) {
     redirect("/menu/new?error=" + encodeURIComponent(referencesValidation.error));
   }
 
+  let code = "";
+  let sortOrder = 0;
+
+  try {
+    code = await getAvailableCatalogItemCode(
+      supabase,
+      [
+        referencesValidation.siteCode,
+        referencesValidation.collectionCode,
+        referencesValidation.productCode,
+      ]
+        .filter(Boolean)
+        .join("-"),
+    );
+
+    sortOrder = await getNextCatalogItemSortOrder(
+      supabase,
+      siteId,
+      commercialCollectionId,
+      commercialCategoryId,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo generar código u orden automático.";
+    redirect("/menu/new?error=" + encodeURIComponent(message));
+  }
+
   const commercialMetadata = {
-    ...metadata,
     source_app: "viso",
     source_module: "menu_comercial",
     operational_product_id: productId,
