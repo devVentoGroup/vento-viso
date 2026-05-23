@@ -28,13 +28,57 @@ type WebsiteItemRow = {
   is_published: boolean;
 };
 
+// Nombres amigables para las páginas
+const PAGE_NAMES: Record<string, string> = {
+  home: "Página principal",
+  restaurantes: "Restaurantes",
+  empleos: "Empleos",
+  servicios: "Servicios",
+  eventos: "Eventos",
+  ecosistema: "Ecosistema",
+};
+
+// Nombres amigables para los bloques (secciones editables del sitio)
+const BLOCK_NAMES: Record<string, string> = {
+  restaurantes_experience: "Sección editorial — Restaurantes",
+  restaurantes_banner: "Imagen de fondo — Restaurantes",
+  eventos_spaces: "Sección espacios para eventos",
+  eventos_banner: "Imagen de fondo — Eventos",
+  servicios_intro: "Sección intro — Servicios",
+  servicios_banner: "Imagen de fondo — Servicios",
+  detail_hero: "Foto principal / Hero del detalle",
+};
+
+// Nombres amigables para las categorías
+const CATEGORY_NAMES: Record<string, string> = {
+  restaurant: "Restaurante",
+  job: "Empleo",
+  service: "Servicio",
+  event: "Evento",
+  app: "App",
+};
+
+// Color de categoria
+const CATEGORY_COLORS: Record<string, string> = {
+  restaurant: "ui-chip--success",
+  job: "ui-chip--brand",
+  service: "",
+  event: "ui-chip--warning",
+  app: "",
+};
+
+function safeDecode(value: string | null | undefined) {
+  if (!value) return "";
+  try { return decodeURIComponent(value); } catch { return value ?? ""; }
+}
+
 const PAGE_FILTERS = [
-  { key: "", label: "Todas" },
-  { key: "home", label: "Home" },
+  { key: "", label: "Todas las páginas" },
   { key: "restaurantes", label: "Restaurantes" },
   { key: "empleos", label: "Empleos" },
   { key: "servicios", label: "Servicios" },
   { key: "eventos", label: "Eventos" },
+  { key: "home", label: "Principal" },
   { key: "ecosistema", label: "Ecosistema" },
 ];
 
@@ -47,15 +91,6 @@ const CATEGORY_FILTERS = [
   { key: "app", label: "Apps" },
 ];
 
-function safeDecode(value: string | null | undefined) {
-  if (!value) return "";
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
 export default async function WebsiteCmsPage({
   searchParams,
 }: {
@@ -67,11 +102,7 @@ export default async function WebsiteCmsPage({
   const okMsg = sp.ok ? safeDecode(sp.ok) : "";
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo: "/website-cms",
-  });
-
+  await requireAppAccess({ appId: "viso", returnTo: "/website-cms" });
   const supabase = createAdminClient();
 
   let blocksQuery = supabase
@@ -79,20 +110,14 @@ export default async function WebsiteCmsPage({
     .select("id,page_slug,block_key,block_type,title,sort_order,media_type,is_published")
     .order("page_slug", { ascending: true })
     .order("sort_order", { ascending: true });
-
-  if (pageFilter) {
-    blocksQuery = blocksQuery.eq("page_slug", pageFilter);
-  }
+  if (pageFilter) blocksQuery = blocksQuery.eq("page_slug", pageFilter);
 
   let itemsQuery = supabase
     .from("website_items")
     .select("id,category,slug,title,location,sort_order,is_published")
     .order("category", { ascending: true })
     .order("sort_order", { ascending: true });
-
-  if (categoryFilter) {
-    itemsQuery = itemsQuery.eq("category", categoryFilter);
-  }
+  if (categoryFilter) itemsQuery = itemsQuery.eq("category", categoryFilter);
 
   const [{ data: blocksData, error: blocksError }, { data: itemsData, error: itemsError }] = await Promise.all([
     blocksQuery,
@@ -103,21 +128,22 @@ export default async function WebsiteCmsPage({
   const items = (itemsData ?? []) as WebsiteItemRow[];
   const effectiveError = errorMsg || blocksError?.message || itemsError?.message || "";
 
+  // Conteos por categoría para los accesos rápidos
+  const countByCategory = (cat: string, published?: boolean) =>
+    items.filter((i) => i.category === cat && (published === undefined || i.is_published === published)).length;
+
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Website CMS"
-        subtitle="Administra bloques e informacion del sitio publico ventogroup.co."
+        title="Sitio web ventogroup.co"
+        subtitle="Actualiza el contenido que aparece en el sitio. Los cambios se reflejan de inmediato."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Link href="/website-cms/venues" className="ui-btn ui-btn--ghost">
-              Venue detail
-            </Link>
             <Link href="/website-cms/blocks/new" className="ui-btn ui-btn--ghost">
-              Crear bloque
+              + Agregar sección
             </Link>
             <Link href="/website-cms/items/new" className="ui-btn ui-btn--brand">
-              Crear item
+              + Agregar tarjeta
             </Link>
           </div>
         }
@@ -126,45 +152,162 @@ export default async function WebsiteCmsPage({
       {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
+      {/* ── Accesos rápidos por sección ───────────────────────────── */}
       <section className="space-y-3">
-        <div className="ui-h3">Bloques de pagina</div>
+        <div>
+          <div className="ui-h3">¿Qué quieres actualizar?</div>
+          <div className="ui-caption mt-0.5">Cada sección maneja el contenido que aparece en esa página del sitio.</div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+
+          {/* Restaurantes */}
+          <div className="ui-panel space-y-3 flex flex-col">
+            <div>
+              <div className="font-semibold text-sm">🍽 Restaurantes</div>
+              <div className="ui-caption mt-1">Fotos, nombre, ubicación y horario de cada restaurante del grupo.</div>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted,#888)]">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+              {countByCategory("restaurant", true)} publicados
+              {countByCategory("restaurant", false) > 0 && (
+                <span className="text-amber-500">· {countByCategory("restaurant", false)} ocultos</span>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 mt-auto pt-1">
+              <Link href="/website-cms/venues" className="ui-btn ui-btn--brand ui-btn--sm text-center">
+                Administrar restaurantes
+              </Link>
+              <Link href="/website-cms/venues" className="ui-btn ui-btn--ghost ui-btn--sm text-center">
+                Importar desde Negocios
+              </Link>
+            </div>
+          </div>
+
+          {/* Empleos */}
+          <div className="ui-panel space-y-3 flex flex-col">
+            <div>
+              <div className="font-semibold text-sm">💼 Empleos</div>
+              <div className="ui-caption mt-1">Vacantes activas que aparecen en ventogroup.co/empleos.</div>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted,#888)]">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+              {countByCategory("job", true)} publicados
+              {countByCategory("job", false) > 0 && (
+                <span className="text-amber-500">· {countByCategory("job", false)} ocultos</span>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 mt-auto pt-1">
+              <Link href="/website-cms?category=job" className="ui-btn ui-btn--ghost ui-btn--sm text-center">
+                Ver empleos
+              </Link>
+              <Link href="/website-cms/items/new" className="ui-btn ui-btn--brand ui-btn--sm text-center">
+                + Publicar vacante
+              </Link>
+            </div>
+          </div>
+
+          {/* Eventos */}
+          <div className="ui-panel space-y-3 flex flex-col">
+            <div>
+              <div className="font-semibold text-sm">🎉 Eventos</div>
+              <div className="ui-caption mt-1">Agenda de eventos y activaciones en ventogroup.co/eventos.</div>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted,#888)]">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+              {countByCategory("event", true)} publicados
+              {countByCategory("event", false) > 0 && (
+                <span className="text-amber-500">· {countByCategory("event", false)} ocultos</span>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 mt-auto pt-1">
+              <Link href="/website-cms?category=event" className="ui-btn ui-btn--ghost ui-btn--sm text-center">
+                Ver eventos
+              </Link>
+              <Link href="/website-cms/items/new" className="ui-btn ui-btn--brand ui-btn--sm text-center">
+                + Agregar evento
+              </Link>
+            </div>
+          </div>
+
+          {/* Servicios */}
+          <div className="ui-panel space-y-3 flex flex-col">
+            <div>
+              <div className="font-semibold text-sm">🛠 Servicios</div>
+              <div className="ui-caption mt-1">Servicios del grupo en ventogroup.co/servicios.</div>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted,#888)]">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+              {countByCategory("service", true)} publicados
+              {countByCategory("service", false) > 0 && (
+                <span className="text-amber-500">· {countByCategory("service", false)} ocultos</span>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 mt-auto pt-1">
+              <Link href="/website-cms?category=service" className="ui-btn ui-btn--ghost ui-btn--sm text-center">
+                Ver servicios
+              </Link>
+              <Link href="/website-cms/items/new" className="ui-btn ui-btn--brand ui-btn--sm text-center">
+                + Agregar servicio
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Tarjetas de contenido ──────────────────────────────────── */}
+      <section className="space-y-3">
+        <div>
+          <div className="ui-h3">Tarjetas de contenido</div>
+          <div className="ui-caption mt-0.5">
+            Son las tarjetas que aparecen en las listas del sitio: restaurantes, empleos, eventos y servicios.
+            Cada una tiene foto, descripcion, ubicacion y un boton de accion.
+          </div>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="ui-caption">Filtrar por pagina:</span>
-          {PAGE_FILTERS.map((item) => (
+          <span className="ui-caption">Filtrar:</span>
+          {CATEGORY_FILTERS.map((f) => (
             <Link
-              key={item.label}
-              href={item.key ? `/website-cms?page=${encodeURIComponent(item.key)}` : "/website-cms"}
-              className={`ui-chip ${pageFilter === item.key ? "ui-chip--brand" : ""}`}
+              key={f.key}
+              href={f.key ? `/website-cms?category=${encodeURIComponent(f.key)}` : "/website-cms"}
+              className={`ui-chip ${categoryFilter === f.key ? "ui-chip--brand" : ""}`}
             >
-              {item.label}
+              {f.label}
             </Link>
           ))}
         </div>
 
         <div className="ui-panel">
-          {blocks.length === 0 ? (
-            <div className="ui-empty">No hay bloques cargados para este filtro.</div>
+          {items.length === 0 ? (
+            <div className="ui-empty space-y-1">
+              <p>No hay contenido creado para este filtro.</p>
+              <p className="text-sm opacity-70">Usa <strong>+ Agregar tarjeta</strong> para crear el primero, o importa restaurantes desde Negocios.</p>
+            </div>
           ) : (
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableHeaderCell>Pagina</TableHeaderCell>
-                  <TableHeaderCell>Bloque</TableHeaderCell>
-                  <TableHeaderCell>Titulo</TableHeaderCell>
+                  <TableHeaderCell>Tipo</TableHeaderCell>
+                  <TableHeaderCell>Nombre / Titulo</TableHeaderCell>
+                  <TableHeaderCell>Ubicacion</TableHeaderCell>
                   <TableHeaderCell>Orden</TableHeaderCell>
                   <TableHeaderCell>Estado</TableHeaderCell>
                   <TableHeaderCell></TableHeaderCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {blocks.map((row) => (
+                {items.map((row) => (
                   <TableRow key={row.id}>
-                    <TableCell>{row.page_slug}</TableCell>
                     <TableCell>
-                      <div className="font-semibold">{row.block_key}</div>
-                      <div className="ui-caption">{row.block_type}{row.media_type ? ` · ${row.media_type}` : ""}</div>
+                      <span className={`ui-chip ${CATEGORY_COLORS[row.category] ?? ""}`}>
+                        {CATEGORY_NAMES[row.category] ?? row.category}
+                      </span>
                     </TableCell>
-                    <TableCell>{row.title ?? "Sin titulo"}</TableCell>
+                    <TableCell>
+                      <div className="font-semibold">{row.title}</div>
+                      <div className="ui-caption">ventogroup.co/.../{row.slug}</div>
+                    </TableCell>
+                    <TableCell>{row.location ?? <span className="opacity-40">Sin definir</span>}</TableCell>
                     <TableCell>{row.sort_order}</TableCell>
                     <TableCell>
                       <span className={`ui-chip ${row.is_published ? "ui-chip--success" : ""}`}>
@@ -172,9 +315,16 @@ export default async function WebsiteCmsPage({
                       </span>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Link href={`/website-cms/blocks/${row.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
-                        Editar
-                      </Link>
+                      <div className="flex justify-end gap-2">
+                        {row.category === "restaurant" && (
+                          <Link href={`/website-cms/venues/${encodeURIComponent(row.slug)}`} className="ui-btn ui-btn--ghost ui-btn--sm">
+                            Galeria
+                          </Link>
+                        )}
+                        <Link href={`/website-cms/items/${row.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
+                          Editar
+                        </Link>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -184,62 +334,69 @@ export default async function WebsiteCmsPage({
         </div>
       </section>
 
+      {/* ── Secciones y textos del sitio ──────────────────────────── */}
       <section className="space-y-3">
-        <div className="ui-h3">Items de contenido</div>
+        <div>
+          <div className="ui-h3">Secciones y textos del sitio</div>
+          <div className="ui-caption mt-0.5">
+            Son las secciones editoriales de cada pagina: textos del hero, imagenes de fondo, frases destacadas y banners.
+            Si no sabes cual editar, filtra por la pagina donde quieres hacer el cambio.
+          </div>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="ui-caption">Filtrar por categoria:</span>
-          {CATEGORY_FILTERS.map((item) => (
+          <span className="ui-caption">Filtrar por pagina:</span>
+          {PAGE_FILTERS.map((f) => (
             <Link
-              key={item.label}
-              href={item.key ? `/website-cms?category=${encodeURIComponent(item.key)}` : "/website-cms"}
-              className={`ui-chip ${categoryFilter === item.key ? "ui-chip--brand" : ""}`}
+              key={f.key}
+              href={f.key ? `/website-cms?page=${encodeURIComponent(f.key)}` : "/website-cms"}
+              className={`ui-chip ${pageFilter === f.key ? "ui-chip--brand" : ""}`}
             >
-              {item.label}
+              {f.label}
             </Link>
           ))}
         </div>
 
         <div className="ui-panel">
-          {items.length === 0 ? (
-            <div className="ui-empty">No hay items creados para este filtro.</div>
+          {blocks.length === 0 ? (
+            <div className="ui-empty space-y-1">
+              <p>No hay secciones creadas para este filtro.</p>
+              <p className="text-sm opacity-70">Usa <strong>+ Agregar seccion</strong> para crear una nueva.</p>
+            </div>
           ) : (
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableHeaderCell>Categoria</TableHeaderCell>
-                  <TableHeaderCell>Item</TableHeaderCell>
-                  <TableHeaderCell>Ubicacion / Meta</TableHeaderCell>
-                  <TableHeaderCell>Orden</TableHeaderCell>
+                  <TableHeaderCell>Pagina</TableHeaderCell>
+                  <TableHeaderCell>Que controla</TableHeaderCell>
+                  <TableHeaderCell>Titulo actual</TableHeaderCell>
                   <TableHeaderCell>Estado</TableHeaderCell>
                   <TableHeaderCell></TableHeaderCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {items.map((row) => (
+                {blocks.map((row) => (
                   <TableRow key={row.id}>
-                    <TableCell>{row.category}</TableCell>
                     <TableCell>
-                      <div className="font-semibold">{row.title}</div>
-                      <div className="ui-caption">/{row.slug}</div>
+                      <span className="ui-chip">{PAGE_NAMES[row.page_slug] ?? row.page_slug}</span>
                     </TableCell>
-                    <TableCell>{row.location ?? "-"}</TableCell>
-                    <TableCell>{row.sort_order}</TableCell>
+                    <TableCell>
+                      <div className="font-semibold text-sm">
+                        {BLOCK_NAMES[row.block_key] ?? row.block_key}
+                      </div>
+                      {row.media_type && (
+                        <div className="ui-caption">{row.media_type === "image" ? "Imagen" : "Video"}</div>
+                      )}
+                    </TableCell>
+                    <TableCell>{row.title ?? <span className="opacity-40">Sin titulo</span>}</TableCell>
                     <TableCell>
                       <span className={`ui-chip ${row.is_published ? "ui-chip--success" : ""}`}>
-                        {row.is_published ? "Publicado" : "Oculto"}
+                        {row.is_published ? "Visible" : "Oculto"}
                       </span>
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {row.category === "restaurant" ? (
-                          <Link href={`/website-cms/venues/${encodeURIComponent(row.slug)}`} className="ui-btn ui-btn--ghost ui-btn--sm">
-                            Venue detail
-                          </Link>
-                        ) : null}
-                        <Link href={`/website-cms/items/${row.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
-                          Editar
-                        </Link>
-                      </div>
+                      <Link href={`/website-cms/blocks/${row.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
+                        Editar
+                      </Link>
                     </TableCell>
                   </TableRow>
                 ))}

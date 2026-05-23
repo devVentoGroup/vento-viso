@@ -38,6 +38,13 @@ type CommercialCollectionOption = {
   is_active?: boolean | null;
 };
 
+type CollectionCategoryLinkOption = {
+  collection_id: string;
+  commercial_category_id: string;
+  sort_order?: number | null;
+  is_active?: boolean | null;
+};
+
 type MenuItemFormValues = {
   id?: string;
   code: string;
@@ -67,6 +74,7 @@ type MenuItemFormProps = {
   products: ProductOption[];
   categories: CommercialCategoryOption[];
   collections?: CommercialCollectionOption[];
+  collectionCategoryLinks?: CollectionCategoryLinkOption[];
   initial: MenuItemFormValues;
   action: (formData: FormData) => void | Promise<void>;
 };
@@ -100,6 +108,7 @@ export function MenuItemForm({
   products,
   categories,
   collections = [],
+  collectionCategoryLinks,
   initial,
   action,
 }: MenuItemFormProps) {
@@ -147,6 +156,27 @@ export function MenuItemForm({
     });
   }, [collections, siteId]);
 
+  const shouldFilterCategoriesByCollection = collectionCategoryLinks != null;
+
+  const categoryIdsByCollection = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+
+    for (const link of collectionCategoryLinks ?? []) {
+      if (link.is_active === false) continue;
+
+      const collectionId = String(link.collection_id ?? "").trim();
+      const categoryId = String(link.commercial_category_id ?? "").trim();
+
+      if (!collectionId || !categoryId) continue;
+
+      const current = map.get(collectionId) ?? new Set<string>();
+      current.add(categoryId);
+      map.set(collectionId, current);
+    }
+
+    return map;
+  }, [collectionCategoryLinks]);
+
   const selectedCollection = useMemo(() => {
     return visibleCollections.find((collection) => collection.id === commercialCollectionId) ?? null;
   }, [commercialCollectionId, visibleCollections]);
@@ -154,9 +184,24 @@ export function MenuItemForm({
   const visibleCategories = useMemo(() => {
     return categories.filter((category) => {
       if (category.is_active === false) return false;
-      return category.site_id === siteId;
+      if (category.site_id !== siteId) return false;
+
+      if (!commercialCollectionId) return false;
+
+      if (!shouldFilterCategoriesByCollection) {
+        return true;
+      }
+
+      const allowedCategoryIds = categoryIdsByCollection.get(commercialCollectionId);
+      return allowedCategoryIds?.has(category.id) ?? false;
     });
-  }, [categories, siteId]);
+  }, [
+    categories,
+    siteId,
+    commercialCollectionId,
+    shouldFilterCategoriesByCollection,
+    categoryIdsByCollection,
+  ]);
 
   const selectedCategory = useMemo(() => {
     return visibleCategories.find((category) => category.id === commercialCategoryId) ?? null;
@@ -360,9 +405,15 @@ export function MenuItemForm({
             <p className="ui-caption">
               Esta categoría es solo para el menú comercial de Pass. No modifica categorías operacionales de NEXO.
             </p>
-            {siteId && visibleCategories.length === 0 ? (
+            {siteId && !commercialCollectionId ? (
               <p className="ui-caption">
-                Esta sede no tiene categorias comerciales. Crea categorias en Viso &gt; Categorias comerciales.
+                Primero selecciona una colección comercial para cargar sus secciones.
+              </p>
+            ) : null}
+
+            {siteId && commercialCollectionId && visibleCategories.length === 0 ? (
+              <p className="ui-caption">
+                Esta colección no tiene secciones asignadas. Ve a Viso &gt; Colecciones comerciales y usa Guardar secciones.
               </p>
             ) : null}
           </label>

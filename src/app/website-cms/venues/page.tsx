@@ -98,12 +98,12 @@ export default async function WebsiteCmsVenuesPage({ searchParams }: { searchPar
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Venue Detail CMS"
-        subtitle="Restaurantes en ventogroup.co/restaurantes"
+        title="Restaurantes en el sitio web"
+        subtitle="Aqui puedes agregar, editar e importar los restaurantes que aparecen en ventogroup.co/restaurantes"
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <form action={importBusinesses}><button type="submit" className="ui-btn ui-btn--ghost">Importar desde Negocios</button></form>
-            <Link href="/website-cms/items/new" className="ui-btn ui-btn--brand">+ Crear restaurante</Link>
+            <form action={importBusinesses}><button type="submit" className="ui-btn ui-btn--brand">Importar negocios existentes</button></form>
+            <Link href="/website-cms/items/new" className="ui-btn ui-btn--brand">+ Crear manualmente</Link>
             <Link href="/website-cms" className="ui-btn ui-btn--ghost">Volver a CMS</Link>
           </div>
         }
@@ -115,7 +115,7 @@ export default async function WebsiteCmsVenuesPage({ searchParams }: { searchPar
       {unsyncedCount > 0 && !okMsg && !errorMsg ? (
         <div className="ui-alert ui-alert--warning">
           <strong>{unsyncedCount} negocio(s)</strong> en VISO Negocios no estan en el sitio web aun.
-          Haz clic en <strong>Importar desde Negocios</strong> para crearlos con nombre, direccion y logo.
+          Haz clic en <strong>Importar negocios existentes</strong> para traerlos con nombre, ubicacion y logo.
           Despues completa la foto y el horario de cada uno.
         </div>
       ) : null}
@@ -138,8 +138,8 @@ export default async function WebsiteCmsVenuesPage({ searchParams }: { searchPar
               <TableRow>
                 <TableHeaderCell>Restaurante</TableHeaderCell>
                 <TableHeaderCell>Ubicacion</TableHeaderCell>
-                <TableHeaderCell>Completitud</TableHeaderCell>
-                <TableHeaderCell>Detalle web</TableHeaderCell>
+                <TableHeaderCell>Perfil completo?</TableHeaderCell>
+                <TableHeaderCell>Pagina propia</TableHeaderCell>
                 <TableHeaderCell>Estado</TableHeaderCell>
                 <TableHeaderCell></TableHeaderCell>
               </TableRow>
@@ -177,7 +177,7 @@ export default async function WebsiteCmsVenuesPage({ searchParams }: { searchPar
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         <Link href={`/website-cms/items/${row.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
-                          {comp !== "complete" ? "Completar" : "Editar perfil"}
+                          {comp !== "complete" ? "Completar datos" : "Editar"}
                         </Link>
                         <Link href={`/website-cms/venues/${encodeURIComponent(row.slug)}`} className="ui-btn ui-btn--brand ui-btn--sm">
                           Editar detalle

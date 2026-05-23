@@ -36,6 +36,13 @@ type CommercialCollectionRow = {
   is_active: boolean | null;
 };
 
+type CollectionCategoryLinkRow = {
+  collection_id: string;
+  commercial_category_id: string;
+  sort_order: number | null;
+  is_active: boolean | null;
+};
+
 type SiteRow = {
   id: string;
   code: string | null;
@@ -109,6 +116,7 @@ async function validateCommercialMenuReferences(
     { data: sellOption, error: sellOptionError },
     { data: commercialCategory, error: commercialCategoryError },
     { data: commercialCollection, error: commercialCollectionError },
+    { data: collectionCategoryLink, error: collectionCategoryLinkError },
     { data: existingItem, error: existingItemError },
   ] = await Promise.all([
     supabase
@@ -132,6 +140,14 @@ async function validateCommercialMenuReferences(
       .select("id,name,code,site_id,kind,is_active")
       .eq("id", commercialCollectionId)
       .eq("site_id", siteId)
+      .eq("is_active", true)
+      .maybeSingle(),
+    supabase
+      .schema("pass")
+      .from("commercial_collection_categories")
+      .select("id,collection_id,commercial_category_id,is_active")
+      .eq("collection_id", commercialCollectionId)
+      .eq("commercial_category_id", commercialCategoryId)
       .eq("is_active", true)
       .maybeSingle(),
     supabase
@@ -192,6 +208,24 @@ async function validateCommercialMenuReferences(
   if (!commercialCollection) {
     return {
       error: "La coleccion comercial seleccionada no existe, esta inactiva o no pertenece a esta sede.",
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
+  }
+
+  if (collectionCategoryLinkError) {
+    return {
+      error: `No se pudo validar la relación entre colección y categoría comercial: ${collectionCategoryLinkError.message}`,
+      categoryLabel: "",
+      basePriceAmount: null,
+      recipeCostAmount: null,
+    };
+  }
+
+  if (!collectionCategoryLink) {
+    return {
+      error: "La categoría comercial seleccionada no pertenece a la colección comercial seleccionada.",
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
@@ -349,28 +383,38 @@ export default async function NewMenuItemPage({
     .order("name", { ascending: true });
   const sites = (sitesRaw ?? []) as SiteRow[];
 
-  const [{ data: sellOptionsRaw }, { data: categoriesRaw }, { data: collectionsRaw }] =
-    await Promise.all([
-      supabase
-        .schema("pass")
-        .from("sell_products_by_site")
-        .select("site_id,product_id,name,sku,base_price,recipe_cost_amount")
-        .order("name", { ascending: true }),
-      supabase
-        .schema("pass")
-        .from("commercial_categories")
-        .select("id,site_id,name,code,is_active")
-        .eq("is_active", true)
-        .order("sort_order", { ascending: true })
-        .order("name", { ascending: true }),
-      supabase
-        .schema("pass")
-        .from("commercial_collections")
-        .select("id,site_id,name,subtitle,code,kind,is_active")
-        .eq("is_active", true)
-        .order("sort_order", { ascending: true })
-        .order("name", { ascending: true }),
-    ]);
+  const [
+    { data: sellOptionsRaw },
+    { data: categoriesRaw },
+    { data: collectionsRaw },
+    { data: collectionCategoryLinksRaw },
+  ] = await Promise.all([
+    supabase
+      .schema("pass")
+      .from("sell_products_by_site")
+      .select("site_id,product_id,name,sku,base_price,recipe_cost_amount")
+      .order("name", { ascending: true }),
+    supabase
+      .schema("pass")
+      .from("commercial_categories")
+      .select("id,site_id,name,code,is_active")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
+    supabase
+      .schema("pass")
+      .from("commercial_collections")
+      .select("id,site_id,name,subtitle,code,kind,is_active")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
+    supabase
+      .schema("pass")
+      .from("commercial_collection_categories")
+      .select("collection_id,commercial_category_id,sort_order,is_active")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true }),
+  ]);
 
   const productsMap = new Map<
     string,
@@ -458,6 +502,7 @@ export default async function NewMenuItemPage({
         products={products}
         categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
         collections={(collectionsRaw ?? []) as CommercialCollectionRow[]}
+        collectionCategoryLinks={(collectionCategoryLinksRaw ?? []) as CollectionCategoryLinkRow[]}
         initial={{
           code: "",
           name: "",
