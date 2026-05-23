@@ -108,16 +108,14 @@ function onlyDigits(value: string) {
 
 function formatCopInput(value: string) {
   const digits = onlyDigits(value);
-  if (!digits) return "";
+  if (!digits || Number(digits) <= 0) return "";
 
   const parsed = Number(digits);
   if (!Number.isFinite(parsed)) return "";
 
-  return new Intl.NumberFormat("es-CO", {
-    style: "currency",
-    currency: "COP",
+  return `$ ${new Intl.NumberFormat("es-CO", {
     maximumFractionDigits: 0,
-  }).format(parsed);
+  }).format(parsed)}`;
 }
 
 export function MenuItemForm({
@@ -499,19 +497,19 @@ export function MenuItemForm({
 
             <input type="hidden" name="price_amount" value={priceAmount} />
 
-            <div className="relative">
+            <div className="flex overflow-hidden rounded-xl border border-[var(--ui-border)] bg-white focus-within:ring-2 focus-within:ring-[var(--ui-brand)]/20">
+              <div className="flex items-center border-r border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm font-semibold text-[var(--ui-muted)]">
+                COP
+              </div>
               <input
                 type="text"
                 inputMode="numeric"
-                className="ui-input pl-12 font-semibold"
+                className="min-h-12 flex-1 bg-white px-4 text-base font-semibold text-[var(--ui-text)] outline-none"
                 value={formatCopInput(priceAmount)}
                 onChange={(event) => setPriceAmount(onlyDigits(event.target.value))}
                 placeholder="$ 22.000"
                 required
               />
-              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-[var(--ui-muted)]">
-                COP
-              </span>
             </div>
 
             <p className="ui-caption">
@@ -533,18 +531,18 @@ export function MenuItemForm({
 
             <input type="hidden" name="compare_at_amount" value={compareAtAmount} />
 
-            <div className="relative">
+            <div className="flex overflow-hidden rounded-xl border border-[var(--ui-border)] bg-white focus-within:ring-2 focus-within:ring-[var(--ui-brand)]/20">
+              <div className="flex items-center border-r border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm font-semibold text-[var(--ui-muted)]">
+                COP
+              </div>
               <input
                 type="text"
                 inputMode="numeric"
-                className="ui-input pl-12"
+                className="min-h-12 flex-1 bg-white px-4 text-base text-[var(--ui-text)] outline-none"
                 value={formatCopInput(compareAtAmount)}
                 onChange={(event) => setCompareAtAmount(onlyDigits(event.target.value))}
                 placeholder="$ 0"
               />
-              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-[var(--ui-muted)]">
-                COP
-              </span>
             </div>
 
             <p className="ui-caption">
