@@ -521,7 +521,7 @@ export default async function NewMenuItemPage({
     .select("id,code,name,is_active")
     .eq("is_active", true)
     .order("name", { ascending: true });
-  const sites = (sitesRaw ?? []) as SiteRow[];
+  const activeSites = (sitesRaw ?? []) as SiteRow[];
 
   const [
     { data: sellOptionsRaw },
@@ -622,6 +622,22 @@ export default async function NewMenuItemPage({
     }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
 
+  const categorySiteIds = new Set(
+    ((categoriesRaw ?? []) as CommercialCategoryRow[])
+      .map((category) => String(category.site_id ?? "").trim())
+      .filter(Boolean),
+  );
+
+  const collectionSiteIds = new Set(
+    ((collectionsRaw ?? []) as CommercialCollectionRow[])
+      .map((collection) => String(collection.site_id ?? "").trim())
+      .filter(Boolean),
+  );
+
+  const commercialSites = activeSites.filter((site) => {
+    return categorySiteIds.has(site.id) && collectionSiteIds.has(site.id);
+  });
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -637,7 +653,7 @@ export default async function NewMenuItemPage({
       <MenuItemForm
         mode="create"
         action={createMenuItem}
-        sites={sites ?? []}
+        sites={commercialSites}
         products={products}
         categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
         collections={(collectionsRaw ?? []) as CommercialCollectionRow[]}
@@ -652,7 +668,7 @@ export default async function NewMenuItemPage({
           sort_order: "0",
           is_active: true,
           is_featured: false,
-          site_id: sites[0]?.id ?? "",
+          site_id: commercialSites[0]?.id ?? "",
           commercial_collection_id: "",
           commercial_category_id: "",
           category_label: "",
