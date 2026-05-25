@@ -482,6 +482,16 @@ export function MenuItemForm({
               required
             />
           </label>
+          <div className="space-y-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+            <div>
+              <div className="ui-label">Estado comercial</div>
+              <p className="ui-caption">Controla si el item aparece disponible en el menu de compras.</p>
+            </div>
+            <label className="flex items-center gap-3 text-sm font-semibold text-[var(--ui-text)]">
+              <input type="checkbox" name="is_active" defaultChecked={initial.is_active} />
+              Item activo
+            </label>
+          </div>
           <label className="space-y-2 sm:col-span-2">
             <span className="ui-label">Descripcion</span>
             <textarea
@@ -577,10 +587,6 @@ export function MenuItemForm({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-4 sm:col-span-2">
-            <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
-              <input type="checkbox" name="is_active" defaultChecked={initial.is_active} />
-              Item activo
-            </label>
             <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
               <input type="checkbox" name="is_featured" defaultChecked={initial.is_featured} />
               Mostrar en destacados
