@@ -40,7 +40,6 @@ type CollectionCategoryLinkRow = {
   collection_id: string;
   commercial_category_id: string;
   sort_order: number | null;
-  is_active: boolean | null;
 };
 
 type SiteRow = {
@@ -150,10 +149,9 @@ async function validateCommercialMenuReferences(
     supabase
       .schema("pass")
       .from("commercial_collection_categories")
-      .select("id,collection_id,commercial_category_id,is_active")
+      .select("collection_id,commercial_category_id")
       .eq("collection_id", commercialCollectionId)
       .eq("commercial_category_id", commercialCategoryId)
-      .eq("is_active", true)
       .maybeSingle(),
     supabase
       .schema("pass")
@@ -553,8 +551,7 @@ export default async function NewMenuItemPage({
     supabase
       .schema("pass")
       .from("commercial_collection_categories")
-      .select("collection_id,commercial_category_id,sort_order,is_active")
-      .eq("is_active", true)
+      .select("collection_id,commercial_category_id,sort_order")
       .order("sort_order", { ascending: true }),
   ]);
 
@@ -650,7 +647,7 @@ export default async function NewMenuItemPage({
           name: "",
           description: "",
           product_id: "",
-          price_amount: "0",
+          price_amount: "",
           compare_at_amount: "",
           sort_order: "0",
           is_active: true,
