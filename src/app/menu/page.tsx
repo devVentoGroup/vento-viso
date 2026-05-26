@@ -1,4 +1,6 @@
+import { revalidatePath } from "next/cache";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
@@ -17,15 +19,32 @@ type MenuItemRow = {
   commercial_collection_id: string | null;
   commercial_category_id: string | null;
   commercial_collection?:
-  | { id: string; name: string | null; subtitle: string | null; code: string | null; kind: string | null }
-  | { id: string; name: string | null; subtitle: string | null; code: string | null; kind: string | null }[]
+  | { id: string; name: string | null; subtitle: string | null; code: string | null; kind: string | null; sort_order: number | null }
+  | { id: string; name: string | null; subtitle: string | null; code: string | null; kind: string | null; sort_order: number | null }[]
   | null;
-  commercial_category?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
+  commercial_category?:
+  | { id: string; name: string | null; code: string | null; sort_order: number | null }
+  | { id: string; name: string | null; code: string | null; sort_order: number | null }[]
+  | null;
   price_amount: number;
+  sort_order: number | null;
   is_active: boolean;
   is_featured: boolean;
   metadata?: Record<string, unknown> | null;
   site?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
+};
+
+type CollectionCategoryLinkRow = {
+  collection_id: string;
+  commercial_category_id: string;
+  sort_order: number | null;
+  is_active: boolean | null;
+};
+
+type MenuItemMoveRow = {
+  id: string;
+  name: string;
+  sort_order: number | null;
 };
 
 function safeDecode(value: string | null | undefined) {
@@ -61,6 +80,16 @@ function hasTextValue(value: unknown) {
   return String(value).trim().length > 0;
 }
 
+function relationOne<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function sortNumber(value: number | string | null | undefined, fallback = Number.MAX_SAFE_INTEGER) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function isVisoCommercialMenuItem(row: MenuItemRow) {
   return (
     hasTextValue(row.product_id) &&
@@ -69,6 +98,99 @@ function isVisoCommercialMenuItem(row: MenuItemRow) {
     row.metadata?.source_app === "viso" &&
     row.metadata?.source_module === "menu_comercial"
   );
+}
+
+async function moveMenuItem(formData: FormData) {
+  "use server";
+
+  const supabase = createAdminClient();
+
+  const itemId = String(formData.get("item_id") ?? "").trim();
+  const direction = String(formData.get("direction") ?? "").trim();
+
+  if (!itemId || !["up", "down"].includes(direction)) {
+    redirect("/menu?error=" + encodeURIComponent("Movimiento invalido."));
+  }
+
+  const { data: current, error: currentError } = await supabase
+    .schema("pass")
+    .from("catalog_items")
+    .select("id,site_id,commercial_collection_id,commercial_category_id")
+    .eq("id", itemId)
+    .maybeSingle();
+
+  if (currentError || !current) {
+    redirect(
+      "/menu?error=" +
+      encodeURIComponent(currentError?.message || "No se encontro el item comercial."),
+    );
+  }
+
+  if (!current.commercial_category_id) {
+    redirect("/menu?error=" + encodeURIComponent("El item no tiene categoria comercial."));
+  }
+
+  let groupQuery = supabase
+    .schema("pass")
+    .from("catalog_items")
+    .select("id,name,sort_order")
+    .eq("site_id", current.site_id)
+    .eq("commercial_category_id", current.commercial_category_id)
+    .not("product_id", "is", null)
+    .gt("price_amount", 0)
+    .eq("metadata->>source_app", "viso")
+    .eq("metadata->>source_module", "menu_comercial")
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+
+  groupQuery = current.commercial_collection_id
+    ? groupQuery.eq("commercial_collection_id", current.commercial_collection_id)
+    : groupQuery.is("commercial_collection_id", null);
+
+  const { data: groupRaw, error: groupError } = await groupQuery;
+
+  if (groupError) {
+    redirect("/menu?error=" + encodeURIComponent(groupError.message));
+  }
+
+  const group = ((groupRaw ?? []) as MenuItemMoveRow[]).sort((a, b) => {
+    const aOrder = sortNumber(a.sort_order);
+    const bOrder = sortNumber(b.sort_order);
+
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return a.name.localeCompare(b.name, "es-CO");
+  });
+
+  const currentIndex = group.findIndex((item) => item.id === itemId);
+  const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= group.length) {
+    redirect("/menu?ok=" + encodeURIComponent("Orden sin cambios."));
+  }
+
+  const reordered = [...group];
+  const moving = reordered[currentIndex];
+  reordered[currentIndex] = reordered[targetIndex];
+  reordered[targetIndex] = moving;
+
+  const updates = await Promise.all(
+    reordered.map((item, index) =>
+      supabase
+        .schema("pass")
+        .from("catalog_items")
+        .update({ sort_order: index * 10 })
+        .eq("id", item.id),
+    ),
+  );
+
+  const failed = updates.find((result) => result.error);
+
+  if (failed?.error) {
+    redirect("/menu?error=" + encodeURIComponent(failed.error.message));
+  }
+
+  revalidatePath("/menu");
+  redirect("/menu?ok=" + encodeURIComponent("Orden de productos actualizado."));
 }
 
 export default async function MenuPage({
@@ -86,14 +208,25 @@ export default async function MenuPage({
   });
   const supabase = createAdminClient();
 
-  const { data, error: menuError } = await supabase
-    .schema("pass")
-    .from("catalog_items")
-    .select("id,code,name,site_id,product_id,category_label,commercial_collection_id,commercial_collection:commercial_collections(id,name,subtitle,code,kind),commercial_category_id,commercial_category:commercial_categories(id,name,code),price_amount,is_active,is_featured,metadata")
-    .not("product_id", "is", null)
-    .not("commercial_category_id", "is", null)
-    .order("sort_order", { ascending: true })
-    .order("name", { ascending: true });
+  const [
+    { data, error: menuError },
+    { data: categoryLinksRaw, error: categoryLinksError },
+  ] = await Promise.all([
+    supabase
+      .schema("pass")
+      .from("catalog_items")
+      .select("id,code,name,site_id,product_id,category_label,commercial_collection_id,commercial_collection:commercial_collections(id,name,subtitle,code,kind,sort_order),commercial_category_id,commercial_category:commercial_categories(id,name,code,sort_order),price_amount,sort_order,is_active,is_featured,metadata")
+      .not("product_id", "is", null)
+      .not("commercial_category_id", "is", null)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
+    supabase
+      .schema("pass")
+      .from("commercial_collection_categories")
+      .select("collection_id,commercial_category_id,sort_order,is_active")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true }),
+  ]);
 
   const commercialRows = menuError
     ? []
@@ -130,6 +263,120 @@ export default async function MenuPage({
     site: siteById.get(row.site_id) ?? null,
   }));
 
+  const categoryOrderByCollection = new Map<string, number>();
+
+  for (const link of (categoryLinksRaw ?? []) as CollectionCategoryLinkRow[]) {
+    if (link.is_active === false) continue;
+
+    const collectionId = String(link.collection_id ?? "").trim();
+    const categoryId = String(link.commercial_category_id ?? "").trim();
+
+    if (!collectionId || !categoryId) continue;
+
+    categoryOrderByCollection.set(
+      `${collectionId}:${categoryId}`,
+      sortNumber(link.sort_order),
+    );
+  }
+
+  const rowsBySite = new Map<
+    string,
+    {
+      siteLabel: string;
+      collections: Map<
+        string,
+        {
+          label: string;
+          subtitle: string;
+          sortOrder: number;
+          categories: Map<
+            string,
+            {
+              label: string;
+              sortOrder: number;
+              rows: MenuItemRow[];
+            }
+          >;
+        }
+      >;
+    }
+  >();
+
+  for (const row of rows) {
+    const site = relationOne(row.site);
+    const collection = relationOne(row.commercial_collection);
+    const category = relationOne(row.commercial_category);
+
+    const siteId = row.site_id;
+    const collectionId = row.commercial_collection_id || collection?.id || "__sin_coleccion__";
+    const categoryId = row.commercial_category_id || category?.id || "__sin_categoria__";
+
+    if (!rowsBySite.has(siteId)) {
+      rowsBySite.set(siteId, {
+        siteLabel: site?.name ?? site?.code ?? "Sin sede",
+        collections: new Map(),
+      });
+    }
+
+    const siteGroup = rowsBySite.get(siteId)!;
+
+    if (!siteGroup.collections.has(collectionId)) {
+      siteGroup.collections.set(collectionId, {
+        label: collection?.name ?? collection?.code ?? "Sin coleccion",
+        subtitle: collection?.subtitle ?? "",
+        sortOrder: sortNumber(collection?.sort_order),
+        categories: new Map(),
+      });
+    }
+
+    const collectionGroup = siteGroup.collections.get(collectionId)!;
+
+    if (!collectionGroup.categories.has(categoryId)) {
+      collectionGroup.categories.set(categoryId, {
+        label: category?.name ?? category?.code ?? row.category_label ?? "Sin categoria",
+        sortOrder:
+          categoryOrderByCollection.get(`${collectionId}:${categoryId}`) ??
+          sortNumber(category?.sort_order),
+        rows: [],
+      });
+    }
+
+    collectionGroup.categories.get(categoryId)!.rows.push(row);
+  }
+
+  const organizedMenu = Array.from(rowsBySite.entries()).map(([siteId, siteGroup]) => ({
+    siteId,
+    siteLabel: siteGroup.siteLabel,
+    collections: Array.from(siteGroup.collections.entries())
+      .map(([collectionId, collectionGroup]) => ({
+        collectionId,
+        label: collectionGroup.label,
+        subtitle: collectionGroup.subtitle,
+        sortOrder: collectionGroup.sortOrder,
+        categories: Array.from(collectionGroup.categories.entries())
+          .map(([categoryId, categoryGroup]) => ({
+            categoryId,
+            label: categoryGroup.label,
+            sortOrder: categoryGroup.sortOrder,
+            rows: categoryGroup.rows.sort((a, b) => {
+              const aOrder = sortNumber(a.sort_order);
+              const bOrder = sortNumber(b.sort_order);
+
+              if (aOrder !== bOrder) return aOrder - bOrder;
+              return a.name.localeCompare(b.name, "es-CO");
+            }),
+          }))
+          .sort((a, b) => {
+            if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+            return a.label.localeCompare(b.label, "es-CO");
+          }),
+      }))
+      .sort((a, b) => {
+        if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+        return a.label.localeCompare(b.label, "es-CO");
+      }),
+  }));
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -154,6 +401,11 @@ export default async function MenuPage({
           No se pudo cargar el menú comercial: {menuError.message}
         </div>
       ) : null}
+      {categoryLinksError ? (
+        <div className="ui-alert ui-alert--error">
+          No se pudo cargar el orden de categorias por coleccion: {categoryLinksError.message}
+        </div>
+      ) : null}
       {sitesError ? (
         <div className="ui-alert ui-alert--error">
           No se pudieron cargar las sedes del menú comercial: {sitesError.message}
@@ -166,79 +418,147 @@ export default async function MenuPage({
         ) : rows.length === 0 ? (
           <div className="ui-empty">No hay items comerciales configurados.</div>
         ) : (
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>Item</TableHeaderCell>
-                <TableHeaderCell>Coleccion</TableHeaderCell>
-                <TableHeaderCell>Categoria</TableHeaderCell>
-                <TableHeaderCell>Precio</TableHeaderCell>
-                <TableHeaderCell>Costo receta</TableHeaderCell>
-                <TableHeaderCell>Margen</TableHeaderCell>
-                <TableHeaderCell>Negocio</TableHeaderCell>
-                <TableHeaderCell>Estado</TableHeaderCell>
-                <TableHeaderCell></TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {rows.map((row) => {
-                const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site ?? null;
-                const commercialCollection = Array.isArray(row.commercial_collection)
-                  ? row.commercial_collection[0] ?? null
-                  : row.commercial_collection ?? null;
-                const commercialCategory = Array.isArray(row.commercial_category)
-                  ? row.commercial_category[0] ?? null
-                  : row.commercial_category ?? null;
-                const recipeCost = readNumericMeta(row.metadata, "recipe_cost_amount");
-                const marginAmount = readNumericMeta(row.metadata, "margin_amount");
-                const marginPct = readNumericMeta(row.metadata, "margin_pct");
+          <div className="space-y-8">
+            {organizedMenu.map((siteGroup) => (
+              <section key={siteGroup.siteId} className="space-y-5">
+                <div>
+                  <h2 className="text-lg font-semibold text-[var(--ui-text)]">
+                    {siteGroup.siteLabel}
+                  </h2>
+                  <p className="ui-caption">
+                    Organizacion comercial por coleccion, categoria y producto.
+                  </p>
+                </div>
 
-                return (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      <div className="font-semibold">{row.name}</div>
-                      <div className="ui-caption">{row.code}</div>
-                      {row.is_featured ? <div className="ui-caption">Destacado</div> : null}
-                    </TableCell>
-                    <TableCell>
-                      {commercialCollection ? (
-                        <div>
-                          <div>{commercialCollection.name || commercialCollection.code || "-"}</div>
-                          {commercialCollection.subtitle ? (
-                            <div className="ui-caption">{commercialCollection.subtitle}</div>
-                          ) : null}
+                {siteGroup.collections.map((collectionGroup) => (
+                  <div
+                    key={collectionGroup.collectionId}
+                    className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4"
+                  >
+                    <div className="mb-4">
+                      <h3 className="text-base font-semibold text-[var(--ui-text)]">
+                        {collectionGroup.label}
+                      </h3>
+                      {collectionGroup.subtitle ? (
+                        <p className="ui-caption">{collectionGroup.subtitle}</p>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-6">
+                      {collectionGroup.categories.map((categoryGroup) => (
+                        <div
+                          key={categoryGroup.categoryId}
+                          className="rounded-2xl border border-[var(--ui-border)] bg-white p-4"
+                        >
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--ui-muted)]">
+                                {categoryGroup.label}
+                              </h4>
+                              <p className="ui-caption">
+                                {categoryGroup.rows.length} {categoryGroup.rows.length === 1 ? "producto" : "productos"}
+                              </p>
+                            </div>
+                          </div>
+
+                          <Table>
+                            <TableHead>
+                              <TableRow>
+                                <TableHeaderCell>Orden</TableHeaderCell>
+                                <TableHeaderCell>Item</TableHeaderCell>
+                                <TableHeaderCell>Precio</TableHeaderCell>
+                                <TableHeaderCell>Costo receta</TableHeaderCell>
+                                <TableHeaderCell>Margen</TableHeaderCell>
+                                <TableHeaderCell>Estado</TableHeaderCell>
+                                <TableHeaderCell></TableHeaderCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {categoryGroup.rows.map((row, index) => {
+                                const recipeCost = readNumericMeta(row.metadata, "recipe_cost_amount");
+                                const marginAmount = readNumericMeta(row.metadata, "margin_amount");
+                                const marginPct = readNumericMeta(row.metadata, "margin_pct");
+
+                                return (
+                                  <TableRow key={row.id}>
+                                    <TableCell>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-semibold text-[var(--ui-text)]">
+                                          {index + 1}
+                                        </span>
+
+                                        <div className="flex gap-1">
+                                          <form action={moveMenuItem}>
+                                            <input type="hidden" name="item_id" value={row.id} />
+                                            <input type="hidden" name="direction" value="up" />
+                                            <button
+                                              type="submit"
+                                              className="ui-btn ui-btn--ghost ui-btn--sm"
+                                              disabled={index === 0}
+                                            >
+                                              Subir
+                                            </button>
+                                          </form>
+
+                                          <form action={moveMenuItem}>
+                                            <input type="hidden" name="item_id" value={row.id} />
+                                            <input type="hidden" name="direction" value="down" />
+                                            <button
+                                              type="submit"
+                                              className="ui-btn ui-btn--ghost ui-btn--sm"
+                                              disabled={index === categoryGroup.rows.length - 1}
+                                            >
+                                              Bajar
+                                            </button>
+                                          </form>
+                                        </div>
+                                      </div>
+                                    </TableCell>
+
+                                    <TableCell>
+                                      <div className="font-semibold">{row.name}</div>
+                                      <div className="ui-caption">{row.code}</div>
+                                      {row.is_featured ? <div className="ui-caption">Destacado</div> : null}
+                                    </TableCell>
+
+                                    <TableCell>{formatCop(row.price_amount)}</TableCell>
+                                    <TableCell>{recipeCost == null ? "-" : formatCop(recipeCost)}</TableCell>
+
+                                    <TableCell>
+                                      {marginAmount == null ? "-" : (
+                                        <div>
+                                          <div>{formatCop(marginAmount)}</div>
+                                          {marginPct == null ? null : (
+                                            <div className="ui-caption">{marginPct.toFixed(2)}%</div>
+                                          )}
+                                        </div>
+                                      )}
+                                    </TableCell>
+
+                                    <TableCell>
+                                      <span className={`ui-chip ${row.is_active ? "ui-chip--success" : ""}`}>
+                                        {row.is_active ? "Activo" : "Inactivo"}
+                                      </span>
+                                    </TableCell>
+
+                                    <TableCell className="text-right">
+                                      <Link href={`/menu/${row.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
+                                        Editar
+                                      </Link>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
                         </div>
-                      ) : (
-                        <span className="ui-caption">Sin coleccion</span>
-                      )}
-                    </TableCell>
-                    <TableCell>{commercialCategory?.name || row.category_label || "-"}</TableCell>
-                    <TableCell>{formatCop(row.price_amount)}</TableCell>
-                    <TableCell>{recipeCost == null ? "-" : formatCop(recipeCost)}</TableCell>
-                    <TableCell>
-                      {marginAmount == null ? "-" : (
-                        <div>
-                          <div>{formatCop(marginAmount)}</div>
-                          {marginPct == null ? null : <div className="ui-caption">{marginPct.toFixed(2)}%</div>}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>{site?.name ?? site?.code ?? "Sin sede"}</TableCell>
-                    <TableCell>
-                      <span className={`ui-chip ${row.is_active ? "ui-chip--success" : ""}`}>
-                        {row.is_active ? "Activo" : "Inactivo"}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Link href={`/menu/${row.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
-                        Editar
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
         )}
       </div>
     </div>

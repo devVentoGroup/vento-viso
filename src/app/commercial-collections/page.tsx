@@ -186,14 +186,14 @@ async function saveCollection(formData: FormData) {
 
   const { error } = id
     ? await supabase
-        .schema("pass")
-        .from("commercial_collections")
-        .update(payload)
-        .eq("id", id)
+      .schema("pass")
+      .from("commercial_collections")
+      .update(payload)
+      .eq("id", id)
     : await supabase
-        .schema("pass")
-        .from("commercial_collections")
-        .upsert(payload, { onConflict: "site_id,code" });
+      .schema("pass")
+      .from("commercial_collections")
+      .upsert(payload, { onConflict: "site_id,code" });
 
   if (error) {
     redirect("/commercial-collections?error=" + encodeURIComponent(error.message));
@@ -233,7 +233,7 @@ async function saveCollectionCategories(formData: FormData) {
   if (collectionError || !collection) {
     redirect(
       "/commercial-collections?error=" +
-        encodeURIComponent(collectionError?.message || "La coleccion no existe."),
+      encodeURIComponent(collectionError?.message || "La coleccion no existe."),
     );
   }
 
@@ -261,10 +261,56 @@ async function saveCollectionCategories(formData: FormData) {
     if (hasInvalidCategory) {
       redirect(
         "/commercial-collections?error=" +
-          encodeURIComponent("Una o mas categorias no pertenecen a la sede de la coleccion."),
+        encodeURIComponent("Una o mas categorias no pertenecen a la sede de la coleccion."),
       );
     }
   }
+
+  const { data: existingLinksRaw, error: existingLinksError } = await supabase
+    .schema("pass")
+    .from("commercial_collection_categories")
+    .select("commercial_category_id,sort_order,is_active")
+    .eq("collection_id", collectionId)
+    .order("sort_order", { ascending: true });
+
+  if (existingLinksError) {
+    redirect("/commercial-collections?error=" + encodeURIComponent(existingLinksError.message));
+  }
+
+  const existingOrderByCategoryId = new Map<string, number>();
+
+  for (const link of (existingLinksRaw ?? []) as {
+    commercial_category_id: string;
+    sort_order: number | null;
+    is_active: boolean | null;
+  }[]) {
+    if (link.is_active === false) continue;
+
+    const categoryId = String(link.commercial_category_id ?? "").trim();
+    const sortOrder = Number(link.sort_order ?? Number.MAX_SAFE_INTEGER);
+
+    if (categoryId && Number.isFinite(sortOrder)) {
+      existingOrderByCategoryId.set(categoryId, sortOrder);
+    }
+  }
+
+  const fallbackPositionByCategoryId = new Map(
+    selectedCategoryIds.map((categoryId, index) => [categoryId, index]),
+  );
+
+  const orderedCategoryIds = [...selectedCategoryIds].sort((a, b) => {
+    const aOrder = existingOrderByCategoryId.get(a);
+    const bOrder = existingOrderByCategoryId.get(b);
+
+    if (aOrder != null && bOrder != null && aOrder !== bOrder) {
+      return aOrder - bOrder;
+    }
+
+    if (aOrder != null && bOrder == null) return -1;
+    if (aOrder == null && bOrder != null) return 1;
+
+    return (fallbackPositionByCategoryId.get(a) ?? 0) - (fallbackPositionByCategoryId.get(b) ?? 0);
+  });
 
   const { error: deactivateError } = await supabase
     .schema("pass")
@@ -276,8 +322,8 @@ async function saveCollectionCategories(formData: FormData) {
     redirect("/commercial-collections?error=" + encodeURIComponent(deactivateError.message));
   }
 
-  if (selectedCategoryIds.length > 0) {
-    const payload = selectedCategoryIds.map((categoryId, index) => ({
+  if (orderedCategoryIds.length > 0) {
+    const payload = orderedCategoryIds.map((categoryId, index) => ({
       collection_id: collectionId,
       commercial_category_id: categoryId,
       sort_order: index * 10,
@@ -297,6 +343,72 @@ async function saveCollectionCategories(formData: FormData) {
   revalidatePath("/commercial-collections");
   revalidatePath("/menu");
   redirect("/commercial-collections?ok=" + encodeURIComponent("Secciones de coleccion guardadas."));
+}
+
+async function moveCollectionCategory(formData: FormData) {
+  "use server";
+
+  const supabase = createAdminClient();
+
+  const collectionId = asText(formData.get("collection_id"));
+  const linkId = asText(formData.get("link_id"));
+  const direction = asText(formData.get("direction"));
+
+  if (!collectionId || !linkId || !["up", "down"].includes(direction)) {
+    redirect("/commercial-collections?error=" + encodeURIComponent("Movimiento invalido."));
+  }
+
+  const { data: linksRaw, error: linksError } = await supabase
+    .schema("pass")
+    .from("commercial_collection_categories")
+    .select("id,collection_id,commercial_category_id,sort_order,is_active")
+    .eq("collection_id", collectionId)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+
+  if (linksError) {
+    redirect("/commercial-collections?error=" + encodeURIComponent(linksError.message));
+  }
+
+  const links = ((linksRaw ?? []) as CollectionCategoryRow[]).sort((a, b) => {
+    const aOrder = Number(a.sort_order ?? Number.MAX_SAFE_INTEGER);
+    const bOrder = Number(b.sort_order ?? Number.MAX_SAFE_INTEGER);
+
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return a.commercial_category_id.localeCompare(b.commercial_category_id);
+  });
+
+  const currentIndex = links.findIndex((link) => link.id === linkId);
+  const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= links.length) {
+    redirect("/commercial-collections?ok=" + encodeURIComponent("Orden sin cambios."));
+  }
+
+  const reordered = [...links];
+  const current = reordered[currentIndex];
+  reordered[currentIndex] = reordered[targetIndex];
+  reordered[targetIndex] = current;
+
+  const updates = await Promise.all(
+    reordered.map((link, index) =>
+      supabase
+        .schema("pass")
+        .from("commercial_collection_categories")
+        .update({ sort_order: index * 10 })
+        .eq("id", link.id),
+    ),
+  );
+
+  const failedUpdate = updates.find((result) => result.error);
+
+  if (failedUpdate?.error) {
+    redirect("/commercial-collections?error=" + encodeURIComponent(failedUpdate.error.message));
+  }
+
+  revalidatePath("/commercial-collections");
+  revalidatePath("/menu");
+  redirect("/commercial-collections?ok=" + encodeURIComponent("Orden de secciones actualizado."));
 }
 
 async function deleteCollection(formData: FormData) {
@@ -332,20 +444,20 @@ async function deleteCollection(formData: FormData) {
   if (canonicalItemsError || pricedItemsError) {
     redirect(
       "/commercial-collections?error=" +
-        encodeURIComponent(
-          canonicalItemsError?.message ||
-            pricedItemsError?.message ||
-            "No se pudo validar si la coleccion tiene items asignados.",
-        ),
+      encodeURIComponent(
+        canonicalItemsError?.message ||
+        pricedItemsError?.message ||
+        "No se pudo validar si la coleccion tiene items asignados.",
+      ),
     );
   }
 
   if ((canonicalItemsCount ?? 0) > 0 || (pricedItemsCount ?? 0) > 0) {
     redirect(
       "/commercial-collections?error=" +
-        encodeURIComponent(
-          "No puedes eliminar una coleccion con items comerciales asignados. Desactivala o mueve esos productos primero.",
-        ),
+      encodeURIComponent(
+        "No puedes eliminar una coleccion con items comerciales asignados. Desactivala o mueve esos productos primero.",
+      ),
     );
   }
 
@@ -416,41 +528,41 @@ export default async function CommercialCollectionsPage({
   ] =
     businessSiteIds.length > 0
       ? await Promise.all([
-          supabase
-            .from("sites")
-            .select("id,name,code,is_active,is_public")
-            .eq("is_active", true)
-            .in("id", businessSiteIds),
-          supabase
-            .schema("pass")
-            .from("commercial_collections")
-            .select("id,site_id,code,name,subtitle,description,kind,hero_image_url,starts_at,ends_at,sort_order,is_active")
-            .in("site_id", businessSiteIds)
-            .order("site_id", { ascending: true })
-            .order("sort_order", { ascending: true })
-            .order("name", { ascending: true }),
-          supabase
-            .schema("pass")
-            .from("commercial_categories")
-            .select("id,site_id,code,name,description,sort_order,is_active")
-            .in("site_id", businessSiteIds)
-            .eq("is_active", true)
-            .order("site_id", { ascending: true })
-            .order("sort_order", { ascending: true })
-            .order("name", { ascending: true }),
-          supabase
-            .schema("pass")
-            .from("commercial_collection_categories")
-            .select("id,collection_id,commercial_category_id,sort_order,is_active")
-            .eq("is_active", true)
-            .order("sort_order", { ascending: true }),
-        ])
+        supabase
+          .from("sites")
+          .select("id,name,code,is_active,is_public")
+          .eq("is_active", true)
+          .in("id", businessSiteIds),
+        supabase
+          .schema("pass")
+          .from("commercial_collections")
+          .select("id,site_id,code,name,subtitle,description,kind,hero_image_url,starts_at,ends_at,sort_order,is_active")
+          .in("site_id", businessSiteIds)
+          .order("site_id", { ascending: true })
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true }),
+        supabase
+          .schema("pass")
+          .from("commercial_categories")
+          .select("id,site_id,code,name,description,sort_order,is_active")
+          .in("site_id", businessSiteIds)
+          .eq("is_active", true)
+          .order("site_id", { ascending: true })
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true }),
+        supabase
+          .schema("pass")
+          .from("commercial_collection_categories")
+          .select("id,collection_id,commercial_category_id,sort_order,is_active")
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true }),
+      ])
       : [
-          { data: [], error: null },
-          { data: [], error: null },
-          { data: [], error: null },
-          { data: [], error: null },
-        ];
+        { data: [], error: null },
+        { data: [], error: null },
+        { data: [], error: null },
+        { data: [], error: null },
+      ];
 
   const siteOrderById = new Map(
     businessSiteIds.map((siteId, index) => [siteId, index]),
@@ -481,14 +593,26 @@ export default async function CommercialCollectionsPage({
     categoriesBySite.get(category.site_id)!.push(category);
   }
 
-  const categoryIdsByCollection = new Map<string, Set<string>>();
+  const categoryLinksByCollection = new Map<string, CollectionCategoryRow[]>();
 
   for (const link of links) {
     if (link.is_active === false) continue;
-    if (!categoryIdsByCollection.has(link.collection_id)) {
-      categoryIdsByCollection.set(link.collection_id, new Set<string>());
+
+    if (!categoryLinksByCollection.has(link.collection_id)) {
+      categoryLinksByCollection.set(link.collection_id, []);
     }
-    categoryIdsByCollection.get(link.collection_id)!.add(link.commercial_category_id);
+
+    categoryLinksByCollection.get(link.collection_id)!.push(link);
+  }
+
+  for (const collectionLinks of categoryLinksByCollection.values()) {
+    collectionLinks.sort((a, b) => {
+      const aOrder = Number(a.sort_order ?? Number.MAX_SAFE_INTEGER);
+      const bOrder = Number(b.sort_order ?? Number.MAX_SAFE_INTEGER);
+
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return a.commercial_category_id.localeCompare(b.commercial_category_id);
+    });
   }
 
   const effectiveError =
@@ -610,10 +734,19 @@ export default async function CommercialCollectionsPage({
                     </TableHead>
                     <TableBody>
                       {siteCollections.map((collection) => {
-                        const assignedCategoryIds = categoryIdsByCollection.get(collection.id) ?? new Set<string>();
-                        const assignedCategories = Array.from(assignedCategoryIds)
-                          .map((categoryId) => categoriesById.get(categoryId))
-                          .filter((category): category is CategoryRow => Boolean(category));
+                        const assignedCategoryLinks = categoryLinksByCollection.get(collection.id) ?? [];
+                        const assignedCategoryIds = new Set(
+                          assignedCategoryLinks.map((link) => link.commercial_category_id),
+                        );
+                        const assignedCategories = assignedCategoryLinks
+                          .map((link) => ({
+                            link,
+                            category: categoriesById.get(link.commercial_category_id),
+                          }))
+                          .filter(
+                            (entry): entry is { link: CollectionCategoryRow; category: CategoryRow } =>
+                              Boolean(entry.category),
+                          );
 
                         return (
                           <TableRow key={collection.id}>
@@ -679,7 +812,7 @@ export default async function CommercialCollectionsPage({
                                 <div className="mt-3 flex items-center justify-between gap-3">
                                   <div className="text-xs text-[var(--ui-muted)]">
                                     {assignedCategories.length > 0
-                                      ? assignedCategories.map((category) => category.name).join(" · ")
+                                      ? assignedCategories.map(({ category }) => category.name).join(" · ")
                                       : "Sin secciones asignadas"}
                                   </div>
 
@@ -688,6 +821,60 @@ export default async function CommercialCollectionsPage({
                                   </button>
                                 </div>
                               </form>
+
+                              {assignedCategories.length > 0 ? (
+                                <div className="mt-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                                  <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
+                                    Orden en el menu comercial
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    {assignedCategories.map(({ link, category }, index) => (
+                                      <div
+                                        key={link.id}
+                                        className="flex items-center justify-between gap-3 rounded-xl border border-[var(--ui-border)] bg-white px-3 py-2"
+                                      >
+                                        <div className="min-w-0">
+                                          <div className="text-sm font-semibold text-[var(--ui-text)]">
+                                            {index + 1}. {category.name}
+                                          </div>
+                                          <div className="text-xs text-[var(--ui-muted)]">
+                                            {category.description || "Seccion comercial"}
+                                          </div>
+                                        </div>
+
+                                        <div className="flex shrink-0 gap-1">
+                                          <form action={moveCollectionCategory}>
+                                            <input type="hidden" name="collection_id" value={collection.id} />
+                                            <input type="hidden" name="link_id" value={link.id} />
+                                            <input type="hidden" name="direction" value="up" />
+                                            <button
+                                              type="submit"
+                                              className="ui-btn ui-btn--ghost ui-btn--sm"
+                                              disabled={index === 0}
+                                            >
+                                              Subir
+                                            </button>
+                                          </form>
+
+                                          <form action={moveCollectionCategory}>
+                                            <input type="hidden" name="collection_id" value={collection.id} />
+                                            <input type="hidden" name="link_id" value={link.id} />
+                                            <input type="hidden" name="direction" value="down" />
+                                            <button
+                                              type="submit"
+                                              className="ui-btn ui-btn--ghost ui-btn--sm"
+                                              disabled={index === assignedCategories.length - 1}
+                                            >
+                                              Bajar
+                                            </button>
+                                          </form>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
                             </TableCell>
 
                             <TableCell>
