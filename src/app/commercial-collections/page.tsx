@@ -369,7 +369,7 @@ async function saveCollectionCategoryOrder(collectionId: string, orderedLinkIds:
   const { data: activeLinksRaw, error: activeLinksError } = await supabase
     .schema("pass")
     .from("commercial_collection_categories")
-    .select("id,collection_id,is_active")
+    .select("id,collection_id,commercial_category_id,is_active")
     .eq("collection_id", cleanCollectionId)
     .eq("is_active", true);
 
@@ -380,11 +380,16 @@ async function saveCollectionCategoryOrder(collectionId: string, orderedLinkIds:
     };
   }
 
-  const activeLinkIds = new Set(
-    ((activeLinksRaw ?? []) as { id: string }[]).map((link) => link.id),
-  );
+  const activeLinks = (activeLinksRaw ?? []) as {
+    id: string;
+    collection_id: string;
+    commercial_category_id: string;
+    is_active: boolean | null;
+  }[];
 
-  const hasInvalidLink = cleanOrderedLinkIds.some((linkId) => !activeLinkIds.has(linkId));
+  const activeLinkById = new Map(activeLinks.map((link) => [link.id, link]));
+
+  const hasInvalidLink = cleanOrderedLinkIds.some((linkId) => !activeLinkById.has(linkId));
 
   if (hasInvalidLink) {
     return {
@@ -393,26 +398,55 @@ async function saveCollectionCategoryOrder(collectionId: string, orderedLinkIds:
     };
   }
 
-  const updates = await Promise.all(
-    cleanOrderedLinkIds.map((linkId, index) =>
+  const orderedLinks = cleanOrderedLinkIds
+    .map((linkId) => activeLinkById.get(linkId))
+    .filter((link): link is {
+      id: string;
+      collection_id: string;
+      commercial_category_id: string;
+      is_active: boolean | null;
+    } => Boolean(link));
+
+  const linkUpdates = await Promise.all(
+    orderedLinks.map((link, index) =>
       supabase
         .schema("pass")
         .from("commercial_collection_categories")
         .update({ sort_order: index * 10 })
-        .eq("id", linkId),
+        .eq("id", link.id),
     ),
   );
 
-  const failedUpdate = updates.find((result) => result.error);
+  const failedLinkUpdate = linkUpdates.find((result) => result.error);
 
-  if (failedUpdate?.error) {
+  if (failedLinkUpdate?.error) {
     return {
       ok: false,
-      error: failedUpdate.error.message,
+      error: failedLinkUpdate.error.message,
+    };
+  }
+
+  const categoryUpdates = await Promise.all(
+    orderedLinks.map((link, index) =>
+      supabase
+        .schema("pass")
+        .from("commercial_categories")
+        .update({ sort_order: index * 10 })
+        .eq("id", link.commercial_category_id),
+    ),
+  );
+
+  const failedCategoryUpdate = categoryUpdates.find((result) => result.error);
+
+  if (failedCategoryUpdate?.error) {
+    return {
+      ok: false,
+      error: failedCategoryUpdate.error.message,
     };
   }
 
   revalidatePath("/commercial-collections");
+  revalidatePath("/commercial-categories");
   revalidatePath("/menu");
 
   return {
