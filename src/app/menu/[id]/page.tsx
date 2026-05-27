@@ -95,6 +95,50 @@ function parseFulfillmentModes(formData: FormData) {
   return modes;
 }
 
+function sameStringList(a: string[] | null | undefined, b: string[]) {
+  const left = [...(a ?? [])].sort();
+  const right = [...b].sort();
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameOptionalNumber(a: number | null | undefined, b: number | null) {
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  return Number(a) === Number(b);
+}
+
+function sameJsonObject(a: Record<string, unknown> | null | undefined, b: Record<string, unknown>) {
+  return JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
+}
+
+function isImageOnlyCatalogChange(current: CatalogItemRow, formData: FormData) {
+  const compareAtAmountRaw = asText(formData.get("compare_at_amount"));
+  const compareAtAmount = compareAtAmountRaw
+    ? asNonNegativeNumber(formData.get("compare_at_amount"))
+    : null;
+  const { metadata, error: metadataError } = parseMetadata(asText(formData.get("metadata_extra")));
+  if (metadataError) return false;
+
+  return (
+    asText(formData.get("code")) === current.code &&
+    asText(formData.get("name")) === current.name &&
+    asText(formData.get("site_id")) === current.site_id &&
+    asText(formData.get("product_id")) === (current.product_id ?? "") &&
+    asText(formData.get("description")) === (current.description ?? "") &&
+    asText(formData.get("commercial_collection_id")) === (current.commercial_collection_id ?? "") &&
+    asText(formData.get("commercial_category_id")) === (current.commercial_category_id ?? "") &&
+    asNonNegativeNumber(formData.get("price_amount")) === Number(current.price_amount ?? 0) &&
+    sameOptionalNumber(current.compare_at_amount, compareAtAmount) &&
+    Math.round(asNonNegativeNumber(formData.get("sort_order"))) === Number(current.sort_order ?? 0) &&
+    asBool(formData.get("is_active")) === current.is_active &&
+    asBool(formData.get("is_featured")) === current.is_featured &&
+    sameStringList(current.badges, parseBadgesCsv(asText(formData.get("badges_csv")))) &&
+    sameStringList(current.fulfillment_modes, parseFulfillmentModes(formData)) &&
+    sameJsonObject(current.metadata, metadata) &&
+    asText(formData.get("image_url")) !== (current.image_url ?? "")
+  );
+}
+
 function parseMetadata(extraRaw: string) {
   if (!extraRaw) return { metadata: {}, error: "" };
   try {
@@ -274,6 +318,31 @@ async function updateMenuItem(formData: FormData) {
 
   if (!id || !code || !name || !siteId || !productId || !commercialCollectionId || !commercialCategoryId) {
     redirect(`/menu/${id}?error=${encodeURIComponent("Faltan campos obligatorios.")}`);
+  }
+
+  const admin = createAdminClient();
+  const { data: currentItem } = await admin
+    .schema("pass")
+    .from("catalog_items")
+    .select("id,code,name,description,site_id,product_id,commercial_collection_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (currentItem && isImageOnlyCatalogChange(currentItem as CatalogItemRow, formData)) {
+    const { error: imageError } = await supabase
+      .schema("pass")
+      .rpc("update_catalog_item_image", {
+        p_item_id: id,
+        p_image_url: asText(formData.get("image_url")) || null,
+      });
+
+    if (imageError) {
+      redirect(`/menu/${id}?error=${encodeURIComponent(imageError.message)}`);
+    }
+
+    revalidatePath(`/menu/${id}`);
+    revalidatePath("/menu");
+    redirect("/menu?ok=" + encodeURIComponent("Foto actualizada."));
   }
 
   const priceAmount = asNonNegativeNumber(formData.get("price_amount"));

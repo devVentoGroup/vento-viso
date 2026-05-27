@@ -31,21 +31,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  const { data: employee } = await supabase
-    .from("employees")
-    .select("role")
-    .eq("id", userData.user.id)
-    .maybeSingle();
-  const role = String(employee?.role ?? "").toLowerCase();
-  if (!["propietario", "gerente_general"].includes(role)) {
-    return NextResponse.json({ error: "Sin permisos para subir imagenes" }, { status: 403 });
+  const { data: canManageImages, error: permissionErr } = await supabase.rpc("has_permission", {
+    p_permission_code: "viso.menu.images.manage",
+  });
+
+  if (permissionErr || !canManageImages) {
+    return NextResponse.json({ error: "Sin permisos para subir imágenes" }, { status: 403 });
   }
 
   let formData: FormData;
   try {
     formData = await req.formData();
   } catch {
-    return NextResponse.json({ error: "Formato de solicitud invalido" }, { status: 400 });
+    return NextResponse.json({ error: "Formato de solicitud inválido" }, { status: 400 });
   }
 
   const file = formData.get("file") as File | null;
@@ -59,7 +57,7 @@ export async function POST(req: Request) {
 
   const mime = file.type?.toLowerCase() ?? "";
   if (!ALLOWED_TYPES.includes(mime)) {
-    return NextResponse.json({ error: "Solo se permiten imagenes" }, { status: 400 });
+    return NextResponse.json({ error: "Solo se permiten imágenes" }, { status: 400 });
   }
 
   const rawCode = (formData.get("code") as string)?.trim() || "product";
