@@ -40,6 +40,16 @@ type CatalogItemRow = {
   metadata: Record<string, unknown> | null;
 };
 
+type CatalogItemPresentationRow = {
+  catalog_item_id: string;
+  surface: string;
+  card_layout: string;
+  opens_detail_modal: boolean | null;
+  is_highlighted: boolean | null;
+  sort_weight: number | null;
+  metadata: Record<string, unknown> | null;
+};
+
 type CommercialCategoryRow = {
   id: string;
   site_id: string;
@@ -93,6 +103,11 @@ function parseFulfillmentModes(formData: FormData) {
   if (asBool(formData.get("fulfillment_on_premise"))) modes.push("on_premise");
   if (modes.length === 0) modes.push("delivery");
   return modes;
+}
+
+function parsePassCardLayout(value: FormDataEntryValue | string | null | undefined) {
+  const layout = typeof value === "string" ? value.trim() : "";
+  return layout === "featured" ? "featured" : "compact";
 }
 
 function sameStringList(a: string[] | null | undefined, b: string[]) {
@@ -320,15 +335,33 @@ async function updateMenuItem(formData: FormData) {
     redirect(`/menu/${id}?error=${encodeURIComponent("Faltan campos obligatorios.")}`);
   }
 
-  const admin = createAdminClient();
-  const { data: currentItem } = await admin
-    .schema("pass")
-    .from("catalog_items")
-    .select("id,code,name,description,site_id,product_id,commercial_collection_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
-    .eq("id", id)
-    .maybeSingle();
+  const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
 
-  if (currentItem && isImageOnlyCatalogChange(currentItem as CatalogItemRow, formData)) {
+  const admin = createAdminClient();
+  const [{ data: currentItem }, { data: currentPresentationRaw }] = await Promise.all([
+    admin
+      .schema("pass")
+      .from("catalog_items")
+      .select("id,code,name,description,site_id,product_id,commercial_collection_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
+      .eq("id", id)
+      .maybeSingle(),
+    admin
+      .schema("pass")
+      .from("catalog_item_presentation")
+      .select("catalog_item_id,surface,card_layout,opens_detail_modal,is_highlighted,sort_weight,metadata")
+      .eq("catalog_item_id", id)
+      .eq("surface", "vento_pass_menu")
+      .maybeSingle(),
+  ]);
+
+  const currentPresentation = (currentPresentationRaw ?? null) as CatalogItemPresentationRow | null;
+  const currentPassCardLayout = parsePassCardLayout(currentPresentation?.card_layout);
+
+  if (
+    currentItem &&
+    currentPassCardLayout === passCardLayout &&
+    isImageOnlyCatalogChange(currentItem as CatalogItemRow, formData)
+  ) {
     const { error: imageError } = await supabase
       .schema("pass")
       .rpc("update_catalog_item_image", {
@@ -414,6 +447,26 @@ async function updateMenuItem(formData: FormData) {
     redirect(`/menu/${id}?error=${encodeURIComponent(error.message)}`);
   }
 
+  const { error: presentationError } = await supabase
+    .schema("pass")
+    .from("catalog_item_presentation")
+    .upsert(
+      {
+        catalog_item_id: id,
+        surface: "vento_pass_menu",
+        card_layout: passCardLayout,
+        opens_detail_modal: currentPresentation?.opens_detail_modal ?? false,
+        is_highlighted: passCardLayout === "featured",
+        sort_weight: currentPresentation?.sort_weight ?? 0,
+        metadata: currentPresentation?.metadata ?? {},
+      },
+      { onConflict: "catalog_item_id,surface" },
+    );
+
+  if (presentationError) {
+    redirect(`/menu/${id}?error=${encodeURIComponent(presentationError.message)}`);
+  }
+
   revalidatePath(`/menu/${id}`);
   revalidatePath("/menu");
   redirect("/menu?ok=" + encodeURIComponent("Item actualizado."));
@@ -481,7 +534,13 @@ export default async function MenuItemDetailPage({
   });
   const supabase = createAdminClient();
 
-  const [{ data: item }, { data: sitesRaw }, { data: categoriesRaw }, { data: collectionsRaw }] = await Promise.all([
+  const [
+    { data: item },
+    { data: sitesRaw },
+    { data: categoriesRaw },
+    { data: collectionsRaw },
+    { data: presentationRaw },
+  ] = await Promise.all([
     supabase
       .schema("pass").from("catalog_items")
       .select("id,code,name,description,site_id,product_id,commercial_collection_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
@@ -502,6 +561,13 @@ export default async function MenuItemDetailPage({
       .eq("is_active", true)
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true }),
+    supabase
+      .schema("pass")
+      .from("catalog_item_presentation")
+      .select("catalog_item_id,surface,card_layout,opens_detail_modal,is_highlighted,sort_weight,metadata")
+      .eq("catalog_item_id", id)
+      .eq("surface", "vento_pass_menu")
+      .maybeSingle(),
   ]);
 
   const { data: sellOptionsRaw } = await supabase
@@ -581,6 +647,7 @@ export default async function MenuItemDetailPage({
   }
 
   const row = item as CatalogItemRow;
+  const presentation = (presentationRaw ?? null) as CatalogItemPresentationRow | null;
   const sites = (sitesRaw ?? []) as SiteRow[];
   const metadata = (row.metadata ?? {}) as Record<string, unknown>;
 
@@ -623,6 +690,7 @@ export default async function MenuItemDetailPage({
           fulfillment_pickup: (row.fulfillment_modes ?? []).includes("pickup"),
           fulfillment_on_premise: (row.fulfillment_modes ?? []).includes("on_premise"),
           metadata_extra: Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : "",
+          pass_card_layout: parsePassCardLayout(presentation?.card_layout),
         }}
       />
 

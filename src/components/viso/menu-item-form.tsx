@@ -66,6 +66,7 @@ type MenuItemFormValues = {
   fulfillment_pickup: boolean;
   fulfillment_on_premise: boolean;
   metadata_extra: string;
+  pass_card_layout?: "compact" | "featured" | string;
 };
 
 type MenuItemFormProps = {
@@ -141,6 +142,9 @@ export function MenuItemForm({
   const [categoryLabel] = useState(initial.category_label);
   const [badgesCsv, setBadgesCsv] = useState(initial.badges_csv);
   const [imageUrl, setImageUrl] = useState(initial.image_url);
+  const [passCardLayout, setPassCardLayout] = useState(
+    initial.pass_card_layout === "featured" ? "featured" : "compact",
+  );
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
 
@@ -586,7 +590,46 @@ export function MenuItemForm({
               </label>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-4 sm:col-span-2">
+          <div className="space-y-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 sm:col-span-2">
+            <div>
+              <div className="ui-label">Visualización en Pass</div>
+              <p className="ui-caption">
+                Define cómo se presenta este producto en el menú comercial. La opción destacada ocupa más ancho y permite más detalle visual.
+              </p>
+            </div>
+
+            <input type="hidden" name="pass_card_layout" value={passCardLayout} />
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setPassCardLayout("compact")}
+                className={`rounded-2xl border p-4 text-left transition ${passCardLayout === "compact"
+                    ? "border-[var(--ui-brand)] bg-white shadow-sm"
+                    : "border-[var(--ui-border)] bg-white/70"
+                  }`}
+              >
+                <div className="text-sm font-bold text-[var(--ui-text)]">Compacta</div>
+                <div className="mt-1 text-xs text-[var(--ui-muted)]">
+                  Card vertical en grilla de 2 columnas. Ideal para productos genéricos o de alta rotación.
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPassCardLayout("featured")}
+                className={`rounded-2xl border p-4 text-left transition ${passCardLayout === "featured"
+                    ? "border-[var(--ui-brand)] bg-white shadow-sm"
+                    : "border-[var(--ui-border)] bg-white/70"
+                  }`}
+              >
+                <div className="text-sm font-bold text-[var(--ui-text)]">Destacada</div>
+                <div className="mt-1 text-xs text-[var(--ui-muted)]">
+                  Card horizontal con más protagonismo. Ideal para combos, lanzamientos o productos estratégicos.
+                </div>
+              </button>
+            </div>
+
             <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
               <input type="checkbox" name="is_featured" defaultChecked={initial.is_featured} />
               Mostrar en destacados

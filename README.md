@@ -1,34 +1,33 @@
-# Vento VISO
+﻿# VISO
 
-App de gerencia para administrar trabajadores, usuarios de Vento Pass y negocios.
+VISO es el backoffice gerencial de Vento OS para personal, negocios, menu comercial, Pass, contenido web y vistas administrativas.
 
-## Setup rapido
+## Estado actual
 
-1. Copia `.env.example` a `.env.local` y completa las variables.
-2. Aplica migraciones de `supabase/migrations` en tu BD.
-3. Instala dependencias: `npm install`.
-4. Levanta el proyecto: `npm run dev`.
+- Staff, permisos, documentos, fotos, asistencia y calendario.
+- Planner semanal y foundation heuristica/AI para horarios.
+- Negocios/sedes y branding.
+- Menu comercial, categorias comerciales, colecciones y productos.
+- Usuarios Pass, delivery rates y CMS web.
+- Health endpoint y pantallas de error para diagnostico de produccion.
 
-### Variables de entorno en Vercel
+## Documentacion vigente
 
-Si en producción ves **500 Internal Server Error** y en el navegador solo aparece un mensaje genérico de Server Components:
+- `docs/ESTADO-ACTUAL-VISO-2026-05-28.md`
+- `docs/VISO-SCHEDULING-AI-FOUNDATION.md` como diseño tecnico de planner AI.
+- Los documentos historicos VISO/ANIMA de marzo fueron eliminados; el estado actual vive en `docs/ESTADO-ACTUAL-VISO-2026-05-28.md`.
 
-1. **Comprueba env en el deploy**: Abre `https://viso.ventogroup.co/api/health`. Si devuelve `503` y un array `missing`, faltan variables en Vercel (Settings → Environment Variables). Añade al menos:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (o `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`)
-   - `SUPABASE_SERVICE_ROLE_KEY`
+## Desarrollo
 
-2. **Ver el error real**: En el dashboard de Vercel → tu proyecto → **Logs** (o **Deployments** → último deploy → **Functions**). Ahí aparece el mensaje y stack del error del servidor (p. ej. "SUPABASE_SERVICE_ROLE_KEY is required").
+```bash
+npm install
+npm run dev
+```
 
-## Flujo de alta de negocio
+## Variables de entorno clave
 
-1. Entra a `Negocios` -> `Crear negocio`.
-2. Completa datos de sede (code, nombre, tipo, direccion, coords).
-3. Completa el branding de Vento Pass (logo, colores, tags).
-4. Revisa la vista previa y guarda.
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` o `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
-## Notas
-
-- El bucket `pass-satellite-logos` debe existir y estar en modo publico.
-- El bucket `website-media` se usa para imagenes/videos del sitio `ventogroup.co`.
-- Las politicas de RLS del migration `20260309000000_viso_pass_admin_policies.sql` habilitan escritura para propietario y gerente_general.
+Para diagnostico en produccion: `/api/health`.

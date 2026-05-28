@@ -79,6 +79,11 @@ function parseFulfillmentModes(formData: FormData) {
   return modes;
 }
 
+function parsePassCardLayout(value: FormDataEntryValue | string | null | undefined) {
+  const layout = typeof value === "string" ? value.trim() : "";
+  return layout === "featured" ? "featured" : "compact";
+}
+
 function toOptionalNumber(value: number | string | null | undefined) {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -418,6 +423,8 @@ async function createMenuItem(formData: FormData) {
     ? asNonNegativeNumber(formData.get("compare_at_amount"))
     : null;
 
+  const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
+
   const referencesValidation = await validateCommercialMenuReferences(
     supabase,
     productId,
@@ -466,28 +473,57 @@ async function createMenuItem(formData: FormData) {
     recipe_cost_amount: referencesValidation.recipeCostAmount,
   };
 
-  const { error } = await supabase.schema("pass").from("catalog_items").insert({
-    code,
-    name,
-    site_id: siteId,
-    product_id: productId,
-    description: asText(formData.get("description")) || null,
-    commercial_collection_id: commercialCollectionId,
-    commercial_category_id: commercialCategoryId,
-    category_label: referencesValidation.categoryLabel,
-    image_url: asText(formData.get("image_url")) || null,
-    price_amount: priceAmount,
-    compare_at_amount: compareAtAmount,
-    sort_order: sortOrder,
-    is_active: asBool(formData.get("is_active")),
-    is_featured: asBool(formData.get("is_featured")),
-    badges: parseBadgesCsv(asText(formData.get("badges_csv"))),
-    fulfillment_modes: parseFulfillmentModes(formData),
-    metadata: commercialMetadata,
-  });
+  const { data: createdItem, error } = await supabase
+    .schema("pass")
+    .from("catalog_items")
+    .insert({
+      code,
+      name,
+      site_id: siteId,
+      product_id: productId,
+      description: asText(formData.get("description")) || null,
+      commercial_collection_id: commercialCollectionId,
+      commercial_category_id: commercialCategoryId,
+      category_label: referencesValidation.categoryLabel,
+      image_url: asText(formData.get("image_url")) || null,
+      price_amount: priceAmount,
+      compare_at_amount: compareAtAmount,
+      sort_order: sortOrder,
+      is_active: asBool(formData.get("is_active")),
+      is_featured: asBool(formData.get("is_featured")),
+      badges: parseBadgesCsv(asText(formData.get("badges_csv"))),
+      fulfillment_modes: parseFulfillmentModes(formData),
+      metadata: commercialMetadata,
+    })
+    .select("id")
+    .single();
 
   if (error) {
     redirect("/menu/new?error=" + encodeURIComponent(error.message));
+  }
+
+  if (!createdItem?.id) {
+    redirect("/menu/new?error=" + encodeURIComponent("Item creado sin identificador."));
+  }
+
+  const { error: presentationError } = await supabase
+    .schema("pass")
+    .from("catalog_item_presentation")
+    .upsert(
+      {
+        catalog_item_id: createdItem.id,
+        surface: "vento_pass_menu",
+        card_layout: passCardLayout,
+        opens_detail_modal: false,
+        is_highlighted: passCardLayout === "featured",
+        sort_weight: 0,
+        metadata: {},
+      },
+      { onConflict: "catalog_item_id,surface" },
+    );
+
+  if (presentationError) {
+    redirect("/menu/new?error=" + encodeURIComponent(presentationError.message));
   }
 
   redirect("/menu?ok=" + encodeURIComponent("Item creado."));
@@ -678,6 +714,7 @@ export default async function NewMenuItemPage({
           fulfillment_pickup: true,
           fulfillment_on_premise: true,
           metadata_extra: "",
+          pass_card_layout: "compact",
         }}
       />
     </div>
