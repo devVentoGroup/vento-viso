@@ -76,6 +76,35 @@ export default async function WebsiteBlockNewPage({
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
 
+      {/* Referencia rápida de block keys */}
+      <details className="ui-panel">
+        <summary className="cursor-pointer font-medium text-sm py-1">📋 Block keys disponibles (referencia rápida)</summary>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 text-xs text-[var(--ui-text-muted)]">
+          <div>
+            <div className="font-semibold text-[var(--ui-text)] mb-1">Home (page_slug: home)</div>
+            <ul className="space-y-0.5">
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">hero_slide_1</code> — Primer slide del hero</li>
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">hero_slide_2</code> — Segundo slide</li>
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">hero_slide_3</code> — Tercer slide</li>
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">home_editorial_1</code> — Sección intro editorial (tipo: editorial_band)</li>
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">home_editorial_2</code> — Sección statement (tipo: editorial_band)</li>
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">home_image_banner</code> — Banner full-width</li>
+            </ul>
+          </div>
+          <div>
+            <div className="font-semibold text-[var(--ui-text)] mb-1">Otras páginas</div>
+            <ul className="space-y-0.5">
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">restaurantes_experience</code> — Editorial restaurantes</li>
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">restaurantes_banner</code> — Banner restaurantes</li>
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">servicios_intro</code> — Intro servicios</li>
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">servicios_banner</code> — Banner servicios</li>
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">eventos_spaces</code> — Espacios eventos</li>
+              <li><code className="bg-[var(--ui-bg-subtle)] px-1 rounded">eventos_banner</code> — Banner eventos</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
       <form action={createWebsiteBlock} className="space-y-6">
         <div className="ui-panel space-y-4">
           <div className="ui-h3">Identificacion</div>
@@ -90,7 +119,11 @@ export default async function WebsiteBlockNewPage({
             </label>
             <label className="space-y-2">
               <span className="ui-label">Tipo de bloque</span>
-              <input name="block_type" className="ui-input" defaultValue="content" />
+              <select name="block_type" className="ui-input" defaultValue="content">
+                <option value="content">content (banners, intros)</option>
+                <option value="hero_slide">hero_slide (slides del home)</option>
+                <option value="editorial_band">editorial_band (home_editorial_*)</option>
+              </select>
             </label>
           </div>
         </div>

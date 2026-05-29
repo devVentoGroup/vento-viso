@@ -40,13 +40,27 @@ const PAGE_NAMES: Record<string, string> = {
 
 // Nombres amigables para los bloques (secciones editables del sitio)
 const BLOCK_NAMES: Record<string, string> = {
+  // Home
+  hero_main: "Hero principal — Home",
+  hero_slide_1: "Slide 1 del hero — Home",
+  hero_slide_2: "Slide 2 del hero — Home",
+  hero_slide_3: "Slide 3 del hero — Home",
+  hero_slide_4: "Slide 4 del hero — Home",
+  home_editorial_1: "Sección editorial intro — Home",
+  home_editorial_2: "Sección editorial statement — Home",
+  home_image_banner: "Banner de imagen full-width — Home",
+  home_event_spaces_feature: "Sección espacios de eventos — Home",
+  // Restaurantes
   restaurantes_experience: "Sección editorial — Restaurantes",
-  restaurantes_banner: "Imagen de fondo — Restaurantes",
-  eventos_spaces: "Sección espacios para eventos",
-  eventos_banner: "Imagen de fondo — Eventos",
+  restaurantes_banner: "Banner de imagen — Restaurantes",
+  // Servicios
   servicios_intro: "Sección intro — Servicios",
-  servicios_banner: "Imagen de fondo — Servicios",
-  detail_hero: "Foto principal / Hero del detalle",
+  servicios_banner: "Banner de imagen — Servicios",
+  // Eventos
+  eventos_spaces: "Sección espacios — Eventos",
+  eventos_banner: "Banner de imagen — Eventos",
+  // Detalle
+  detail_hero: "Foto hero — Página detalle",
 };
 
 // Nombres amigables para las categorías
