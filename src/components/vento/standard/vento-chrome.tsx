@@ -1,10 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-
-import { createClient } from "@/lib/supabase/client";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { AppSwitcher } from "./app-switcher";
 import { ProfileMenu } from "./profile-menu";
@@ -14,6 +12,21 @@ type SiteOption = {
   id: string;
   name: string | null;
   site_type?: string | null;
+};
+
+type AppStatus = "active" | "soon";
+type AppAccess = "enabled" | "disabled" | "soon";
+
+type AppSwitcherItem = {
+  id: string;
+  name: string;
+  description: string;
+  href: string;
+  logoSrc: string;
+  brandColor: string;
+  status: AppStatus;
+  access: AppAccess;
+  group: "Workspace" | "Operacion" | "Proximamente";
 };
 
 type NavItem = {
@@ -36,6 +49,8 @@ type VentoChromeProps = {
   email?: string | null;
   sites: SiteOption[];
   activeSiteId: string;
+  appSwitcherItems: AppSwitcherItem[];
+  navGroups: NavGroup[];
 };
 
 const APP_ENTITY =
@@ -48,74 +63,28 @@ const APP_ENTITY =
     | "origo"
     | "anima"
     | "aura") ?? "viso";
+
 const APP_NAME = process.env.NEXT_PUBLIC_VENTO_APP_NAME ?? "VISO";
+
 const APP_TAGLINE =
   process.env.NEXT_PUBLIC_VENTO_APP_TAGLINE ?? "Gerencia y auditoria";
 
-type IconName = "dashboard" | "accounting" | "users" | "calendar" | "store" | "sparkles" | "package" | "menu" | "fileText" | "briefcase" | "phone";
-
-type NavigationRow = {
-  group_label: string | null;
-  group_order: number | null;
-  label: string | null;
-  description: string | null;
-  href: string | null;
-  icon: string | null;
-  required_permission_code: string | null;
-  sort_order: number | null;
-};
-
-const APP_CODE = APP_ENTITY === "default" ? "viso" : APP_ENTITY;
-
-const ICON_NAMES = new Set<IconName>([
-  "dashboard",
-  "accounting",
-  "users",
-  "calendar",
-  "store",
-  "sparkles",
-  "package",
-  "menu",
-  "fileText",
-  "briefcase",
-  "phone",
-]);
-
-function normalizeIconName(value: string | null | undefined): IconName | undefined {
-  const icon = String(value ?? "").trim();
-  return ICON_NAMES.has(icon as IconName) ? (icon as IconName) : undefined;
-}
-
-function buildNavGroups(rows: NavigationRow[]): NavGroup[] {
-  const groups = new Map<string, NavItem[]>();
-
-  for (const row of rows) {
-    const groupLabel = String(row.group_label ?? "").trim();
-    const href = String(row.href ?? "").trim();
-    const label = String(row.label ?? "").trim();
-    const permissionCode = String(row.required_permission_code ?? "").trim();
-
-    if (!groupLabel || !href || !label || !permissionCode) continue;
-
-    const current = groups.get(groupLabel) ?? [];
-    current.push({
-      href,
-      label,
-      description: row.description ?? undefined,
-      icon: normalizeIconName(row.icon),
-      permissionCode,
-    });
-    groups.set(groupLabel, current);
-  }
-
-  return Array.from(groups.entries()).map(([label, items]) => ({
-    label,
-    items,
-  }));
-}
+type IconName =
+  | "dashboard"
+  | "accounting"
+  | "users"
+  | "calendar"
+  | "store"
+  | "sparkles"
+  | "package"
+  | "menu"
+  | "fileText"
+  | "briefcase"
+  | "phone";
 
 function Icon({ name }: { name?: IconName }) {
   const common = "none";
+
   switch (name) {
     case "dashboard":
       return (
@@ -126,6 +95,7 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M4 13h7v7H4z" />
         </svg>
       );
+
     case "accounting":
       return (
         <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
@@ -140,6 +110,7 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M8 4h8" />
         </svg>
       );
+
     case "users":
       return (
         <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
@@ -149,6 +120,7 @@ function Icon({ name }: { name?: IconName }) {
           <circle cx="8" cy="9" r="3" />
         </svg>
       );
+
     case "calendar":
       return (
         <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
@@ -163,6 +135,7 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M12 18h.01" />
         </svg>
       );
+
     case "store":
       return (
         <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
@@ -171,6 +144,7 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M9 19v-6h6v6" />
         </svg>
       );
+
     case "sparkles":
       return (
         <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
@@ -179,6 +153,7 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M18 14l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2z" />
         </svg>
       );
+
     case "package":
       return (
         <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
@@ -187,6 +162,7 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M3 8.5l9 4.5 9-4.5" />
         </svg>
       );
+
     case "menu":
       return (
         <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
@@ -198,6 +174,7 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M4 7h2" />
         </svg>
       );
+
     case "fileText":
       return (
         <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
@@ -208,6 +185,7 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M10 9H8" />
         </svg>
       );
+
     case "briefcase":
       return (
         <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
@@ -216,6 +194,7 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M3 11h18" />
         </svg>
       );
+
     case "phone":
       return (
         <svg viewBox="0 0 24 24" fill={common} stroke="currentColor" strokeWidth="1.6">
@@ -224,6 +203,7 @@ function Icon({ name }: { name?: IconName }) {
           <path d="M10 5.5h4" />
         </svg>
       );
+
     default:
       return null;
   }
@@ -254,14 +234,19 @@ function SidebarLink({
       href={item.href}
       onClick={onNavigate}
       title={collapsed ? item.label : undefined}
-      className={`ui-sidebar-item ${active ? "active" : ""} ${collapsed ? "lg:h-10 lg:w-10 lg:items-center lg:justify-center lg:gap-0 lg:overflow-hidden lg:p-0" : ""
-        }`}
+      className={`ui-sidebar-item ${active ? "active" : ""} ${
+        collapsed
+          ? "lg:h-10 lg:w-10 lg:items-center lg:justify-center lg:gap-0 lg:overflow-hidden lg:p-0"
+          : ""
+      }`}
     >
       <span className="ui-sidebar-item-icon">
         <Icon name={item.icon} />
       </span>
+
       <span className={`ui-sidebar-item-content ${collapsed ? "lg:!hidden" : ""}`}>
         <span className="ui-sidebar-item-title">{item.label}</span>
+
         {item.description ? (
           <span className="ui-sidebar-item-desc">{item.description}</span>
         ) : null}
@@ -277,14 +262,15 @@ export function VentoChrome({
   email,
   sites,
   activeSiteId,
+  appSwitcherItems,
+  navGroups,
 }: VentoChromeProps) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [navGroups, setNavGroups] = useState<NavGroup[]>([]);
-  const [navLoading, setNavLoading] = useState(true);
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
+
     try {
       return window.localStorage.getItem("vento:sidebar-collapsed") === "1";
     } catch {
@@ -300,68 +286,9 @@ export function VentoChrome({
     }
   }, [sidebarCollapsed]);
 
-  const currentSiteId = searchParams.get("site_id") ?? activeSiteId ?? "";
-  const currentSite = useMemo(
-    () => sites.find((site) => site.id === currentSiteId),
-    [sites, currentSiteId]
-  );
+  const currentSiteId = activeSiteId ?? "";
+  const currentSite = sites.find((site) => site.id === currentSiteId);
   const currentSiteLabel = currentSite?.name ?? currentSiteId ?? "Sin sede";
-
-  useEffect(() => {
-    let activeRequest = true;
-    const supabase = createClient();
-
-    setNavLoading(true);
-
-    supabase
-      .from("app_navigation_items")
-      .select("group_label,group_order,label,description,href,icon,required_permission_code,sort_order")
-      .eq("app_code", APP_CODE)
-      .eq("is_active", true)
-      .order("group_order", { ascending: true })
-      .order("sort_order", { ascending: true })
-      .then(async ({
-        data,
-        error,
-      }: {
-        data: NavigationRow[] | null;
-        error: { message?: string } | null;
-      }) => {
-        if (!activeRequest) return;
-
-        if (error) {
-          setNavGroups([]);
-          setNavLoading(false);
-          return;
-        }
-
-        const rows = data ?? [];
-
-        const permissionResults = await Promise.all(
-          rows.map((row) =>
-            supabase.rpc("has_permission", {
-              p_permission_code: row.required_permission_code,
-              p_site_id: currentSiteId || null,
-              p_area_id: null,
-            })
-          )
-        );
-
-        if (!activeRequest) return;
-
-        const allowedRows = rows.filter((_, index) => {
-          const result = permissionResults[index];
-          return !result?.error && Boolean(result?.data);
-        });
-
-        setNavGroups(buildNavGroups(allowedRows));
-        setNavLoading(false);
-      });
-
-    return () => {
-      activeRequest = false;
-    };
-  }, [currentSiteId]);
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -372,15 +299,21 @@ export function VentoChrome({
     <div className="min-h-screen bg-[var(--ui-bg)] text-[var(--ui-text)]">
       <div className="flex min-h-screen">
         <div
-          className={`fixed inset-0 z-40 bg-black/30 transition lg:hidden ${menuOpen ? "opacity-100" : "pointer-events-none opacity-0"
-            }`}
+          className={`fixed inset-0 z-40 bg-black/30 transition lg:hidden ${
+            menuOpen ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
           onClick={() => setMenuOpen(false)}
           aria-hidden="true"
         />
 
         <aside
-          className={`ui-sidebar fixed left-0 top-0 z-50 flex h-full w-72 flex-col gap-4 overflow-hidden px-4 py-5 transition-[width,padding,transform] duration-200 ease-out lg:static lg:translate-x-0 lg:shadow-none ${menuOpen ? "translate-x-0" : "-translate-x-full"
-            } ${sidebarCollapsed ? "lg:w-16 lg:items-center lg:px-2" : "lg:w-72 lg:items-stretch lg:px-4"}`}
+          className={`ui-sidebar fixed left-0 top-0 z-50 flex h-full w-72 flex-col gap-4 overflow-hidden px-4 py-5 transition-[width,padding,transform] duration-200 ease-out lg:static lg:translate-x-0 lg:shadow-none ${
+            menuOpen ? "translate-x-0" : "-translate-x-full"
+          } ${
+            sidebarCollapsed
+              ? "lg:w-16 lg:items-center lg:px-2"
+              : "lg:w-72 lg:items-stretch lg:px-4"
+          }`}
         >
           <div className={`flex items-center ${sidebarCollapsed ? "lg:justify-center" : "justify-between"}`}>
             <div className={sidebarCollapsed ? "lg:hidden" : ""}>
@@ -390,11 +323,13 @@ export function VentoChrome({
                 subtitle={APP_TAGLINE}
               />
             </div>
+
             <button
               type="button"
               onClick={() => setSidebarCollapsed((value) => !value)}
-              className={`hidden h-10 w-10 items-center justify-center text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)] lg:inline-flex ${sidebarCollapsed ? "group rounded-xl" : ""
-                }`}
+              className={`hidden h-10 w-10 items-center justify-center text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)] lg:inline-flex ${
+                sidebarCollapsed ? "group rounded-xl" : ""
+              }`}
               aria-label={sidebarCollapsed ? "Expandir menu lateral" : "Contraer menu lateral"}
               title={sidebarCollapsed ? "Expandir menu" : "Contraer menu"}
             >
@@ -403,6 +338,7 @@ export function VentoChrome({
                   <span className="block group-hover:hidden">
                     <VentoLogo entity={APP_ENTITY} showText={false} />
                   </span>
+
                   <span className="hidden group-hover:block">
                     <SidebarToggleIcon />
                   </span>
@@ -411,6 +347,7 @@ export function VentoChrome({
                 <SidebarToggleIcon />
               )}
             </button>
+
             <button
               type="button"
               onClick={() => setMenuOpen(false)}
@@ -424,17 +361,14 @@ export function VentoChrome({
             <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
               Sede activa
             </div>
-            <div className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{currentSiteLabel}</div>
+
+            <div className="mt-1 text-sm font-semibold text-[var(--ui-text)]">
+              {currentSiteLabel}
+            </div>
           </div>
 
           <nav className={`flex flex-1 flex-col gap-4 overflow-y-auto pr-1 ${sidebarCollapsed ? "lg:items-center lg:pr-0" : ""}`}>
-            {navLoading ? (
-              <div className={`px-2 text-sm text-[var(--ui-muted)] ${sidebarCollapsed ? "lg:!hidden" : ""}`}>
-                Cargando menú...
-              </div>
-            ) : null}
-
-            {!navLoading && navGroups.length === 0 ? (
+            {navGroups.length === 0 ? (
               <div className={`px-2 text-sm text-[var(--ui-muted)] ${sidebarCollapsed ? "lg:!hidden" : ""}`}>
                 No hay pantallas disponibles.
               </div>
@@ -445,6 +379,7 @@ export function VentoChrome({
                 <div className={`px-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] ${sidebarCollapsed ? "lg:!hidden" : ""}`}>
                   {group.label}
                 </div>
+
                 <div className="space-y-1">
                   {group.items.map((item) => (
                     <SidebarLink
@@ -468,30 +403,49 @@ export function VentoChrome({
                 <button
                   type="button"
                   onClick={() => setMenuOpen(true)}
-                  className="inline-flex items-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] h-10 px-3 text-sm font-semibold text-[var(--ui-text)] hover:bg-[var(--ui-surface-2)] sm:h-12 sm:px-4 sm:text-base lg:hidden"
+                  className="inline-flex h-10 items-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 text-sm font-semibold text-[var(--ui-text)] hover:bg-[var(--ui-surface-2)] sm:h-12 sm:px-4 sm:text-base lg:hidden"
                 >
                   Menu
                 </button>
-                <div className="hidden sm:flex items-center gap-3">
+
+                <div className="hidden items-center gap-3 sm:flex">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--ui-surface-2)] ring-1 ring-inset ring-[var(--ui-border)]">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={`/logos/${APP_ENTITY}.svg`} alt={APP_NAME} className="h-6 w-6" />
                   </div>
+
                   <div className="flex flex-col leading-tight">
-                    <span className="text-sm font-semibold text-[var(--ui-text)]">{APP_NAME}</span>
-                    <span className="text-xs text-[var(--ui-muted)]">{APP_TAGLINE}</span>
+                    <span className="text-sm font-semibold text-[var(--ui-text)]">
+                      {APP_NAME}
+                    </span>
+
+                    <span className="text-xs text-[var(--ui-muted)]">
+                      {APP_TAGLINE}
+                    </span>
                   </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <AppSwitcher sites={sites} activeSiteId={currentSiteId} />
-                <ProfileMenu name={displayName} role={role ?? undefined} email={email} sites={sites} />
+                <AppSwitcher
+                  sites={sites}
+                  activeSiteId={currentSiteId}
+                  appSwitcherItems={appSwitcherItems}
+                />
+
+                <ProfileMenu
+                  name={displayName}
+                  role={role ?? undefined}
+                  email={email}
+                  sites={sites}
+                />
               </div>
             </div>
           </header>
 
-          <main className="ui-main min-w-0 flex-1 px-6 py-8 sm:px-8 sm:py-10">{children}</main>
+          <main className="ui-main min-w-0 flex-1 px-6 py-8 sm:px-8 sm:py-10">
+            {children}
+          </main>
         </div>
       </div>
     </div>
