@@ -1,7 +1,11 @@
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
-import { normalizePermissionCode } from "@/lib/auth/permissions";
+import {
+  checkPermission,
+  normalizePermissionCode,
+  type PermissionContext,
+} from "@/lib/auth/permissions";
 import {
   canUseRoleOverride,
   getRoleOverrideFromCookies,
@@ -13,6 +17,8 @@ type GuardOptions = {
   returnTo: string;
   supabase?: Awaited<ReturnType<typeof createClient>>;
   permissionCode?: string | string[];
+  siteId?: string | null;
+  areaId?: string | null;
 };
 
 export async function requireAppAccess({
@@ -20,8 +26,14 @@ export async function requireAppAccess({
   returnTo,
   supabase,
   permissionCode,
+  siteId,
+  areaId,
 }: GuardOptions) {
   const client = supabase ?? (await createClient());
+  const context: PermissionContext = {
+    siteId: siteId ?? null,
+    areaId: areaId ?? null,
+  };
 
   const { data: userRes } = await client.auth.getUser();
   const user = userRes.user ?? null;
@@ -32,14 +44,13 @@ export async function requireAppAccess({
     redirect(`/login?${qs.toString()}`);
   }
 
-  const { data: canAccess, error: accessErr } = await client.rpc("has_permission", {
-    p_permission_code: `${appId}.access`,
-  });
+  const canAccess = await checkPermission(client, appId, "access", context);
 
-  if (accessErr || !canAccess) {
+  if (!canAccess) {
     const qs = new URLSearchParams();
     qs.set("returnTo", returnTo);
-    if (accessErr) qs.set("reason", "no_access");
+    qs.set("reason", "no_access");
+    qs.set("permission", `${appId}.access`);
     redirect(`/no-access?${qs.toString()}`);
   }
 
@@ -70,11 +81,14 @@ export async function requireAppAccess({
     }
 
     if (canOverride) {
+      const overrideContext: PermissionContext = {
+        siteId: context.siteId ?? defaultSiteId,
+        areaId: context.areaId ?? null,
+      };
+
       const checks = await Promise.all(
         normalizedCodes.map((code) =>
-          isPermissionAllowedForRole(client, overrideRole!, appId, code, {
-            siteId: defaultSiteId,
-          })
+          isPermissionAllowedForRole(client, overrideRole!, appId, code, overrideContext)
         )
       );
       const deniedIndex = checks.findIndex((allowed) => !allowed);
@@ -89,11 +103,11 @@ export async function requireAppAccess({
     } else {
       const checks = await Promise.all(
         normalizedCodes.map((code) =>
-          client.rpc("has_permission", { p_permission_code: code })
+          checkPermission(client, appId, code, context)
         )
       );
 
-      const deniedIndex = checks.findIndex((res) => res.error || !res.data);
+      const deniedIndex = checks.findIndex((allowed) => !allowed);
       if (deniedIndex !== -1) {
         const qs = new URLSearchParams();
         qs.set("returnTo", returnTo);

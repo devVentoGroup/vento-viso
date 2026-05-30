@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { createClient } from "@/lib/supabase/client";
+
 import { AppSwitcher } from "./app-switcher";
 import { ProfileMenu } from "./profile-menu";
 import { VentoLogo } from "./vento-logo";
@@ -19,6 +21,7 @@ type NavItem = {
   label: string;
   description?: string;
   icon?: IconName;
+  permissionCode: string;
 };
 
 type NavGroup = {
@@ -49,121 +52,67 @@ const APP_NAME = process.env.NEXT_PUBLIC_VENTO_APP_NAME ?? "VISO";
 const APP_TAGLINE =
   process.env.NEXT_PUBLIC_VENTO_APP_TAGLINE ?? "Gerencia y auditoria";
 
-const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "Inicio",
-    items: [
-      {
-        href: "/",
-        label: "Panel",
-        description: "Resumen general",
-        icon: "dashboard",
-      },
-      {
-        href: "/accounting",
-        label: "Contabilidad",
-        description: "Costos e impuestos",
-        icon: "accounting",
-      },
-    ],
-  },
-  {
-    label: "Libretas",
-    items: [
-      {
-        href: "/staff",
-        label: "Trabajadores",
-        description: "Personal y roles",
-        icon: "users",
-      },
-      {
-        href: "/staff/schedule",
-        label: "Horarios",
-        description: "Planner semanal",
-        icon: "calendar",
-      },
-      {
-        href: "/staff/calendar",
-        label: "Calendario maestro",
-        description: "Contratos, festivos y mantenimientos",
-        icon: "calendar",
-      },
-      {
-        href: "/ops/audit",
-        label: "Auditoria ops",
-        description: "Areas, LOCs y asignaciones",
-        icon: "dashboard",
-      },
-      {
-        href: "/pass-users",
-        label: "Usuarios Pass",
-        description: "Clientes y lealtad",
-        icon: "sparkles",
-      },
-    ],
-  },
-  {
-    label: "Negocios",
-    items: [
-      {
-        href: "/businesses",
-        label: "Negocios",
-        description: "Sedes y Vento Pass",
-        icon: "store",
-      },
-      {
-        href: "/products",
-        label: "Productos fidelización",
-        description: "Canjes y recompensas",
-        icon: "package",
-      },
-      {
-        href: "/menu",
-        label: "Menú comercial",
-        description: "Catalogo comercial",
-        icon: "menu",
-      },
-      {
-        href: "/commercial-categories",
-        label: "Categorías comerciales",
-        description: "Orden por satélite",
-        icon: "menu",
-      },
-      {
-        href: "/delivery-rates",
-        label: "Domicilios",
-        description: "Tarifas por distancia",
-        icon: "store",
-      },
-      {
-        href: "/vacancies",
-        label: "Vacantes",
-        description: "Portal de empleo",
-        icon: "briefcase",
-      },
-      {
-        href: "/content-blocks",
-        label: "Contenido Pass",
-        description: "Textos y bloques de la app",
-        icon: "fileText",
-      },
-      {
-        href: "/app-updates",
-        label: "Actualización app",
-        description: "Versiones y links Store",
-        icon: "phone",
-      },
-      {
-        href: "/website-cms",
-        label: "Website CMS",
-        description: "Contenido de ventogroup.co",
-        icon: "fileText",
-      },
-    ],
-  },
-];
-
 type IconName = "dashboard" | "accounting" | "users" | "calendar" | "store" | "sparkles" | "package" | "menu" | "fileText" | "briefcase" | "phone";
+
+type NavigationRow = {
+  group_label: string | null;
+  group_order: number | null;
+  label: string | null;
+  description: string | null;
+  href: string | null;
+  icon: string | null;
+  required_permission_code: string | null;
+  sort_order: number | null;
+};
+
+const APP_CODE = APP_ENTITY === "default" ? "viso" : APP_ENTITY;
+
+const ICON_NAMES = new Set<IconName>([
+  "dashboard",
+  "accounting",
+  "users",
+  "calendar",
+  "store",
+  "sparkles",
+  "package",
+  "menu",
+  "fileText",
+  "briefcase",
+  "phone",
+]);
+
+function normalizeIconName(value: string | null | undefined): IconName | undefined {
+  const icon = String(value ?? "").trim();
+  return ICON_NAMES.has(icon as IconName) ? (icon as IconName) : undefined;
+}
+
+function buildNavGroups(rows: NavigationRow[]): NavGroup[] {
+  const groups = new Map<string, NavItem[]>();
+
+  for (const row of rows) {
+    const groupLabel = String(row.group_label ?? "").trim();
+    const href = String(row.href ?? "").trim();
+    const label = String(row.label ?? "").trim();
+    const permissionCode = String(row.required_permission_code ?? "").trim();
+
+    if (!groupLabel || !href || !label || !permissionCode) continue;
+
+    const current = groups.get(groupLabel) ?? [];
+    current.push({
+      href,
+      label,
+      description: row.description ?? undefined,
+      icon: normalizeIconName(row.icon),
+      permissionCode,
+    });
+    groups.set(groupLabel, current);
+  }
+
+  return Array.from(groups.entries()).map(([label, items]) => ({
+    label,
+    items,
+  }));
+}
 
 function Icon({ name }: { name?: IconName }) {
   const common = "none";
@@ -305,9 +254,8 @@ function SidebarLink({
       href={item.href}
       onClick={onNavigate}
       title={collapsed ? item.label : undefined}
-      className={`ui-sidebar-item ${active ? "active" : ""} ${
-        collapsed ? "lg:h-10 lg:w-10 lg:items-center lg:justify-center lg:gap-0 lg:overflow-hidden lg:p-0" : ""
-      }`}
+      className={`ui-sidebar-item ${active ? "active" : ""} ${collapsed ? "lg:h-10 lg:w-10 lg:items-center lg:justify-center lg:gap-0 lg:overflow-hidden lg:p-0" : ""
+        }`}
     >
       <span className="ui-sidebar-item-icon">
         <Icon name={item.icon} />
@@ -333,6 +281,8 @@ export function VentoChrome({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [navGroups, setNavGroups] = useState<NavGroup[]>([]);
+  const [navLoading, setNavLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     try {
@@ -357,6 +307,62 @@ export function VentoChrome({
   );
   const currentSiteLabel = currentSite?.name ?? currentSiteId ?? "Sin sede";
 
+  useEffect(() => {
+    let activeRequest = true;
+    const supabase = createClient();
+
+    setNavLoading(true);
+
+    supabase
+      .from("app_navigation_items")
+      .select("group_label,group_order,label,description,href,icon,required_permission_code,sort_order")
+      .eq("app_code", APP_CODE)
+      .eq("is_active", true)
+      .order("group_order", { ascending: true })
+      .order("sort_order", { ascending: true })
+      .then(async ({
+        data,
+        error,
+      }: {
+        data: NavigationRow[] | null;
+        error: { message?: string } | null;
+      }) => {
+        if (!activeRequest) return;
+
+        if (error) {
+          setNavGroups([]);
+          setNavLoading(false);
+          return;
+        }
+
+        const rows = data ?? [];
+
+        const permissionResults = await Promise.all(
+          rows.map((row) =>
+            supabase.rpc("has_permission", {
+              p_permission_code: row.required_permission_code,
+              p_site_id: currentSiteId || null,
+              p_area_id: null,
+            })
+          )
+        );
+
+        if (!activeRequest) return;
+
+        const allowedRows = rows.filter((_, index) => {
+          const result = permissionResults[index];
+          return !result?.error && Boolean(result?.data);
+        });
+
+        setNavGroups(buildNavGroups(allowedRows));
+        setNavLoading(false);
+      });
+
+    return () => {
+      activeRequest = false;
+    };
+  }, [currentSiteId]);
+
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
     return pathname === href || pathname.startsWith(`${href}/`);
@@ -366,17 +372,15 @@ export function VentoChrome({
     <div className="min-h-screen bg-[var(--ui-bg)] text-[var(--ui-text)]">
       <div className="flex min-h-screen">
         <div
-          className={`fixed inset-0 z-40 bg-black/30 transition lg:hidden ${
-            menuOpen ? "opacity-100" : "pointer-events-none opacity-0"
-          }`}
+          className={`fixed inset-0 z-40 bg-black/30 transition lg:hidden ${menuOpen ? "opacity-100" : "pointer-events-none opacity-0"
+            }`}
           onClick={() => setMenuOpen(false)}
           aria-hidden="true"
         />
 
         <aside
-          className={`ui-sidebar fixed left-0 top-0 z-50 flex h-full w-72 flex-col gap-4 overflow-hidden px-4 py-5 transition-[width,padding,transform] duration-200 ease-out lg:static lg:translate-x-0 lg:shadow-none ${
-            menuOpen ? "translate-x-0" : "-translate-x-full"
-          } ${sidebarCollapsed ? "lg:w-16 lg:items-center lg:px-2" : "lg:w-72 lg:items-stretch lg:px-4"}`}
+          className={`ui-sidebar fixed left-0 top-0 z-50 flex h-full w-72 flex-col gap-4 overflow-hidden px-4 py-5 transition-[width,padding,transform] duration-200 ease-out lg:static lg:translate-x-0 lg:shadow-none ${menuOpen ? "translate-x-0" : "-translate-x-full"
+            } ${sidebarCollapsed ? "lg:w-16 lg:items-center lg:px-2" : "lg:w-72 lg:items-stretch lg:px-4"}`}
         >
           <div className={`flex items-center ${sidebarCollapsed ? "lg:justify-center" : "justify-between"}`}>
             <div className={sidebarCollapsed ? "lg:hidden" : ""}>
@@ -389,9 +393,8 @@ export function VentoChrome({
             <button
               type="button"
               onClick={() => setSidebarCollapsed((value) => !value)}
-              className={`hidden h-10 w-10 items-center justify-center text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)] lg:inline-flex ${
-                sidebarCollapsed ? "group rounded-xl" : ""
-              }`}
+              className={`hidden h-10 w-10 items-center justify-center text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)] lg:inline-flex ${sidebarCollapsed ? "group rounded-xl" : ""
+                }`}
               aria-label={sidebarCollapsed ? "Expandir menu lateral" : "Contraer menu lateral"}
               title={sidebarCollapsed ? "Expandir menu" : "Contraer menu"}
             >
@@ -425,7 +428,19 @@ export function VentoChrome({
           </div>
 
           <nav className={`flex flex-1 flex-col gap-4 overflow-y-auto pr-1 ${sidebarCollapsed ? "lg:items-center lg:pr-0" : ""}`}>
-            {NAV_GROUPS.map((group) => (
+            {navLoading ? (
+              <div className={`px-2 text-sm text-[var(--ui-muted)] ${sidebarCollapsed ? "lg:!hidden" : ""}`}>
+                Cargando menú...
+              </div>
+            ) : null}
+
+            {!navLoading && navGroups.length === 0 ? (
+              <div className={`px-2 text-sm text-[var(--ui-muted)] ${sidebarCollapsed ? "lg:!hidden" : ""}`}>
+                No hay pantallas disponibles.
+              </div>
+            ) : null}
+
+            {navGroups.map((group) => (
               <div key={group.label} className="space-y-2">
                 <div className={`px-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] ${sidebarCollapsed ? "lg:!hidden" : ""}`}>
                   {group.label}
@@ -470,7 +485,7 @@ export function VentoChrome({
               </div>
 
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <AppSwitcher sites={sites} activeSiteId={activeSiteId} role={role} />
+                <AppSwitcher sites={sites} activeSiteId={currentSiteId} />
                 <ProfileMenu name={displayName} role={role ?? undefined} email={email} sites={sites} />
               </div>
             </div>

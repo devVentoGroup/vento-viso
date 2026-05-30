@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 
+import { createClient } from "@/lib/supabase/client";
+
 type AppStatus = "active" | "soon";
 type AppAccess = "enabled" | "disabled" | "soon";
 
@@ -26,21 +28,7 @@ type SiteOption = {
 type AppSwitcherProps = {
   sites?: SiteOption[];
   activeSiteId?: string;
-  role?: string | null;
 };
-
-const GLOBAL_OPERATIONS_ROLES = new Set(["propietario", "gerente_general"]);
-const MANAGEMENT_ROLES = new Set(["propietario", "gerente_general", "gerente", "auxiliar_administrativa"]);
-
-function normalizeRole(role?: string | null) {
-  return String(role ?? "").trim().toLowerCase();
-}
-
-function getActiveSiteType(sites: SiteOption[] | undefined, activeSiteId?: string) {
-  if (!sites?.length) return "";
-  const selected = activeSiteId ? sites.find((site) => site.id === activeSiteId) : null;
-  return String((selected ?? sites[0])?.site_type ?? "").trim().toLowerCase();
-}
 
 function DotsIcon() {
   return (
@@ -107,9 +95,11 @@ function AppTile({ app, access, onNavigate }: { app: AppLink; access: AppAccess;
 
 export function AppSwitcher(props: AppSwitcherProps) {
   const [open, setOpen] = useState(false);
+  const [appAccessById, setAppAccessById] = useState<Record<string, AppAccess>>({
+    hub: "enabled",
+  });
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const role = normalizeRole(props.role);
-  const activeSiteType = getActiveSiteType(props.sites, props.activeSiteId);
+  const activeSiteId = props.activeSiteId ?? "";
 
   const apps = useMemo<AppLink[]>(
     () => [
@@ -190,44 +180,57 @@ export function AppSwitcher(props: AppSwitcherProps) {
   const workspace = apps.filter((a) => a.group === "Workspace");
   const operacion = apps.filter((a) => a.group === "Operacion");
   const proximamente = apps.filter((a) => a.group === "Proximamente");
-  const appAccessById = useMemo<Record<string, AppAccess>>(() => {
-    const hasGlobalOps = GLOBAL_OPERATIONS_ROLES.has(role);
-    const hasManagement = MANAGEMENT_ROLES.has(role);
-    const isProductionCenter = activeSiteType === "production_center";
-    const isSatellite = activeSiteType === "satellite";
+  useEffect(() => {
+    let activeRequest = true;
+    const supabase = createClient();
 
-    return {
-      hub: "enabled",
-      nexo:
-        hasGlobalOps ||
-        role === "gerente" ||
-        role === "bodeguero" ||
-        role === "conductor" ||
-        role === "cocinero"
-          ? "enabled"
-          : "disabled",
-      origo:
-        hasGlobalOps || role === "gerente" || (role === "bodeguero" && isProductionCenter)
-          ? "enabled"
-          : "disabled",
-      pulso:
-        hasGlobalOps ||
-        role === "gerente" ||
-        ((role === "cajero" || role === "mesero" || role === "barista" || role === "cocinero") && isSatellite)
-          ? "enabled"
-          : "disabled",
-      viso: hasManagement ? "enabled" : "disabled",
-      fogo:
-        hasGlobalOps ||
-        role === "gerente" ||
-        ((role === "barista" || role === "cocinero") && isSatellite) ||
-        ((role === "cocinero" || role === "panadero" || role === "repostero" || role === "pastelero" || role === "bodeguero") &&
-          isProductionCenter)
-          ? "enabled"
-          : "disabled",
-      aura: "soon",
+    const initialAccess: Record<string, AppAccess> = {};
+    const permissionApps = apps.filter((app) => app.status === "active" && app.id !== "hub");
+
+    for (const app of apps) {
+      if (app.id === "hub") {
+        initialAccess[app.id] = "enabled";
+      } else if (app.status === "soon") {
+        initialAccess[app.id] = "soon";
+      } else {
+        initialAccess[app.id] = "disabled";
+      }
+    }
+
+    setAppAccessById(initialAccess);
+
+    Promise.all(
+      permissionApps.map((app) =>
+        supabase.rpc("has_permission", {
+          p_permission_code: `${app.id}.access`,
+          p_site_id: activeSiteId || null,
+          p_area_id: null,
+        })
+      )
+    )
+      .then((results) => {
+        if (!activeRequest) return;
+
+        const nextAccess = { ...initialAccess };
+
+        results.forEach((result, index) => {
+          const app = permissionApps[index];
+          if (!app) return;
+
+          nextAccess[app.id] = !result.error && Boolean(result.data) ? "enabled" : "disabled";
+        });
+
+        setAppAccessById(nextAccess);
+      })
+      .catch(() => {
+        if (!activeRequest) return;
+        setAppAccessById(initialAccess);
+      });
+
+    return () => {
+      activeRequest = false;
     };
-  }, [activeSiteType, role]);
+  }, [activeSiteId, apps]);
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {

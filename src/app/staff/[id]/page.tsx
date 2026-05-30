@@ -140,19 +140,6 @@ type EmployeeAreaPurposeAssignmentRow = {
   area?: { id: string; site_id: string | null; name: string | null; kind: string | null } | { id: string; site_id: string | null; name: string | null; kind: string | null }[] | null;
 };
 
-const STAFF_PERMISSION_CODES = [
-  "anima.documents.view_all",
-  "anima.documents.upload",
-  "anima.documents.delete",
-  "anima.employee_photos.upload",
-  "viso.access",
-  "viso.staff.read",
-  "viso.staff.manage",
-  "viso.staff.documents.manage",
-  "viso.staff.employee_photos.manage",
-  "viso.staff.permissions.manage",
-] as const;
-
 const PHOTO_MIME_EXTENSIONS: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -929,8 +916,9 @@ async function grantEmployeePermission(formData: FormData) {
 
   const app = Array.isArray(permission?.app) ? permission?.app[0] : permission?.app;
   const fullCode = app?.code && permission?.code ? `${app.code}.${permission.code}` : "";
-  if (permissionError || !permission || !STAFF_PERMISSION_CODES.includes(fullCode as (typeof STAFF_PERMISSION_CODES)[number])) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Permiso no permitido para esta pantalla.")}`);
+
+  if (permissionError || !permission || !fullCode) {
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Permiso inválido o no encontrado.")}`);
   }
 
   let scopeSiteId: string | null = null;
@@ -1258,7 +1246,6 @@ export default async function StaffDetailPage({
     supabase
       .from("app_permissions")
       .select("id,code,name,app:apps(code)")
-      .in("code", STAFF_PERMISSION_CODES.map((code) => code.split(".").slice(1).join(".")))
       .order("code", { ascending: true }),
     supabase
       .from("employee_permissions")
@@ -1361,9 +1348,7 @@ export default async function StaffDetailPage({
         name: item.name,
       };
     })
-    .filter((item): item is StaffPermissionOption =>
-      STAFF_PERMISSION_CODES.includes(`${item.appCode}.${item.code}` as (typeof STAFF_PERMISSION_CODES)[number])
-    )
+    .filter((item): item is StaffPermissionOption => Boolean(item.id && item.appCode && item.code))
     .sort((a, b) => `${a.appCode}.${a.code}`.localeCompare(`${b.appCode}.${b.code}`, "es"));
   type RawEmployeePermission = {
     id: string;
@@ -1382,9 +1367,6 @@ export default async function StaffDetailPage({
         code: permissionRaw.code,
         name: permissionRaw.name,
       };
-      if (!STAFF_PERMISSION_CODES.includes(`${permission.appCode}.${permission.code}` as (typeof STAFF_PERMISSION_CODES)[number])) {
-        return null;
-      }
       return {
         id: item.id,
         isAllowed: item.is_allowed,
