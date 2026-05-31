@@ -14,23 +14,6 @@ type SearchParams = {
   error?: string;
 };
 
-type AppRow = {
-  code: string | null;
-};
-
-type RawPermissionOption = {
-  code: string;
-  name: string | null;
-  app: { code: string } | { code: string }[] | null;
-};
-
-type PermissionOption = {
-  appCode: string;
-  code: string;
-  fullCode: string;
-  label: string;
-};
-
 type NavigationRow = {
   app_code: string;
   group_key: string | null;
@@ -44,40 +27,16 @@ type NavigationRow = {
   required_permission_code: string | null;
   sort_order: number | null;
   is_active: boolean | null;
-  opens_in_new_tab: boolean | null;
-  metadata: Record<string, unknown> | null;
 };
 
-const FALLBACK_APPS = ["viso", "nexo", "fogo", "origo", "pulso", "shell", "aura"];
+type NavigationGroup = {
+  groupKey: string;
+  groupLabel: string;
+  groupOrder: number;
+  items: NavigationRow[];
+};
 
-const ICON_OPTIONS = [
-  "dashboard",
-  "accounting",
-  "users",
-  "calendar",
-  "store",
-  "sparkles",
-  "package",
-  "menu",
-  "fileText",
-  "briefcase",
-  "phone",
-  "book",
-  "flask",
-  "truck",
-  "warehouse",
-  "clipboard",
-  "boxes",
-  "shoppingCart",
-  "map",
-  "settings",
-  "alertTriangle",
-  "scan",
-  "printer",
-  "arrows",
-  "sliders",
-  "layers",
-];
+const MANAGED_APPS = ["viso", "nexo", "fogo", "origo", "pulso"];
 
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
@@ -98,6 +57,10 @@ function asInteger(value: FormDataEntryValue | null, fallback: number) {
   return Number.isInteger(parsed) ? parsed : fallback;
 }
 
+function normalizeAppCode(value: string) {
+  return value.trim().toLowerCase();
+}
+
 function slugify(value: string) {
   const base = value
     .trim()
@@ -108,55 +71,7 @@ function slugify(value: string) {
     .replace(/^_+|_+$/g, "")
     .slice(0, 80);
 
-  return base || "item";
-}
-
-function normalizeAppCode(value: string) {
-  return value.trim().toLowerCase();
-}
-
-function normalizePermission(item: RawPermissionOption): PermissionOption | null {
-  const app = Array.isArray(item.app) ? item.app[0] ?? null : item.app;
-  const appCode = String(app?.code ?? "").trim();
-  const code = String(item.code ?? "").trim();
-
-  if (!appCode || !code) return null;
-
-  return {
-    appCode,
-    code,
-    fullCode: `${appCode}.${code}`,
-    label: item.name ? `${appCode}.${code} · ${item.name}` : `${appCode}.${code}`,
-  };
-}
-
-function parseMetadata(value: string) {
-  const raw = value.trim();
-
-  if (!raw) {
-    return { ok: true as const, value: {} as Record<string, unknown> };
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {
-        ok: false as const,
-        error: "Metadata debe ser un objeto JSON. Ejemplo: {}",
-      };
-    }
-
-    return {
-      ok: true as const,
-      value: parsed as Record<string, unknown>,
-    };
-  } catch {
-    return {
-      ok: false as const,
-      error: "Metadata no es JSON valido.",
-    };
-  }
+  return base || "group";
 }
 
 function buildRedirect(appCode: string, status: { ok?: string; error?: string }) {
@@ -166,149 +81,66 @@ function buildRedirect(appCode: string, status: { ok?: string; error?: string })
   if (status.ok) params.set("ok", status.ok);
   if (status.error) params.set("error", status.error);
 
-  const qs = params.toString();
-  return qs ? `/app-navigation?${qs}` : "/app-navigation";
+  const query = params.toString();
+  return query ? `/app-navigation?${query}` : "/app-navigation";
 }
 
-function getNavigationPayload(formData: FormData) {
-  const appCode = normalizeAppCode(asText(formData.get("app_code")));
-  const itemKey = slugify(asText(formData.get("item_key")));
-  const groupLabel = asText(formData.get("group_label"));
-  const groupKey = slugify(asText(formData.get("group_key")) || groupLabel);
-  const label = asText(formData.get("label"));
-  const href = asText(formData.get("href"));
-  const requiredPermissionCode = asText(formData.get("required_permission_code"));
-  const metadataResult = parseMetadata(asText(formData.get("metadata")));
-
-  if (!appCode) {
-    return { ok: false as const, appCode: "", error: "Selecciona una app." };
-  }
-
-  if (!itemKey) {
-    return { ok: false as const, appCode, error: "Define item_key." };
-  }
-
-  if (!groupLabel) {
-    return { ok: false as const, appCode, error: "Define el grupo." };
-  }
-
-  if (!label) {
-    return { ok: false as const, appCode, error: "Define el nombre de pantalla." };
-  }
-
-  if (!href.startsWith("/")) {
-    return { ok: false as const, appCode, error: "La ruta href debe empezar por /." };
-  }
-
-  if (!requiredPermissionCode.includes(".")) {
-    return {
-      ok: false as const,
-      appCode,
-      error: "El permiso requerido debe incluir la app. Ejemplo: nexo.inventory.stock",
-    };
-  }
-
-  if (!metadataResult.ok) {
-    return {
-      ok: false as const,
-      appCode,
-      error: metadataResult.error,
-    };
-  }
-
-  return {
-    ok: true as const,
-    appCode,
-    itemKey,
-    payload: {
-      app_code: appCode,
-      group_key: groupKey,
-      group_label: groupLabel,
-      group_order: asInteger(formData.get("group_order"), 100),
-      item_key: itemKey,
-      label,
-      description: asText(formData.get("description")) || null,
-      href,
-      icon: asText(formData.get("icon")) || null,
-      required_permission_code: requiredPermissionCode,
-      sort_order: asInteger(formData.get("sort_order"), 100),
-      is_active: formData.get("is_active") === "on",
-      opens_in_new_tab: formData.get("opens_in_new_tab") === "on",
-      metadata: metadataResult.value,
-    },
-  };
+function getAppLabel(appCode: string) {
+  return appCode.toUpperCase();
 }
 
-async function createNavigationItem(formData: FormData) {
-  "use server";
+function groupNavigationRows(rows: NavigationRow[]): NavigationGroup[] {
+  const groups = new Map<string, NavigationGroup>();
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo: "/app-navigation",
-    permissionCode: "staff.permissions.manage",
-  });
+  for (const row of rows) {
+    const groupKey =
+      String(row.group_key ?? "").trim() ||
+      slugify(String(row.group_label ?? "Sin grupo"));
+    const groupLabel = String(row.group_label ?? "Sin grupo").trim() || "Sin grupo";
+    const groupOrder = Number(row.group_order ?? 100);
 
-  const result = getNavigationPayload(formData);
+    const current =
+      groups.get(groupKey) ??
+      ({
+        groupKey,
+        groupLabel,
+        groupOrder,
+        items: [],
+      } satisfies NavigationGroup);
 
-  if (!result.ok) {
-    redirect(buildRedirect(result.appCode, { error: result.error }));
+    current.items.push(row);
+    current.groupLabel = groupLabel;
+    current.groupOrder = groupOrder;
+
+    groups.set(groupKey, current);
   }
 
-  const supabase = createAdminClient();
-
-  const { error } = await supabase
-    .from("app_navigation_items")
-    .upsert(result.payload, {
-      onConflict: "app_code,item_key",
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      items: group.items.sort((a, b) => {
+        const orderDiff = Number(a.sort_order ?? 100) - Number(b.sort_order ?? 100);
+        if (orderDiff !== 0) return orderDiff;
+        return String(a.label ?? a.item_key).localeCompare(String(b.label ?? b.item_key), "es");
+      }),
+    }))
+    .sort((a, b) => {
+      const orderDiff = a.groupOrder - b.groupOrder;
+      if (orderDiff !== 0) return orderDiff;
+      return a.groupLabel.localeCompare(b.groupLabel, "es");
     });
-
-  if (error) {
-    redirect(buildRedirect(result.appCode, { error: error.message }));
-  }
-
-  revalidatePath("/app-navigation");
-  redirect(buildRedirect(result.appCode, { ok: "navigation_saved" }));
 }
 
-async function updateNavigationItem(formData: FormData) {
-  "use server";
-
-  const originalAppCode = normalizeAppCode(asText(formData.get("original_app_code")));
-  const originalItemKey = slugify(asText(formData.get("original_item_key")));
-
-  await requireAppAccess({
-    appId: "viso",
-    returnTo: buildRedirect(originalAppCode, {}),
-    permissionCode: "staff.permissions.manage",
-  });
-
-  const result = getNavigationPayload(formData);
-
-  if (!result.ok) {
-    redirect(buildRedirect(result.appCode || originalAppCode, { error: result.error }));
-  }
-
-  const supabase = createAdminClient();
-
-  const { error } = await supabase
-    .from("app_navigation_items")
-    .update(result.payload)
-    .eq("app_code", originalAppCode)
-    .eq("item_key", originalItemKey);
-
-  if (error) {
-    redirect(buildRedirect(result.appCode, { error: error.message }));
-  }
-
-  revalidatePath("/app-navigation");
-  redirect(buildRedirect(result.appCode, { ok: "navigation_saved" }));
-}
-
-async function deleteNavigationItem(formData: FormData) {
+async function updateNavigationGroup(formData: FormData) {
   "use server";
 
   const appCode = normalizeAppCode(asText(formData.get("app_code")));
-  const itemKey = slugify(asText(formData.get("item_key")));
+  const groupLabel = asText(formData.get("group_label"));
+  const groupOrder = asInteger(formData.get("group_order"), 100);
+  const itemKeys = formData
+    .getAll("item_key")
+    .map((value) => String(value).trim())
+    .filter(Boolean);
 
   await requireAppAccess({
     appId: "viso",
@@ -316,379 +148,215 @@ async function deleteNavigationItem(formData: FormData) {
     permissionCode: "staff.permissions.manage",
   });
 
-  if (!appCode || !itemKey) {
-    redirect(buildRedirect(appCode, { error: "Faltan app_code o item_key." }));
+  if (!MANAGED_APPS.includes(appCode)) {
+    redirect(buildRedirect(appCode, { error: "App no administrable desde esta vista." }));
+  }
+
+  if (!groupLabel) {
+    redirect(buildRedirect(appCode, { error: "El grupo necesita un nombre." }));
+  }
+
+  if (!itemKeys.length) {
+    redirect(buildRedirect(appCode, { error: "No hay pantallas para guardar." }));
   }
 
   const supabase = createAdminClient();
+  const groupKey = slugify(groupLabel);
 
-  const { error } = await supabase
-    .from("app_navigation_items")
-    .delete()
-    .eq("app_code", appCode)
-    .eq("item_key", itemKey);
+  const updates = itemKeys.map(async (itemKey) => {
+    const label = asText(formData.get(`label__${itemKey}`));
+    const sortOrder = asInteger(formData.get(`sort_order__${itemKey}`), 100);
+    const isActive = formData.get(`is_active__${itemKey}`) === "on";
 
-  if (error) {
-    redirect(buildRedirect(appCode, { error: error.message }));
+    if (!label) {
+      return {
+        itemKey,
+        error: "Cada pantalla necesita un nombre.",
+      };
+    }
+
+    const { error } = await supabase
+      .from("app_navigation_items")
+      .update({
+        group_key: groupKey,
+        group_label: groupLabel,
+        group_order: groupOrder,
+        label,
+        sort_order: sortOrder,
+        is_active: isActive,
+      })
+      .eq("app_code", appCode)
+      .eq("item_key", itemKey);
+
+    return {
+      itemKey,
+      error: error?.message ?? null,
+    };
+  });
+
+  const results = await Promise.all(updates);
+  const firstError = results.find((result) => result.error);
+
+  if (firstError?.error) {
+    redirect(buildRedirect(appCode, { error: firstError.error }));
   }
 
   revalidatePath("/app-navigation");
-  redirect(buildRedirect(appCode, { ok: "navigation_deleted" }));
+  redirect(buildRedirect(appCode, { ok: "navigation_saved" }));
 }
 
-function PermissionSelect({
-  name,
-  value,
-  permissions,
-  appCode,
-}: {
-  name: string;
-  value: string;
-  permissions: PermissionOption[];
-  appCode: string;
-}) {
-  const appPermissions = permissions.filter((permission) => permission.appCode === appCode);
-  const hasCurrent = permissions.some((permission) => permission.fullCode === value);
-
-  return (
-    <select name={name} defaultValue={value} className="ui-input">
-      {value && !hasCurrent ? <option value={value}>{value}</option> : null}
-      <option value="">Selecciona permiso...</option>
-
-      {appPermissions.map((permission) => (
-        <option key={permission.fullCode} value={permission.fullCode}>
-          {permission.label}
-        </option>
-      ))}
-
-      {permissions.length > appPermissions.length ? (
-        <option disabled>────────── Otras apps ──────────</option>
-      ) : null}
-
-      {permissions
-        .filter((permission) => permission.appCode !== appCode)
-        .map((permission) => (
-          <option key={permission.fullCode} value={permission.fullCode}>
-            {permission.label}
-          </option>
-        ))}
-    </select>
-  );
-}
-
-function IconSelect({ value }: { value: string }) {
-  return (
-    <select name="icon" defaultValue={value} className="ui-input">
-      <option value="">Sin icono</option>
-
-      {ICON_OPTIONS.map((icon) => (
-        <option key={icon} value={icon}>
-          {icon}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function TextInput({
-  name,
-  defaultValue,
-  placeholder,
-  required,
-}: {
-  name: string;
-  defaultValue?: string | number | null;
-  placeholder?: string;
-  required?: boolean;
-}) {
-  return (
-    <input
-      name={name}
-      defaultValue={defaultValue ?? ""}
-      placeholder={placeholder}
-      required={required}
-      className="ui-input"
-    />
-  );
-}
-
-function NumberInput({
-  name,
-  defaultValue,
-}: {
-  name: string;
-  defaultValue?: number | null;
-}) {
-  return (
-    <input
-      name={name}
-      type="number"
-      defaultValue={defaultValue ?? 100}
-      className="ui-input"
-    />
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="space-y-1">
-      <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function NavigationItemForm({
-  row,
-  permissions,
-}: {
-  row: NavigationRow;
-  permissions: PermissionOption[];
-}) {
-  const metadataValue = JSON.stringify(row.metadata ?? {}, null, 2);
-
-  return (
-    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow-soft)]">
-      <form action={updateNavigationItem} className="space-y-4">
-        <input type="hidden" name="original_app_code" value={row.app_code} />
-        <input type="hidden" name="original_item_key" value={row.item_key} />
-
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-[var(--ui-text)]">
-              {row.label || row.item_key}
-            </div>
-            <div className="text-xs text-[var(--ui-muted)]">
-              {row.href} · {row.required_permission_code}
-            </div>
-          </div>
-
-          <label className="inline-flex items-center gap-2 rounded-full border border-[var(--ui-border)] px-3 py-1 text-xs font-semibold text-[var(--ui-text)]">
-            <input
-              type="checkbox"
-              name="is_active"
-              defaultChecked={row.is_active !== false}
-              className="h-4 w-4"
-            />
-            Visible
-          </label>
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-4">
-          <Field label="App">
-            <TextInput name="app_code" defaultValue={row.app_code} required />
-          </Field>
-
-          <Field label="Item key">
-            <TextInput name="item_key" defaultValue={row.item_key} required />
-          </Field>
-
-          <Field label="Grupo key">
-            <TextInput name="group_key" defaultValue={row.group_key} required />
-          </Field>
-
-          <Field label="Grupo orden">
-            <NumberInput name="group_order" defaultValue={row.group_order} />
-          </Field>
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-3">
-          <Field label="Grupo">
-            <TextInput name="group_label" defaultValue={row.group_label} required />
-          </Field>
-
-          <Field label="Pantalla">
-            <TextInput name="label" defaultValue={row.label} required />
-          </Field>
-
-          <Field label="Orden pantalla">
-            <NumberInput name="sort_order" defaultValue={row.sort_order} />
-          </Field>
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-3">
-          <Field label="Ruta href">
-            <TextInput name="href" defaultValue={row.href} required />
-          </Field>
-
-          <Field label="Icono">
-            <IconSelect value={row.icon ?? ""} />
-          </Field>
-
-          <Field label="Permiso requerido">
-            <PermissionSelect
-              name="required_permission_code"
-              value={row.required_permission_code ?? ""}
-              permissions={permissions}
-              appCode={row.app_code}
-            />
-          </Field>
-        </div>
-
-        <Field label="Descripcion">
-          <textarea
-            name="description"
-            defaultValue={row.description ?? ""}
-            rows={2}
-            className="ui-input min-h-20"
-          />
-        </Field>
-
-        <Field label="Metadata JSON">
-          <textarea
-            name="metadata"
-            defaultValue={metadataValue}
-            rows={4}
-            className="ui-input min-h-28 font-mono text-xs"
-          />
-        </Field>
-
-        <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-muted)]">
-          <input
-            type="checkbox"
-            name="opens_in_new_tab"
-            defaultChecked={row.opens_in_new_tab === true}
-            className="h-4 w-4"
-          />
-          Abrir en nueva pestana
-        </label>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--ui-border)] pt-4">
-          <button type="submit" className="ui-btn ui-btn--primary">
-            Guardar cambios
-          </button>
-
-          <button
-            type="submit"
-            form={`delete-${row.app_code}-${row.item_key}`}
-            className="ui-btn ui-btn--ghost text-red-600 hover:text-red-700"
-          >
-            Eliminar
-          </button>
-        </div>
-      </form>
-
-      <form id={`delete-${row.app_code}-${row.item_key}`} action={deleteNavigationItem}>
-        <input type="hidden" name="app_code" value={row.app_code} />
-        <input type="hidden" name="item_key" value={row.item_key} />
-      </form>
-    </div>
-  );
-}
-
-function CreateNavigationItemForm({
+function AppSelector({
   selectedApp,
-  permissions,
+  visibleCounts,
 }: {
   selectedApp: string;
-  permissions: PermissionOption[];
+  visibleCounts: Record<string, number>;
 }) {
   return (
-    <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface)] p-4">
-      <div className="mb-4">
-        <div className="text-sm font-semibold text-[var(--ui-text)]">
-          Crear entrada de navegacion
-        </div>
-        <div className="text-xs text-[var(--ui-muted)]">
-          Agrega una pantalla al sidebar server-driven.
-        </div>
+    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow-soft)]">
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+        App
       </div>
 
-      <form action={createNavigationItem} className="space-y-4">
-        <div className="grid gap-3 lg:grid-cols-4">
-          <Field label="App">
-            <TextInput name="app_code" defaultValue={selectedApp} required />
-          </Field>
-
-          <Field label="Item key">
-            <TextInput name="item_key" placeholder="inventory_stock" required />
-          </Field>
-
-          <Field label="Grupo key">
-            <TextInput name="group_key" placeholder="inventory_control" />
-          </Field>
-
-          <Field label="Grupo orden">
-            <NumberInput name="group_order" defaultValue={100} />
-          </Field>
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-3">
-          <Field label="Grupo">
-            <TextInput name="group_label" placeholder="Control de inventario" required />
-          </Field>
-
-          <Field label="Pantalla">
-            <TextInput name="label" placeholder="Stock" required />
-          </Field>
-
-          <Field label="Orden pantalla">
-            <NumberInput name="sort_order" defaultValue={100} />
-          </Field>
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-3">
-          <Field label="Ruta href">
-            <TextInput name="href" placeholder="/inventory/stock" required />
-          </Field>
-
-          <Field label="Icono">
-            <IconSelect value="" />
-          </Field>
-
-          <Field label="Permiso requerido">
-            <PermissionSelect
-              name="required_permission_code"
-              value=""
-              permissions={permissions}
-              appCode={selectedApp}
-            />
-          </Field>
-        </div>
-
-        <Field label="Descripcion">
-          <textarea
-            name="description"
-            rows={2}
-            className="ui-input min-h-20"
-            placeholder="Descripcion corta para el sidebar."
-          />
-        </Field>
-
-        <Field label="Metadata JSON">
-          <textarea
-            name="metadata"
-            rows={4}
-            className="ui-input min-h-28 font-mono text-xs"
-            defaultValue="{}"
-          />
-        </Field>
-
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-muted)]">
-            <input type="checkbox" name="is_active" defaultChecked className="h-4 w-4" />
-            Visible en menu
-          </label>
-
-          <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-muted)]">
-            <input type="checkbox" name="opens_in_new_tab" className="h-4 w-4" />
-            Abrir en nueva pestana
-          </label>
-
-          <button type="submit" className="ui-btn ui-btn--primary">
-            Crear entrada
-          </button>
-        </div>
-      </form>
+      <div className="flex flex-wrap gap-2">
+        {MANAGED_APPS.map((appCode) => (
+          <Link
+            key={appCode}
+            href={`/app-navigation?app=${encodeURIComponent(appCode)}`}
+            className={`ui-btn ${
+              appCode === selectedApp ? "ui-btn--primary" : "ui-btn--ghost"
+            }`}
+          >
+            {getAppLabel(appCode)}
+            <span className="ml-2 rounded-full bg-black/10 px-2 py-0.5 text-xs">
+              {visibleCounts[appCode] ?? 0}
+            </span>
+          </Link>
+        ))}
+      </div>
     </div>
+  );
+}
+
+function NavigationGroupCard({ group, appCode }: { group: NavigationGroup; appCode: string }) {
+  const visibleCount = group.items.filter((item) => item.is_active !== false).length;
+  const hiddenCount = group.items.length - visibleCount;
+
+  return (
+    <form
+      action={updateNavigationGroup}
+      className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow-soft)]"
+    >
+      <input type="hidden" name="app_code" value={appCode} />
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Grupo del menú
+          </div>
+          <div className="mt-1 text-lg font-semibold text-[var(--ui-text)]">
+            {group.groupLabel}
+          </div>
+          <div className="mt-1 text-sm text-[var(--ui-muted)]">
+            {visibleCount} visibles · {hiddenCount} ocultas
+          </div>
+        </div>
+
+        <button type="submit" className="ui-btn ui-btn--primary">
+          Guardar grupo
+        </button>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_160px]">
+        <label className="space-y-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Nombre del grupo
+          </span>
+          <input
+            name="group_label"
+            defaultValue={group.groupLabel}
+            className="ui-input"
+            required
+          />
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Orden del grupo
+          </span>
+          <input
+            name="group_order"
+            type="number"
+            defaultValue={group.groupOrder}
+            className="ui-input"
+          />
+        </label>
+      </div>
+
+      <div className="mt-5 overflow-hidden rounded-2xl border border-[var(--ui-border)]">
+        <div className="grid grid-cols-[72px_minmax(0,1fr)_120px] gap-3 bg-[var(--ui-surface-2)] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+          <div>Visible</div>
+          <div>Pantalla</div>
+          <div>Orden</div>
+        </div>
+
+        <div className="divide-y divide-[var(--ui-border)]">
+          {group.items.map((item) => {
+            const label = item.label ?? item.item_key;
+
+            return (
+              <div
+                key={item.item_key}
+                className="grid grid-cols-[72px_minmax(0,1fr)_120px] gap-3 px-4 py-3"
+              >
+                <input type="hidden" name="item_key" value={item.item_key} />
+
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    name={`is_active__${item.item_key}`}
+                    defaultChecked={item.is_active !== false}
+                    className="h-5 w-5"
+                    aria-label={`Mostrar ${label}`}
+                  />
+                </label>
+
+                <div className="min-w-0">
+                  <input
+                    name={`label__${item.item_key}`}
+                    defaultValue={label}
+                    required
+                    className="ui-input h-12"
+                  />
+
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--ui-muted)]">
+                    {item.href ? (
+                      <span className="rounded-full bg-[var(--ui-surface-2)] px-2 py-1">
+                        {item.href}
+                      </span>
+                    ) : null}
+
+                    {item.required_permission_code ? (
+                      <span className="rounded-full bg-[var(--ui-surface-2)] px-2 py-1">
+                        {item.required_permission_code}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <input
+                  name={`sort_order__${item.item_key}`}
+                  type="number"
+                  defaultValue={item.sort_order ?? 100}
+                  className="ui-input h-12"
+                  aria-label={`Orden de ${label}`}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </form>
   );
 }
 
@@ -698,13 +366,13 @@ export default async function AppNavigationPage({
   searchParams?: Promise<SearchParams>;
 }) {
   const sp = (await searchParams) ?? {};
-  const requestedApp = normalizeAppCode(String(sp.app ?? "viso"));
+  const requestedApp = normalizeAppCode(String(sp.app ?? "nexo"));
+  const selectedApp = MANAGED_APPS.includes(requestedApp) ? requestedApp : "nexo";
+
   const okMsg =
     sp.ok === "navigation_saved"
-      ? "Navegacion guardada."
-      : sp.ok === "navigation_deleted"
-        ? "Entrada eliminada."
-        : safeDecode(sp.ok);
+      ? "Navegación guardada."
+      : safeDecode(sp.ok);
   const errorMsg = safeDecode(sp.error);
 
   await requireAppAccess({
@@ -715,135 +383,95 @@ export default async function AppNavigationPage({
 
   const supabase = createAdminClient();
 
-  const [{ data: appsData }, { data: permissionsData }, { data: navigationData }] =
-    await Promise.all([
-      supabase.from("apps").select("code").order("code", { ascending: true }),
-      supabase
-        .from("app_permissions")
-        .select("code,name,app:apps(code)")
-        .order("code", { ascending: true }),
-      supabase
-        .from("app_navigation_items")
-        .select(
-          "app_code,group_key,group_label,group_order,item_key,label,description,href,icon,required_permission_code,sort_order,is_active,opens_in_new_tab,metadata"
-        )
-        .order("app_code", { ascending: true })
-        .order("group_order", { ascending: true })
-        .order("sort_order", { ascending: true }),
-    ]);
-
-  const appCodesFromApps = ((appsData ?? []) as AppRow[])
-    .map((app) => String(app.code ?? "").trim())
-    .filter(Boolean);
-
-  const appCodesFromNavigation = Array.from(
-    new Set(
-      ((navigationData ?? []) as NavigationRow[])
-        .map((item) => String(item.app_code ?? "").trim())
-        .filter(Boolean)
+  const { data: navigationData, error } = await supabase
+    .from("app_navigation_items")
+    .select(
+      "app_code,group_key,group_label,group_order,item_key,label,description,href,icon,required_permission_code,sort_order,is_active"
     )
-  );
+    .in("app_code", MANAGED_APPS)
+    .order("app_code", { ascending: true })
+    .order("group_order", { ascending: true })
+    .order("sort_order", { ascending: true });
 
-  const appCodes = Array.from(
-    new Set([...appCodesFromApps, ...appCodesFromNavigation, ...FALLBACK_APPS])
-  ).sort((a, b) => a.localeCompare(b, "es"));
+  if (error) {
+    redirect(buildRedirect(selectedApp, { error: error.message }));
+  }
 
-  const selectedApp = appCodes.includes(requestedApp) ? requestedApp : appCodes[0] ?? "viso";
+  const allRows = (navigationData ?? []) as NavigationRow[];
+  const selectedRows = allRows.filter((row) => row.app_code === selectedApp);
+  const groups = groupNavigationRows(selectedRows);
 
-  const permissions = ((permissionsData ?? []) as RawPermissionOption[])
-    .map(normalizePermission)
-    .filter((item): item is PermissionOption => item !== null)
-    .sort((a, b) => a.fullCode.localeCompare(b.fullCode, "es"));
+  const visibleCounts = MANAGED_APPS.reduce<Record<string, number>>((acc, appCode) => {
+    acc[appCode] = allRows.filter(
+      (row) => row.app_code === appCode && row.is_active !== false
+    ).length;
+    return acc;
+  }, {});
 
-  const navigationRows = ((navigationData ?? []) as NavigationRow[])
-    .filter((item) => item.app_code === selectedApp)
-    .sort((a, b) => {
-      const groupDiff = Number(a.group_order ?? 100) - Number(b.group_order ?? 100);
-      if (groupDiff !== 0) return groupDiff;
-      return Number(a.sort_order ?? 100) - Number(b.sort_order ?? 100);
-    });
-
-  const visibleCount = navigationRows.filter((item) => item.is_active !== false).length;
-  const hiddenCount = navigationRows.length - visibleCount;
+  const visibleCount = selectedRows.filter((row) => row.is_active !== false).length;
+  const hiddenCount = selectedRows.length - visibleCount;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Navegacion de apps"
-        subtitle="Administra grupos, pantallas, orden, iconos, permisos y visibilidad global del sidebar."
+        title="Navegación de apps"
+        subtitle="Administra la visibilidad y el orden del menú lateral sin tocar SQL."
         actions={
-          <div className="flex flex-wrap gap-2">
-            <Link href="/roles-permissions" className="ui-btn ui-btn--ghost">
-              Permisos por rol
-            </Link>
-            <Link href="/staff" className="ui-btn ui-btn--ghost">
-              Trabajadores
-            </Link>
-          </div>
+          <Link href="/roles-permissions" className="ui-btn ui-btn--ghost">
+            Permisos por rol
+          </Link>
         }
       />
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">Listo: {okMsg}</div> : null}
 
-      <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow-soft)]">
-        <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
-          App seleccionada
+      <AppSelector selectedApp={selectedApp} visibleCounts={visibleCounts} />
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow-soft)]">
+          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            App seleccionada
+          </div>
+          <div className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">
+            {getAppLabel(selectedApp)}
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {appCodes.map((appCode) => (
-            <Link
-              key={appCode}
-              href={`/app-navigation?app=${encodeURIComponent(appCode)}`}
-              className={`ui-btn ${
-                appCode === selectedApp ? "ui-btn--primary" : "ui-btn--ghost"
-              }`}
-            >
-              {appCode.toUpperCase()}
-            </Link>
+        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow-soft)]">
+          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Pantallas visibles
+          </div>
+          <div className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">
+            {visibleCount}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow-soft)]">
+          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Ocultas
+          </div>
+          <div className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">
+            {hiddenCount}
+          </div>
+        </div>
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="ui-empty">
+          No hay pantallas configuradas para {getAppLabel(selectedApp)}.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {groups.map((group) => (
+            <NavigationGroupCard
+              key={`${selectedApp}:${group.groupKey}`}
+              group={group}
+              appCode={selectedApp}
+            />
           ))}
         </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl bg-[var(--ui-surface-2)] p-3">
-            <div className="text-xs text-[var(--ui-muted)]">Total pantallas</div>
-            <div className="text-xl font-semibold text-[var(--ui-text)]">
-              {navigationRows.length}
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-[var(--ui-surface-2)] p-3">
-            <div className="text-xs text-[var(--ui-muted)]">Visibles</div>
-            <div className="text-xl font-semibold text-[var(--ui-text)]">
-              {visibleCount}
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-[var(--ui-surface-2)] p-3">
-            <div className="text-xs text-[var(--ui-muted)]">Ocultas</div>
-            <div className="text-xl font-semibold text-[var(--ui-text)]">
-              {hiddenCount}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <CreateNavigationItemForm selectedApp={selectedApp} permissions={permissions} />
-
-      <div className="space-y-4">
-        {navigationRows.length === 0 ? (
-          <div className="ui-empty">No hay entradas de navegacion para esta app.</div>
-        ) : null}
-
-        {navigationRows.map((row) => (
-          <NavigationItemForm
-            key={`${row.app_code}:${row.item_key}`}
-            row={row}
-            permissions={permissions}
-          />
-        ))}
-      </div>
+      )}
     </div>
   );
 }
