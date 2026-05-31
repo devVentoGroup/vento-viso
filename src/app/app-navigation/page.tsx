@@ -38,6 +38,13 @@ type NavigationGroup = {
 
 const MANAGED_APPS = ["viso", "nexo", "fogo", "origo", "pulso"];
 
+const DEFAULT_GROUPS: Record<string, { label: string; order: number }> = {
+  inicio: { label: "Inicio", order: 10 },
+  operacion: { label: "Operación", order: 20 },
+  configuracion: { label: "Configuración", order: 80 },
+  administracion: { label: "Administración", order: 90 },
+};
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -55,6 +62,14 @@ function safeDecode(value: string | null | undefined) {
 function asInteger(value: FormDataEntryValue | null, fallback: number) {
   const parsed = Number(asText(value));
   return Number.isInteger(parsed) ? parsed : fallback;
+}
+
+function normalizeHref(value: string) {
+  const href = value.trim();
+
+  if (!href) return "";
+
+  return href.startsWith("/") ? href : `/${href}`;
 }
 
 function normalizeAppCode(value: string) {
@@ -129,6 +144,93 @@ function groupNavigationRows(rows: NavigationRow[]): NavigationGroup[] {
       if (orderDiff !== 0) return orderDiff;
       return a.groupLabel.localeCompare(b.groupLabel, "es");
     });
+}
+
+
+async function createNavigationItem(formData: FormData) {
+  "use server";
+
+  const appCode = normalizeAppCode(asText(formData.get("app_code")));
+  const label = asText(formData.get("label"));
+  const description = asText(formData.get("description"));
+  const href = normalizeHref(asText(formData.get("href")));
+  const permissionCode = asText(formData.get("required_permission_code"));
+  const icon = asText(formData.get("icon")) || "settings";
+  const groupLabel = asText(formData.get("group_label")) || "Configuración";
+  const groupKey = slugify(groupLabel);
+  const groupOrder = asInteger(formData.get("group_order"), DEFAULT_GROUPS[groupKey]?.order ?? 80);
+  const sortOrder = asInteger(formData.get("sort_order"), 100);
+  const isActive = formData.get("is_active") === "on";
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: buildRedirect(appCode, {}),
+    permissionCode: "staff.permissions.manage",
+  });
+
+  if (!MANAGED_APPS.includes(appCode)) {
+    redirect(buildRedirect(appCode, { error: "App no administrable desde esta vista." }));
+  }
+
+  if (!label) {
+    redirect(buildRedirect(appCode, { error: "La pantalla necesita un nombre." }));
+  }
+
+  if (!href || href === "/") {
+    redirect(buildRedirect(appCode, { error: "La ruta debe empezar por / y no puede ser la raíz." }));
+  }
+
+  const supabase = createAdminClient();
+  const baseKey = slugify(`${groupLabel}_${label}`);
+
+  const { data: existingByHref, error: existingByHrefError } = await supabase
+    .from("app_navigation_items")
+    .select("item_key")
+    .eq("app_code", appCode)
+    .eq("href", href)
+    .maybeSingle();
+
+  if (existingByHrefError) {
+    redirect(buildRedirect(appCode, { error: existingByHrefError.message }));
+  }
+
+  const itemKey = existingByHref?.item_key ?? baseKey;
+
+  const payload = {
+    app_code: appCode,
+    group_key: groupKey,
+    group_label: groupLabel,
+    group_order: groupOrder,
+    item_key: itemKey,
+    label,
+    description: description || null,
+    href,
+    icon,
+    required_permission_code: permissionCode || null,
+    sort_order: sortOrder,
+    is_active: isActive,
+  };
+
+  if (existingByHref) {
+    const { error } = await supabase
+      .from("app_navigation_items")
+      .update(payload)
+      .eq("app_code", appCode)
+      .eq("href", href);
+
+    if (error) {
+      redirect(buildRedirect(appCode, { error: error.message }));
+    }
+  } else {
+    const { error } = await supabase.from("app_navigation_items").insert(payload);
+
+    if (error) {
+      redirect(buildRedirect(appCode, { error: error.message }));
+    }
+  }
+
+  revalidatePath("/app-navigation");
+  redirect(buildRedirect(appCode, { ok: "navigation_item_saved" }));
 }
 
 async function updateNavigationGroup(formData: FormData) {
@@ -235,6 +337,135 @@ function AppSelector({
         ))}
       </div>
     </div>
+  );
+}
+
+
+function AddNavigationItemCard({ selectedApp }: { selectedApp: string }) {
+  return (
+    <form
+      action={createNavigationItem}
+      className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow-soft)]"
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Registrar pantalla
+          </div>
+          <h2 className="mt-1 text-lg font-semibold text-[var(--ui-text)]">
+            Agregar una pantalla al menú lateral
+          </h2>
+          <p className="mt-1 text-sm text-[var(--ui-muted)]">
+            Úsalo cuando una página ya existe en código pero todavía no aparece en navegación.
+          </p>
+        </div>
+
+        <button type="submit" className="ui-btn ui-btn--primary">
+          Agregar / actualizar
+        </button>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-2">
+        <input type="hidden" name="app_code" value={selectedApp} />
+
+        <label className="space-y-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            App
+          </span>
+          <input value={getAppLabel(selectedApp)} className="ui-input" readOnly />
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Grupo
+          </span>
+          <input
+            name="group_label"
+            defaultValue={selectedApp === "nexo" ? "Configuración" : "Administración"}
+            className="ui-input"
+            required
+          />
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Pantalla
+          </span>
+          <input
+            name="label"
+            defaultValue={selectedApp === "nexo" ? "Precios internos" : ""}
+            className="ui-input"
+            required
+          />
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Ruta
+          </span>
+          <input
+            name="href"
+            defaultValue={selectedApp === "nexo" ? "/inventory/settings/internal-prices" : ""}
+            placeholder="/ruta-de-la-pagina"
+            className="ui-input"
+            required
+          />
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Descripción
+          </span>
+          <input
+            name="description"
+            defaultValue={selectedApp === "nexo" ? "Centro de costos y precios internos" : ""}
+            className="ui-input"
+          />
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Permiso requerido
+          </span>
+          <input
+            name="required_permission_code"
+            defaultValue={selectedApp === "nexo" ? "nexo.internal_prices.view" : ""}
+            placeholder="app.permiso"
+            className="ui-input"
+          />
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Ícono
+          </span>
+          <input name="icon" defaultValue="settings" className="ui-input" />
+        </label>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="space-y-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+              Orden grupo
+            </span>
+            <input name="group_order" type="number" defaultValue={80} className="ui-input" />
+          </label>
+
+          <label className="space-y-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+              Orden pantalla
+            </span>
+            <input name="sort_order" type="number" defaultValue={100} className="ui-input" />
+          </label>
+        </div>
+
+        <label className="flex items-center gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
+          <input name="is_active" type="checkbox" defaultChecked className="h-5 w-5" />
+          <span className="text-sm font-semibold text-[var(--ui-text)]">
+            Visible en el menú
+          </span>
+        </label>
+      </div>
+    </form>
   );
 }
 
@@ -372,7 +603,9 @@ export default async function AppNavigationPage({
   const okMsg =
     sp.ok === "navigation_saved"
       ? "Navegación guardada."
-      : safeDecode(sp.ok);
+      : sp.ok === "navigation_item_saved"
+        ? "Pantalla registrada en navegación."
+        : safeDecode(sp.ok);
   const errorMsg = safeDecode(sp.error);
 
   await requireAppAccess({
@@ -415,7 +648,7 @@ export default async function AppNavigationPage({
     <div className="space-y-6">
       <PageHeader
         title="Navegación de apps"
-        subtitle="Administra la visibilidad y el orden del menú lateral sin tocar SQL."
+        subtitle="Administra la visibilidad, el orden y el registro de pantallas del menú lateral."
         actions={
           <Link href="/roles-permissions" className="ui-btn ui-btn--ghost">
             Permisos por rol
@@ -427,6 +660,8 @@ export default async function AppNavigationPage({
       {okMsg ? <div className="ui-alert ui-alert--success">Listo: {okMsg}</div> : null}
 
       <AppSelector selectedApp={selectedApp} visibleCounts={visibleCounts} />
+
+      <AddNavigationItemCard selectedApp={selectedApp} />
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow-soft)]">
