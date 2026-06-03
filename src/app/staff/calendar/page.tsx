@@ -6,7 +6,14 @@ import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+import { CalendarInteractiveView } from "./calendar-interactive-view";
+
 export const dynamic = "force-dynamic";
+
+const NEXO_BASE_URL =
+  process.env.NEXT_PUBLIC_NEXO_URL?.replace(/\/$/, "") ||
+  process.env.NEXT_PUBLIC_NEXO_BASE_URL?.replace(/\/$/, "") ||
+  "https://nexo.ventogroup.co";
 
 type SearchParams = {
   month?: string;
@@ -38,6 +45,30 @@ type MaintenanceEventRow = {
     | Array<{ id: string; name: string | null; sku: string | null }>
     | null;
 };
+type AssetMaintenanceItemRow = {
+  id: string;
+  asset_code: string | null;
+  display_name: string | null;
+  serial_number: string | null;
+  site_id: string | null;
+  products?:
+    | { id: string; name: string | null; sku: string | null }
+    | Array<{ id: string; name: string | null; sku: string | null }>
+    | null;
+};
+type AssetMaintenanceRecordRow = {
+  id: string;
+  asset_item_id: string | null;
+  status: string | null;
+  maintenance_type: string | null;
+  scheduled_date: string | null;
+  performed_date: string | null;
+  maintenance_provider: string | null;
+  work_done: string | null;
+  next_scheduled_date: string | null;
+  notes: string | null;
+  asset_items?: AssetMaintenanceItemRow | AssetMaintenanceItemRow[] | null;
+};
 type AssetProfileRow = {
   product_id: string;
   physical_location: string | null;
@@ -64,6 +95,7 @@ type CalendarEvent = {
   detail?: string;
   siteId?: string | null;
   priority: "high" | "medium" | "low";
+  href?: string;
 };
 
 function toIsoDate(date: Date): string {
@@ -170,6 +202,17 @@ function eventTypeLabel(value: CalendarEventType): string {
   return "Mantenimiento";
 }
 
+function eventTypeEmoji(value: CalendarEventType): string {
+  if (value === "holiday") return "🎉";
+  if (value === "mother_day") return "💐";
+  if (value === "commercial") return "💖";
+  if (value === "operations") return "☕";
+  if (value === "other") return "📌";
+  if (value === "contract_start") return "🟢";
+  if (value === "contract_end") return "🧾";
+  return "🛠️";
+}
+
 function eventTypePillClass(value: CalendarEventType): string {
   if (value === "holiday") return "bg-indigo-50 text-indigo-700 border-indigo-200";
   if (value === "mother_day") return "bg-pink-50 text-pink-700 border-pink-200";
@@ -213,6 +256,72 @@ function getMaintenanceProductName(
     return products[0]?.name ?? fallbackProductId;
   }
   return products.name ?? fallbackProductId;
+}
+
+function oneRelation<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null;
+  return Array.isArray(value) ? value[0] ?? null : value;
+}
+
+function getAssetMaintenanceItem(row: AssetMaintenanceRecordRow) {
+  return oneRelation(row.asset_items);
+}
+
+function getAssetMaintenanceProductName(item: AssetMaintenanceItemRow | null, fallback: string) {
+  const product = oneRelation(item?.products);
+  return item?.display_name || product?.name || item?.asset_code || fallback;
+}
+
+function assetMaintenanceTypeLabel(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (raw === "corrective") return "Correctivo";
+  if (raw === "inspection") return "Inspección";
+  if (raw === "calibration") return "Calibración";
+  if (raw === "cleaning") return "Limpieza";
+  if (raw === "other") return "Otro";
+  return "Preventivo";
+}
+
+function assetMaintenanceStatusLabel(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (raw === "done") return "realizado";
+  if (raw === "cancelled") return "cancelado";
+  if (raw === "overdue") return "vencido";
+  return "planeado";
+}
+
+function buildAssetMaintenanceEvent(
+  row: AssetMaintenanceRecordRow,
+  date: string,
+  dateKind: "scheduled" | "next",
+): CalendarEvent | null {
+  if (!date) return null;
+  const item = getAssetMaintenanceItem(row);
+  const name = getAssetMaintenanceProductName(item, row.asset_item_id ?? row.id);
+  const code = item?.asset_code ? ` · ${item.asset_code}` : "";
+  const serial = item?.serial_number ? ` · Serial ${item.serial_number}` : "";
+  const provider = row.maintenance_provider ? ` · ${row.maintenance_provider}` : "";
+  const work = row.work_done || row.notes || "Mantenimiento programado";
+  const status = assetMaintenanceStatusLabel(row.status);
+  const titlePrefix = dateKind === "next" ? "Próx. mant. activo" : "Mant. activo";
+
+  return {
+    date,
+    type: "maintenance",
+    title: `${titlePrefix} · ${name}`,
+    detail: `${assetMaintenanceTypeLabel(row.maintenance_type)} · ${status}${code}${serial}${provider} · ${work}`,
+    siteId: item?.site_id ?? null,
+    priority: row.status === "overdue" ? "high" : "medium",
+    href: row.asset_item_id ? `${NEXO_BASE_URL}/inventory/assets/items/${row.asset_item_id}` : undefined,
+  };
+}
+
+function dedupeAssetMaintenanceRows(rows: AssetMaintenanceRecordRow[]) {
+  const map = new Map<string, AssetMaintenanceRecordRow>();
+  rows.forEach((row) => {
+    map.set(row.id, row);
+  });
+  return Array.from(map.values());
 }
 
 function asText(value: FormDataEntryValue | null) {
@@ -301,7 +410,16 @@ export default async function StaffMasterCalendarPage({
   const selectedView = selectedViewRaw === "month" || selectedViewRaw === "list" ? selectedViewRaw : "both";
   const monthKey = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`;
 
-  const [sitesRes, employeesRes, contractRes, maintenanceRes, assetProfilesRes, manualEventsRes] = await Promise.all([
+  const [
+    sitesRes,
+    employeesRes,
+    contractRes,
+    maintenanceRes,
+    assetProfilesRes,
+    manualEventsRes,
+    assetMaintenanceScheduledRes,
+    assetMaintenanceNextRes,
+  ] = await Promise.all([
     supabase.from("sites").select("id,name").eq("is_active", true).order("name"),
     supabase.from("employees").select("id,full_name,site_id").eq("is_active", true),
     supabase.rpc("employee_wallet_eligibility"),
@@ -321,6 +439,18 @@ export default async function StaffMasterCalendarPage({
       .gte("event_date", toIsoDate(monthStart))
       .lte("event_date", toIsoDate(monthEnd))
       .order("event_date"),
+    supabase
+      .from("asset_maintenance_records")
+      .select("id,asset_item_id,status,maintenance_type,scheduled_date,performed_date,maintenance_provider,work_done,next_scheduled_date,notes,asset_items(id,asset_code,display_name,serial_number,site_id,products(id,name,sku))")
+      .gte("scheduled_date", toIsoDate(monthStart))
+      .lte("scheduled_date", toIsoDate(monthEnd))
+      .order("scheduled_date"),
+    supabase
+      .from("asset_maintenance_records")
+      .select("id,asset_item_id,status,maintenance_type,scheduled_date,performed_date,maintenance_provider,work_done,next_scheduled_date,notes,asset_items(id,asset_code,display_name,serial_number,site_id,products(id,name,sku))")
+      .gte("next_scheduled_date", toIsoDate(monthStart))
+      .lte("next_scheduled_date", toIsoDate(monthEnd))
+      .order("next_scheduled_date"),
   ]);
 
   const sites = (sitesRes.data ?? []) as SiteRow[];
@@ -329,6 +459,10 @@ export default async function StaffMasterCalendarPage({
   const maintenanceRows = (maintenanceRes.data ?? []) as MaintenanceEventRow[];
   const assetProfiles = (assetProfilesRes.data ?? []) as AssetProfileRow[];
   const manualEvents = (manualEventsRes.data ?? []) as ManualCalendarEventRow[];
+  const assetMaintenanceRows = dedupeAssetMaintenanceRows([
+    ...((assetMaintenanceScheduledRes.data ?? []) as AssetMaintenanceRecordRow[]),
+    ...((assetMaintenanceNextRes.data ?? []) as AssetMaintenanceRecordRow[]),
+  ]);
 
   const employeeById = new Map(employees.map((row) => [row.id, row]));
 
@@ -415,6 +549,19 @@ export default async function StaffMasterCalendarPage({
     });
   });
 
+  assetMaintenanceRows.forEach((row) => {
+    const item = getAssetMaintenanceItem(row);
+    if (selectedSiteId && item?.site_id && item.site_id !== selectedSiteId) return;
+
+    const scheduled = buildAssetMaintenanceEvent(row, String(row.scheduled_date ?? ""), "scheduled");
+    if (scheduled) events.push(scheduled);
+
+    if (row.next_scheduled_date && row.next_scheduled_date !== row.scheduled_date) {
+      const next = buildAssetMaintenanceEvent(row, row.next_scheduled_date, "next");
+      if (next) events.push(next);
+    }
+  });
+
   const monthStartIso = toIsoDate(monthStart);
   const monthEndIso = toIsoDate(monthEnd);
   assetProfiles.forEach((row) => {
@@ -444,13 +591,6 @@ export default async function StaffMasterCalendarPage({
     })
     .sort((a, b) => (a.date === b.date ? a.title.localeCompare(b.title) : a.date.localeCompare(b.date)));
 
-  const grouped = filtered.reduce((acc, item) => {
-    const list = acc.get(item.date) ?? [];
-    list.push(item);
-    acc.set(item.date, list);
-    return acc;
-  }, new Map<string, CalendarEvent[]>());
-
   const calendarStart = startOfCalendarWeek(monthStart);
   const calendarEnd = endOfCalendarWeek(monthEnd);
   const days: string[] = [];
@@ -472,6 +612,13 @@ export default async function StaffMasterCalendarPage({
   if (selectedType && selectedType !== "all") qs.set("type", selectedType);
   if (selectedView && selectedView !== "both") qs.set("view", selectedView);
   const baseQuery = qs.toString();
+  const monthLabel = monthDate.toLocaleDateString("es-CO", { month: "long", year: "numeric" });
+  const totalEvents = filtered.length;
+  const holidayCount = filtered.filter((event) => event.type === "holiday" || event.type === "mother_day").length;
+  const contractCount = filtered.filter((event) => event.type.startsWith("contract")).length;
+  const maintenanceCount = filtered.filter((event) => event.type === "maintenance").length;
+  const highPriorityCount = filtered.filter((event) => event.priority === "high").length;
+  const nextHighlights = filtered.slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -489,6 +636,76 @@ export default async function StaffMasterCalendarPage({
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
+
+      <section className="relative overflow-hidden rounded-[2rem] border border-pink-100 bg-gradient-to-br from-pink-50 via-amber-50 to-cyan-50 p-6 shadow-sm">
+        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-pink-200/40 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-16 left-1/3 h-48 w-48 rounded-full bg-cyan-200/40 blur-3xl" />
+        <div className="relative grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/70 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
+              <span>🗓️</span>
+              <span>Calendario vivo de operación</span>
+            </div>
+            <h2 className="mt-4 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">
+              {monthLabel}
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-700 md:text-base">
+              Mira el mes como un tablero vivo: fechas comerciales, contratos, festivos y mantenimientos con tarjetas por día.
+            </p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-4">
+              <div className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-sm">
+                <div className="text-2xl">✨</div>
+                <div className="mt-2 text-2xl font-black text-slate-950">{totalEvents}</div>
+                <div className="text-xs font-semibold text-slate-500">eventos del mes</div>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-sm">
+                <div className="text-2xl">🎉</div>
+                <div className="mt-2 text-2xl font-black text-slate-950">{holidayCount}</div>
+                <div className="text-xs font-semibold text-slate-500">festivos/comerciales</div>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-sm">
+                <div className="text-2xl">🧾</div>
+                <div className="mt-2 text-2xl font-black text-slate-950">{contractCount}</div>
+                <div className="text-xs font-semibold text-slate-500">contratos</div>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-sm">
+                <div className="text-2xl">🛠️</div>
+                <div className="mt-2 text-2xl font-black text-slate-950">{maintenanceCount}</div>
+                <div className="text-xs font-semibold text-slate-500">mantenimientos</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-[1.75rem] border border-white/70 bg-white/70 p-5 shadow-sm backdrop-blur">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-black uppercase tracking-wide text-slate-500">Próximas señales</div>
+                <div className="mt-1 text-xs text-slate-500">{highPriorityCount} evento(s) de prioridad alta</div>
+              </div>
+              <div className="text-4xl">🌈</div>
+            </div>
+            <div className="mt-4 space-y-2">
+              {nextHighlights.length > 0 ? (
+                nextHighlights.map((event, index) => (
+                  <div key={`${event.date}-${event.title}-${index}`} className="rounded-2xl border border-slate-100 bg-white px-4 py-3">
+                    <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                      <span>{eventTypeEmoji(event.type)}</span>
+                      <span>{event.title}</span>
+                    </div>
+                    <div className="mt-1 text-xs font-medium text-slate-500">
+                      {new Intl.DateTimeFormat("es-CO", { dateStyle: "medium" }).format(new Date(`${event.date}T12:00:00`))}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 text-sm text-slate-500">
+                  No hay eventos con los filtros actuales.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="ui-panel space-y-4">
         <div>
@@ -604,106 +821,14 @@ export default async function StaffMasterCalendarPage({
         </form>
       </section>
 
-      {selectedView !== "list" ? (
-      <section className="ui-panel">
-        <div className="text-sm font-semibold text-[var(--ui-text)]">
-          Vista mensual
-        </div>
-        <div className="mt-3 overflow-x-auto">
-          <div className="min-w-[760px] rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)]">
-            <div className="grid grid-cols-7 border-b border-[var(--ui-border)] text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
-              {weekDayLabels.map((label) => (
-                <div key={label} className="px-3 py-2">
-                  {label}
-                </div>
-              ))}
-            </div>
-            {weekRows.map((week, weekIdx) => (
-              <div key={`week-${weekIdx}`} className="grid grid-cols-7 border-b border-[var(--ui-border)] last:border-b-0">
-                {week.map((dateIso) => {
-                  const dayDate = new Date(`${dateIso}T12:00:00`);
-                  const inMonth = dayDate.getMonth() === monthDate.getMonth();
-                  const dayEvents = grouped.get(dateIso) ?? [];
-                  const highCount = dayEvents.filter((x) => x.priority === "high").length;
-                  const mediumCount = dayEvents.filter((x) => x.priority === "medium").length;
-                  const lowCount = dayEvents.filter((x) => x.priority === "low").length;
-                  const holidayCount = dayEvents.filter((x) => x.type === "holiday").length;
-                  const motherDayCount = dayEvents.filter((x) => x.type === "mother_day").length;
-                  const contractCount = dayEvents.filter((x) => x.type === "contract_start" || x.type === "contract_end").length;
-                  const maintenanceCount = dayEvents.filter((x) => x.type === "maintenance").length;
-                  return (
-                    <div
-                      key={dateIso}
-                      className={`min-h-[96px] border-r border-[var(--ui-border)] px-2 py-2 last:border-r-0 ${inMonth ? "bg-white" : "bg-[var(--ui-surface)]/60"}`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className={`text-sm font-semibold ${inMonth ? "text-[var(--ui-text)]" : "text-[var(--ui-muted)]"}`}>
-                          {dayDate.getDate()}
-                        </span>
-                        {dayEvents.length > 0 ? (
-                          <a href={`#date-${dateIso}`} className="ui-chip ui-chip--brand text-[11px]">
-                            {dayEvents.length}
-                          </a>
-                        ) : null}
-                      </div>
-                      <div className="mt-2 space-y-1 text-[11px]">
-                        {holidayCount > 0 ? <div className="rounded-full bg-indigo-50 px-2 py-0.5 text-indigo-700">Festivo: {holidayCount}</div> : null}
-                        {motherDayCount > 0 ? <div className="rounded-full bg-pink-50 px-2 py-0.5 text-pink-700">Madre: {motherDayCount}</div> : null}
-                        {contractCount > 0 ? <div className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">Contratos: {contractCount}</div> : null}
-                        {maintenanceCount > 0 ? <div className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">Mant.: {maintenanceCount}</div> : null}
-                        {highCount > 0 ? <div className="rounded-full bg-red-50 px-2 py-0.5 text-red-700">Alta: {highCount}</div> : null}
-                        {mediumCount > 0 ? <div className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">Media: {mediumCount}</div> : null}
-                        {lowCount > 0 ? <div className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">Baja: {lowCount}</div> : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-      ) : null}
-
-      {selectedView !== "month" ? (
-      <section className="ui-panel">
-        <div className="text-sm font-semibold text-[var(--ui-text)]">
-          Eventos de {monthDate.toLocaleDateString("es-CO", { month: "long", year: "numeric" })}
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <span className="ui-chip ui-chip--brand">Total: {filtered.length}</span>
-          <span className="ui-chip">Festivos: {filtered.filter((x) => x.type === "holiday").length}</span>
-          <span className="ui-chip">Contratos: {filtered.filter((x) => x.type.startsWith("contract")).length}</span>
-          <span className="ui-chip">Mantenimiento: {filtered.filter((x) => x.type === "maintenance").length}</span>
-        </div>
-        {grouped.size === 0 ? (
-          <div className="ui-empty mt-4">No hay eventos en este filtro.</div>
-        ) : (
-          <div className="mt-4 space-y-3">
-            {Array.from(grouped.entries()).map(([date, rows]) => (
-              <div id={`date-${date}`} key={date} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
-                <div className="text-sm font-semibold text-[var(--ui-text)]">
-                  {new Intl.DateTimeFormat("es-CO", { dateStyle: "full" }).format(new Date(`${date}T12:00:00`))}
-                </div>
-                <div className="mt-2 space-y-2">
-                  {rows.map((event, idx) => (
-                    <div key={`${date}-${event.type}-${idx}`} className="rounded-lg border border-[var(--ui-border)] bg-white px-3 py-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${eventTypePillClass(event.type)}`}>
-                          {eventTypeLabel(event.type)}
-                        </span>
-                        <span className="font-semibold text-[var(--ui-text)]">{event.title}</span>
-                      </div>
-                      {event.detail ? <div className="mt-1 text-[var(--ui-muted)]">{event.detail}</div> : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-      ) : null}
+      <CalendarInteractiveView
+        events={filtered}
+        weekRows={weekRows}
+        weekDayLabels={weekDayLabels}
+        monthKey={monthKey}
+        monthLabel={monthLabel}
+        selectedView={selectedView}
+      />
     </div>
   );
 }
