@@ -424,6 +424,7 @@ async function createMenuItem(formData: FormData) {
     : null;
 
   const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
+  const opensDetailModal = asBool(formData.get("opens_detail_modal"));
 
   const referencesValidation = await validateCommercialMenuReferences(
     supabase,
@@ -514,7 +515,7 @@ async function createMenuItem(formData: FormData) {
         catalog_item_id: createdItem.id,
         surface: "vento_pass_menu",
         card_layout: passCardLayout,
-        opens_detail_modal: false,
+        opens_detail_modal: opensDetailModal,
         is_highlighted: passCardLayout === "featured",
         sort_weight: 0,
         metadata: {},
@@ -715,6 +716,7 @@ export default async function NewMenuItemPage({
           fulfillment_on_premise: true,
           metadata_extra: "",
           pass_card_layout: "compact",
+          opens_detail_modal: false,
         }}
       />
     </div>

@@ -336,6 +336,7 @@ async function updateMenuItem(formData: FormData) {
   }
 
   const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
+  const opensDetailModal = asBool(formData.get("opens_detail_modal"));
 
   const admin = createAdminClient();
   const [{ data: currentItem }, { data: currentPresentationRaw }] = await Promise.all([
@@ -356,10 +357,12 @@ async function updateMenuItem(formData: FormData) {
 
   const currentPresentation = (currentPresentationRaw ?? null) as CatalogItemPresentationRow | null;
   const currentPassCardLayout = parsePassCardLayout(currentPresentation?.card_layout);
+  const currentOpensDetailModal = Boolean(currentPresentation?.opens_detail_modal);
 
   if (
     currentItem &&
     currentPassCardLayout === passCardLayout &&
+    currentOpensDetailModal === opensDetailModal &&
     isImageOnlyCatalogChange(currentItem as CatalogItemRow, formData)
   ) {
     const { error: imageError } = await supabase
@@ -455,7 +458,7 @@ async function updateMenuItem(formData: FormData) {
         catalog_item_id: id,
         surface: "vento_pass_menu",
         card_layout: passCardLayout,
-        opens_detail_modal: currentPresentation?.opens_detail_modal ?? false,
+        opens_detail_modal: opensDetailModal,
         is_highlighted: passCardLayout === "featured",
         sort_weight: currentPresentation?.sort_weight ?? 0,
         metadata: currentPresentation?.metadata ?? {},
@@ -691,6 +694,7 @@ export default async function MenuItemDetailPage({
           fulfillment_on_premise: (row.fulfillment_modes ?? []).includes("on_premise"),
           metadata_extra: Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : "",
           pass_card_layout: parsePassCardLayout(presentation?.card_layout),
+          opens_detail_modal: Boolean(presentation?.opens_detail_modal),
         }}
       />
 

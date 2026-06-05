@@ -67,6 +67,7 @@ type MenuItemFormValues = {
   fulfillment_on_premise: boolean;
   metadata_extra: string;
   pass_card_layout?: "compact" | "featured" | string;
+  opens_detail_modal?: boolean;
 };
 
 type MenuItemFormProps = {
@@ -145,6 +146,7 @@ export function MenuItemForm({
   const [passCardLayout, setPassCardLayout] = useState(
     initial.pass_card_layout === "featured" ? "featured" : "compact",
   );
+  const [opensDetailModal, setOpensDetailModal] = useState(Boolean(initial.opens_detail_modal));
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
 
@@ -599,6 +601,7 @@ export function MenuItemForm({
             </div>
 
             <input type="hidden" name="pass_card_layout" value={passCardLayout} />
+            <input type="hidden" name="opens_detail_modal" value={opensDetailModal ? "true" : "false"} />
 
             <div className="grid gap-3 sm:grid-cols-2">
               <button
@@ -628,6 +631,23 @@ export function MenuItemForm({
                   Card horizontal con más protagonismo. Ideal para combos, lanzamientos o productos estratégicos.
                 </div>
               </button>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+              <label className="flex items-start gap-3 text-sm text-[var(--ui-text)]">
+                <input
+                  type="checkbox"
+                  checked={opensDetailModal}
+                  onChange={(event) => setOpensDetailModal(event.target.checked)}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="block font-bold">Requiere detalle antes de agregar</span>
+                  <span className="mt-1 block text-xs text-[var(--ui-muted)]">
+                    Actívalo para productos que deben abrir modal antes de sumarse al pedido, como combos, productos personalizables o items con extras.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
