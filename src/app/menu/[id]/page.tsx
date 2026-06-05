@@ -50,6 +50,103 @@ type CatalogItemPresentationRow = {
   metadata: Record<string, unknown> | null;
 };
 
+type CatalogItemOptionGroupRow = {
+  id: string;
+  catalog_item_id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  selection_type: string;
+  is_required: boolean;
+  min_select: number;
+  max_select: number;
+  sort_order: number;
+  is_active: boolean;
+  metadata: Record<string, unknown> | null;
+};
+
+type CatalogItemOptionRow = {
+  id: string;
+  option_group_id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  price_delta_amount: number | string;
+  product_id: string | null;
+  is_default: boolean;
+  is_active: boolean;
+  sort_order: number;
+  metadata: Record<string, unknown> | null;
+};
+
+type CatalogItemOptionConsumptionRuleRow = {
+  id: string;
+  option_id: string;
+  code: string;
+  name: string;
+  product_id: string;
+  quantity_per_option: number | string;
+  stock_unit_code: string | null;
+  input_quantity_per_option: number | string | null;
+  input_unit_code: string | null;
+  conversion_factor_to_stock: number | string;
+  input_uom_profile_id: string | null;
+  source_location_strategy: string;
+  source_location_id: string | null;
+  source_location_position_id: string | null;
+  is_active: boolean;
+  sort_order: number;
+  metadata: Record<string, unknown> | null;
+};
+
+type OperationalProductRow = {
+  id: string;
+  name: string | null;
+  sku: string | null;
+  unit: string | null;
+  stock_unit_code: string | null;
+  product_type: string | null;
+  is_active: boolean | null;
+};
+
+type InventoryUnitRow = {
+  code: string;
+  name: string;
+  symbol: string | null;
+  family: string | null;
+  is_active: boolean | null;
+};
+
+type ProductUomProfileRow = {
+  id: string;
+  product_id: string;
+  label: string;
+  input_unit_code: string;
+  qty_in_input_unit: number | string;
+  qty_in_stock_unit: number | string;
+  is_active: boolean | null;
+};
+
+type InventoryLocationRow = {
+  id: string;
+  site_id: string;
+  code: string;
+  zone: string;
+  description: string | null;
+  location_type: string | null;
+  is_active: boolean | null;
+};
+
+type InventoryLocationPositionRow = {
+  id: string;
+  site_id: string;
+  location_id: string;
+  code: string;
+  name: string;
+  kind: string;
+  is_active: boolean | null;
+};
+
 type CommercialCategoryRow = {
   id: string;
   site_id: string;
@@ -108,6 +205,77 @@ function parseFulfillmentModes(formData: FormData) {
 function parsePassCardLayout(value: FormDataEntryValue | string | null | undefined) {
   const layout = typeof value === "string" ? value.trim() : "";
   return layout === "featured" ? "featured" : "compact";
+}
+
+function parseSelectionType(value: FormDataEntryValue | string | null | undefined) {
+  const selectionType = typeof value === "string" ? value.trim() : "";
+  return selectionType === "multiple" ? "multiple" : "single";
+}
+
+function parseSourceLocationStrategy(value: FormDataEntryValue | string | null | undefined) {
+  const strategy = typeof value === "string" ? value.trim() : "";
+  if (strategy === "explicit_location" || strategy === "explicit_position") return strategy;
+  return "product_production_location";
+}
+
+function slugify(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function asCatalogCode(value: FormDataEntryValue | null, fallback: string) {
+  return slugify(asText(value) || fallback);
+}
+
+function asOptionalText(value: FormDataEntryValue | null) {
+  const text = asText(value);
+  return text || null;
+}
+
+function asOptionalPositiveNumber(value: FormDataEntryValue | null) {
+  const raw = asText(value);
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function normalizeSelectBounds(formData: FormData, selectionType: string, isRequired: boolean) {
+  const rawMin = Math.round(asNonNegativeNumber(formData.get("min_select")));
+  const rawMax = Math.round(asNonNegativeNumber(formData.get("max_select")));
+  const minSelect = Math.max(isRequired ? 1 : 0, rawMin);
+
+  if (selectionType === "single") {
+    return {
+      minSelect: Math.min(minSelect, 1),
+      maxSelect: 1,
+    };
+  }
+
+  return {
+    minSelect,
+    maxSelect: Math.max(1, rawMax, minSelect),
+  };
+}
+
+function formatCopAdmin(value: number | string | null | undefined) {
+  const parsed = typeof value === "number" ? value : Number(value ?? 0);
+
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(parsed) ? parsed : 0);
+}
+
+function formatQuantityAdmin(value: number | string | null | undefined) {
+  const parsed = typeof value === "number" ? value : Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return "0";
+  return Number.isInteger(parsed) ? String(parsed) : parsed.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function sameStringList(a: string[] | null | undefined, b: string[]) {
@@ -475,6 +643,417 @@ async function updateMenuItem(formData: FormData) {
   redirect("/menu?ok=" + encodeURIComponent("Item actualizado."));
 }
 
+
+async function createOptionGroup(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const name = asText(formData.get("name"));
+  const description = asText(formData.get("description")) || null;
+  const selectionType = parseSelectionType(formData.get("selection_type"));
+  const isRequired = asBool(formData.get("is_required"));
+  const { minSelect, maxSelect } = normalizeSelectBounds(formData, selectionType, isRequired);
+  const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
+  const code = asCatalogCode(formData.get("code"), name);
+
+  if (!itemId || !name || !code) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para crear el grupo de opciones.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .insert({
+      catalog_item_id: itemId,
+      code,
+      name,
+      description,
+      selection_type: selectionType,
+      is_required: isRequired,
+      min_select: minSelect,
+      max_select: maxSelect,
+      sort_order: sortOrder,
+      is_active: true,
+      metadata: {},
+    });
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Grupo de opciones creado.")}`);
+}
+
+async function updateOptionGroup(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const groupId = asText(formData.get("option_group_id"));
+  const name = asText(formData.get("name"));
+  const description = asText(formData.get("description")) || null;
+  const selectionType = parseSelectionType(formData.get("selection_type"));
+  const isRequired = asBool(formData.get("is_required"));
+  const isActive = asBool(formData.get("is_active"));
+  const { minSelect, maxSelect } = normalizeSelectBounds(formData, selectionType, isRequired);
+  const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
+  const code = asCatalogCode(formData.get("code"), name);
+
+  if (!itemId || !groupId || !name || !code) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para actualizar el grupo de opciones.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .update({
+      code,
+      name,
+      description,
+      selection_type: selectionType,
+      is_required: isRequired,
+      min_select: minSelect,
+      max_select: maxSelect,
+      sort_order: sortOrder,
+      is_active: isActive,
+    })
+    .eq("id", groupId)
+    .eq("catalog_item_id", itemId);
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Grupo de opciones actualizado.")}`);
+}
+
+async function disableOptionGroup(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const groupId = asText(formData.get("option_group_id"));
+
+  if (!itemId || !groupId) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Grupo de opciones invalido.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .update({ is_active: false })
+    .eq("id", groupId)
+    .eq("catalog_item_id", itemId);
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Grupo de opciones desactivado.")}`);
+}
+
+async function createOption(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const groupId = asText(formData.get("option_group_id"));
+  const name = asText(formData.get("name"));
+  const description = asText(formData.get("description")) || null;
+  const code = asCatalogCode(formData.get("code"), name);
+  const priceDeltaAmount = asNonNegativeNumber(formData.get("price_delta_amount"));
+  const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
+
+  if (!itemId || !groupId || !name || !code) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para crear la opcion.")}`);
+  }
+
+  const { data: group, error: groupError } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .select("id,catalog_item_id")
+    .eq("id", groupId)
+    .eq("catalog_item_id", itemId)
+    .maybeSingle();
+
+  if (groupError || !group) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(groupError?.message || "El grupo de opciones no pertenece a este item.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("pass")
+    .from("catalog_item_options")
+    .insert({
+      option_group_id: groupId,
+      code,
+      name,
+      description,
+      price_delta_amount: priceDeltaAmount,
+      product_id: null,
+      is_default: asBool(formData.get("is_default")),
+      is_active: true,
+      sort_order: sortOrder,
+      metadata: {},
+    });
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Opcion creada.")}`);
+}
+
+async function updateOption(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const groupId = asText(formData.get("option_group_id"));
+  const optionId = asText(formData.get("option_id"));
+  const name = asText(formData.get("name"));
+  const description = asText(formData.get("description")) || null;
+  const code = asCatalogCode(formData.get("code"), name);
+  const priceDeltaAmount = asNonNegativeNumber(formData.get("price_delta_amount"));
+  const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
+
+  if (!itemId || !groupId || !optionId || !name || !code) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para actualizar la opcion.")}`);
+  }
+
+  const { data: group, error: groupError } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .select("id,catalog_item_id")
+    .eq("id", groupId)
+    .eq("catalog_item_id", itemId)
+    .maybeSingle();
+
+  if (groupError || !group) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(groupError?.message || "El grupo de opciones no pertenece a este item.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("pass")
+    .from("catalog_item_options")
+    .update({
+      code,
+      name,
+      description,
+      price_delta_amount: priceDeltaAmount,
+      is_default: asBool(formData.get("is_default")),
+      is_active: asBool(formData.get("is_active")),
+      sort_order: sortOrder,
+    })
+    .eq("id", optionId)
+    .eq("option_group_id", groupId);
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Opcion actualizada.")}`);
+}
+
+async function disableOption(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const groupId = asText(formData.get("option_group_id"));
+  const optionId = asText(formData.get("option_id"));
+
+  if (!itemId || !groupId || !optionId) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Opcion invalida.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("pass")
+    .from("catalog_item_options")
+    .update({ is_active: false })
+    .eq("id", optionId)
+    .eq("option_group_id", groupId);
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Opcion desactivada.")}`);
+}
+
+function buildConsumptionLocationPayload(formData: FormData) {
+  const sourceLocationStrategy = parseSourceLocationStrategy(formData.get("source_location_strategy"));
+  const sourceLocationId = asOptionalText(formData.get("source_location_id"));
+  const sourceLocationPositionId = asOptionalText(formData.get("source_location_position_id"));
+
+  if (sourceLocationStrategy === "product_production_location") {
+    return {
+      source_location_strategy: sourceLocationStrategy,
+      source_location_id: null,
+      source_location_position_id: null,
+      error: "",
+    };
+  }
+
+  if (sourceLocationStrategy === "explicit_location" && !sourceLocationId) {
+    return {
+      source_location_strategy: sourceLocationStrategy,
+      source_location_id: null,
+      source_location_position_id: null,
+      error: "Selecciona el LOC explícito para esta regla de consumo.",
+    };
+  }
+
+  if (sourceLocationStrategy === "explicit_position" && (!sourceLocationId || !sourceLocationPositionId)) {
+    return {
+      source_location_strategy: sourceLocationStrategy,
+      source_location_id: sourceLocationId,
+      source_location_position_id: null,
+      error: "Selecciona LOC y posición interna para esta regla de consumo.",
+    };
+  }
+
+  return {
+    source_location_strategy: sourceLocationStrategy,
+    source_location_id: sourceLocationId,
+    source_location_position_id: sourceLocationStrategy === "explicit_position" ? sourceLocationPositionId : null,
+    error: "",
+  };
+}
+
+function parseConsumptionRulePayload(formData: FormData) {
+  const itemId = asText(formData.get("catalog_item_id"));
+  const optionId = asText(formData.get("option_id"));
+  const productId = asText(formData.get("product_id"));
+  const quantityPerOption = asNonNegativeNumber(formData.get("quantity_per_option"));
+  const name = asText(formData.get("name"));
+  const code = asCatalogCode(formData.get("code"), name || productId);
+  const inputQuantityPerOption = asOptionalPositiveNumber(formData.get("input_quantity_per_option"));
+  const conversionFactorToStock = asOptionalPositiveNumber(formData.get("conversion_factor_to_stock")) ?? 1;
+  const inputUomProfileId = asOptionalText(formData.get("input_uom_profile_id"));
+  const locationPayload = buildConsumptionLocationPayload(formData);
+
+  return {
+    itemId,
+    optionId,
+    productId,
+    quantityPerOption,
+    payload: {
+      code,
+      name,
+      product_id: productId,
+      quantity_per_option: quantityPerOption,
+      stock_unit_code: asOptionalText(formData.get("stock_unit_code")),
+      input_quantity_per_option: inputQuantityPerOption,
+      input_unit_code: asOptionalText(formData.get("input_unit_code")),
+      conversion_factor_to_stock: conversionFactorToStock,
+      input_uom_profile_id: inputUomProfileId,
+      source_location_strategy: locationPayload.source_location_strategy,
+      source_location_id: locationPayload.source_location_id,
+      source_location_position_id: locationPayload.source_location_position_id,
+      sort_order: Math.round(asNonNegativeNumber(formData.get("sort_order"))),
+      is_active: asBool(formData.get("is_active")),
+      metadata: {},
+    },
+    error: locationPayload.error,
+  };
+}
+
+async function createConsumptionRule(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const { itemId, optionId, productId, quantityPerOption, payload, error } = parseConsumptionRulePayload(formData);
+
+  if (!itemId || !optionId || !productId || !payload.name || !payload.code || quantityPerOption <= 0) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para crear la regla de consumo.")}`);
+  }
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error)}`);
+  }
+
+  const { error: insertError } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_consumption_rules")
+    .insert({
+      option_id: optionId,
+      ...payload,
+      is_active: true,
+    });
+
+  if (insertError) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(insertError.message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Regla de consumo creada.")}`);
+}
+
+async function updateConsumptionRule(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const ruleId = asText(formData.get("consumption_rule_id"));
+  const { itemId, optionId, productId, quantityPerOption, payload, error } = parseConsumptionRulePayload(formData);
+
+  if (!itemId || !optionId || !ruleId || !productId || !payload.name || !payload.code || quantityPerOption <= 0) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para actualizar la regla de consumo.")}`);
+  }
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error)}`);
+  }
+
+  const { error: updateError } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_consumption_rules")
+    .update(payload)
+    .eq("id", ruleId)
+    .eq("option_id", optionId);
+
+  if (updateError) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(updateError.message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Regla de consumo actualizada.")}`);
+}
+
+async function disableConsumptionRule(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const optionId = asText(formData.get("option_id"));
+  const ruleId = asText(formData.get("consumption_rule_id"));
+
+  if (!itemId || !optionId || !ruleId) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Regla de consumo invalida.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_consumption_rules")
+    .update({ is_active: false })
+    .eq("id", ruleId)
+    .eq("option_id", optionId);
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Regla de consumo desactivada.")}`);
+}
+
+
 async function disableMenuItem(formData: FormData) {
   "use server";
   const supabase = await createClient();
@@ -543,6 +1122,7 @@ export default async function MenuItemDetailPage({
     { data: categoriesRaw },
     { data: collectionsRaw },
     { data: presentationRaw },
+    { data: optionGroupsRaw },
   ] = await Promise.all([
     supabase
       .schema("pass").from("catalog_items")
@@ -571,12 +1151,137 @@ export default async function MenuItemDetailPage({
       .eq("catalog_item_id", id)
       .eq("surface", "vento_pass_menu")
       .maybeSingle(),
+    supabase
+      .schema("pass")
+      .from("catalog_item_option_groups")
+      .select("id,catalog_item_id,code,name,description,selection_type,is_required,min_select,max_select,sort_order,is_active,metadata")
+      .eq("catalog_item_id", id)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
   ]);
+
+  if (!item) {
+    redirect("/menu?error=" + encodeURIComponent("Item no encontrado."));
+  }
+
+  const row = item as CatalogItemRow;
+  const presentation = (presentationRaw ?? null) as CatalogItemPresentationRow | null;
+  const sites = (sitesRaw ?? []) as SiteRow[];
+  const metadata = (row.metadata ?? {}) as Record<string, unknown>;
 
   const { data: sellOptionsRaw } = await supabase
     .schema("pass").from("sell_products_by_site")
     .select("site_id,product_id,name,sku,base_price,recipe_cost_amount")
     .order("name", { ascending: true });
+
+  const optionGroups = ((optionGroupsRaw ?? []) as CatalogItemOptionGroupRow[]).sort((a, b) => {
+    if (Number(a.sort_order ?? 0) !== Number(b.sort_order ?? 0)) {
+      return Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0);
+    }
+
+    return String(a.name ?? "").localeCompare(String(b.name ?? ""), "es-CO");
+  });
+
+  const optionGroupIds = optionGroups.map((group) => group.id);
+
+  const { data: optionOptionsRaw } = optionGroupIds.length > 0
+    ? await supabase
+      .schema("pass")
+      .from("catalog_item_options")
+      .select("id,option_group_id,code,name,description,price_delta_amount,product_id,is_default,is_active,sort_order,metadata")
+      .in("option_group_id", optionGroupIds)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true })
+    : { data: [] as CatalogItemOptionRow[] };
+
+  const optionsByGroup = new Map<string, CatalogItemOptionRow[]>();
+
+  for (const option of (optionOptionsRaw ?? []) as CatalogItemOptionRow[]) {
+    const current = optionsByGroup.get(option.option_group_id) ?? [];
+    current.push(option);
+    optionsByGroup.set(option.option_group_id, current);
+  }
+
+  const optionIds = ((optionOptionsRaw ?? []) as CatalogItemOptionRow[]).map((option) => option.id);
+
+  const [
+    { data: consumptionRulesRaw },
+    { data: consumptionProductsRaw },
+    { data: inventoryUnitsRaw },
+    { data: productUomProfilesRaw },
+    { data: inventoryLocationsRaw },
+    { data: inventoryPositionsRaw },
+  ] = await Promise.all([
+    optionIds.length > 0
+      ? supabase
+        .schema("pass")
+        .from("catalog_item_option_consumption_rules")
+        .select("id,option_id,code,name,product_id,quantity_per_option,stock_unit_code,input_quantity_per_option,input_unit_code,conversion_factor_to_stock,input_uom_profile_id,source_location_strategy,source_location_id,source_location_position_id,is_active,sort_order,metadata")
+        .in("option_id", optionIds)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true })
+      : Promise.resolve({ data: [] as CatalogItemOptionConsumptionRuleRow[] }),
+    supabase
+      .from("products")
+      .select("id,name,sku,unit,stock_unit_code,product_type,is_active")
+      .eq("is_active", true)
+      .order("name", { ascending: true }),
+    supabase
+      .from("inventory_units")
+      .select("code,name,symbol,family,is_active")
+      .eq("is_active", true)
+      .order("family", { ascending: true })
+      .order("name", { ascending: true }),
+    supabase
+      .from("product_uom_profiles")
+      .select("id,product_id,label,input_unit_code,qty_in_input_unit,qty_in_stock_unit,is_active")
+      .eq("is_active", true)
+      .order("label", { ascending: true }),
+    supabase
+      .from("inventory_locations")
+      .select("id,site_id,code,zone,description,location_type,is_active")
+      .eq("site_id", row.site_id)
+      .eq("is_active", true)
+      .order("code", { ascending: true }),
+    supabase
+      .from("inventory_location_positions")
+      .select("id,site_id,location_id,code,name,kind,is_active")
+      .eq("site_id", row.site_id)
+      .eq("is_active", true)
+      .order("code", { ascending: true }),
+  ]);
+
+  const consumptionRulesByOption = new Map<string, CatalogItemOptionConsumptionRuleRow[]>();
+
+  for (const rule of (consumptionRulesRaw ?? []) as CatalogItemOptionConsumptionRuleRow[]) {
+    const current = consumptionRulesByOption.get(rule.option_id) ?? [];
+    current.push(rule);
+    consumptionRulesByOption.set(rule.option_id, current);
+  }
+
+  const consumptionProducts = ((consumptionProductsRaw ?? []) as OperationalProductRow[]).sort((a, b) =>
+    String(a.name ?? "").localeCompare(String(b.name ?? ""), "es-CO"),
+  );
+
+  const consumptionProductById = new Map(consumptionProducts.map((product) => [product.id, product]));
+  const inventoryUnits = (inventoryUnitsRaw ?? []) as InventoryUnitRow[];
+  const inventoryLocations = (inventoryLocationsRaw ?? []) as InventoryLocationRow[];
+  const inventoryPositions = (inventoryPositionsRaw ?? []) as InventoryLocationPositionRow[];
+  const uomProfiles = (productUomProfilesRaw ?? []) as ProductUomProfileRow[];
+
+  const uomProfilesByProduct = new Map<string, ProductUomProfileRow[]>();
+  for (const profile of uomProfiles) {
+    const current = uomProfilesByProduct.get(profile.product_id) ?? [];
+    current.push(profile);
+    uomProfilesByProduct.set(profile.product_id, current);
+  }
+
+  const positionsByLocation = new Map<string, InventoryLocationPositionRow[]>();
+  for (const position of inventoryPositions) {
+    const current = positionsByLocation.get(position.location_id) ?? [];
+    current.push(position);
+    positionsByLocation.set(position.location_id, current);
+  }
 
   const productsMap = new Map<
     string,
@@ -645,15 +1350,6 @@ export default async function MenuItemDetailPage({
     }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
 
-  if (!item) {
-    redirect("/menu?error=" + encodeURIComponent("Item no encontrado."));
-  }
-
-  const row = item as CatalogItemRow;
-  const presentation = (presentationRaw ?? null) as CatalogItemPresentationRow | null;
-  const sites = (sitesRaw ?? []) as SiteRow[];
-  const metadata = (row.metadata ?? {}) as Record<string, unknown>;
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -697,6 +1393,665 @@ export default async function MenuItemDetailPage({
           opens_detail_modal: Boolean(presentation?.opens_detail_modal),
         }}
       />
+
+
+      <div className="ui-panel space-y-6">
+        <div>
+          <div className="ui-h3">Opciones configurables</div>
+          <p className="ui-caption">
+            Configura grupos, opciones y reglas de consumo operativo. Las opciones son lo que ve el cliente; las reglas de consumo definen qué insumo/producto se descuenta del LOC al preparar.
+          </p>
+        </div>
+
+        <form action={createOptionGroup} className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+          <input type="hidden" name="catalog_item_id" value={row.id} />
+
+          <div className="grid gap-4 lg:grid-cols-[1fr_140px_140px_120px]">
+            <label className="space-y-2">
+              <span className="ui-label">Nuevo grupo</span>
+              <input name="name" className="ui-input" placeholder="Leche, tamaño, acompañante..." required />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Tipo</span>
+              <select name="selection_type" className="ui-input" defaultValue="single">
+                <option value="single">Única</option>
+                <option value="multiple">Múltiple</option>
+              </select>
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Máximo</span>
+              <input name="max_select" type="number" min="1" className="ui-input" defaultValue="1" />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Orden</span>
+              <input name="sort_order" type="number" min="0" className="ui-input" defaultValue="0" />
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_140px_auto] lg:items-end">
+            <label className="space-y-2">
+              <span className="ui-label">Código opcional</span>
+              <input name="code" className="ui-input" placeholder="leche, tamano, acompanante" />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Mínimo</span>
+              <input name="min_select" type="number" min="0" className="ui-input" defaultValue="0" />
+            </label>
+
+            <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
+              <input type="checkbox" name="is_required" />
+              Obligatorio
+            </label>
+          </div>
+
+          <label className="mt-4 block space-y-2">
+            <span className="ui-label">Descripción opcional</span>
+            <input name="description" className="ui-input" placeholder="El cliente debe escoger una opción de este grupo." />
+          </label>
+
+          <div className="mt-4">
+            <button type="submit" className="ui-btn ui-btn--brand">
+              Crear grupo
+            </button>
+          </div>
+        </form>
+
+        {optionGroups.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-white p-5">
+            <div className="text-sm font-semibold text-[var(--ui-text)]">Este producto aún no tiene opciones configurables.</div>
+            <p className="ui-caption mt-1">
+              Crea un grupo para empezar. Después podrás agregar opciones y reglas de consumo.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {optionGroups.map((group) => {
+              const groupOptions = optionsByGroup.get(group.id) ?? [];
+
+              return (
+                <div key={group.id} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
+                  <form action={updateOptionGroup} className="space-y-4">
+                    <input type="hidden" name="catalog_item_id" value={row.id} />
+                    <input type="hidden" name="option_group_id" value={group.id} />
+
+                    <div className="grid gap-4 lg:grid-cols-[1fr_140px_120px_120px_120px]">
+                      <label className="space-y-2">
+                        <span className="ui-label">Grupo</span>
+                        <input name="name" className="ui-input" defaultValue={group.name} required />
+                      </label>
+
+                      <label className="space-y-2">
+                        <span className="ui-label">Tipo</span>
+                        <select name="selection_type" className="ui-input" defaultValue={parseSelectionType(group.selection_type)}>
+                          <option value="single">Única</option>
+                          <option value="multiple">Múltiple</option>
+                        </select>
+                      </label>
+
+                      <label className="space-y-2">
+                        <span className="ui-label">Mínimo</span>
+                        <input name="min_select" type="number" min="0" className="ui-input" defaultValue={group.min_select ?? 0} />
+                      </label>
+
+                      <label className="space-y-2">
+                        <span className="ui-label">Máximo</span>
+                        <input name="max_select" type="number" min="1" className="ui-input" defaultValue={group.max_select ?? 1} />
+                      </label>
+
+                      <label className="space-y-2">
+                        <span className="ui-label">Orden</span>
+                        <input name="sort_order" type="number" min="0" className="ui-input" defaultValue={group.sort_order ?? 0} />
+                      </label>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+                      <label className="space-y-2">
+                        <span className="ui-label">Código</span>
+                        <input name="code" className="ui-input" defaultValue={group.code} required />
+                      </label>
+
+                      <label className="space-y-2">
+                        <span className="ui-label">Descripción</span>
+                        <input name="description" className="ui-input" defaultValue={group.description ?? ""} />
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-4">
+                      <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                        <input type="checkbox" name="is_required" defaultChecked={group.is_required} />
+                        Obligatorio
+                      </label>
+
+                      <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                        <input type="checkbox" name="is_active" defaultChecked={group.is_active} />
+                        Activo
+                      </label>
+
+                      <button type="submit" className="ui-btn ui-btn--brand">
+                        Guardar grupo
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="mt-3">
+                    <form action={disableOptionGroup}>
+                      <input type="hidden" name="catalog_item_id" value={row.id} />
+                      <input type="hidden" name="option_group_id" value={group.id} />
+                      <button type="submit" className="ui-btn ui-btn--ghost">
+                        Desactivar grupo
+                      </button>
+                    </form>
+                  </div>
+
+                  <div className="mt-6 space-y-3 border-t border-[var(--ui-border)] pt-5">
+                    <div>
+                      <div className="text-sm font-bold text-[var(--ui-text)]">Opciones</div>
+                      <p className="ui-caption">
+                        Cada opción puede sumar precio y tener reglas de consumo de inventario.
+                      </p>
+                    </div>
+
+                    <form action={createOption} className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                      <input type="hidden" name="catalog_item_id" value={row.id} />
+                      <input type="hidden" name="option_group_id" value={group.id} />
+
+                      <div className="grid gap-4 lg:grid-cols-[1fr_150px_120px]">
+                        <label className="space-y-2">
+                          <span className="ui-label">Nueva opción</span>
+                          <input name="name" className="ui-input" placeholder="Entera, almendra, brownie..." required />
+                        </label>
+
+                        <label className="space-y-2">
+                          <span className="ui-label">Adicional COP</span>
+                          <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue="0" />
+                        </label>
+
+                        <label className="space-y-2">
+                          <span className="ui-label">Orden</span>
+                          <input name="sort_order" type="number" min="0" className="ui-input" defaultValue="0" />
+                        </label>
+                      </div>
+
+                      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
+                        <label className="space-y-2">
+                          <span className="ui-label">Código opcional</span>
+                          <input name="code" className="ui-input" placeholder="almendra, brownie..." />
+                        </label>
+
+                        <label className="space-y-2">
+                          <span className="ui-label">Descripción opcional</span>
+                          <input name="description" className="ui-input" />
+                        </label>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap items-center gap-4">
+                        <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                          <input type="checkbox" name="is_default" />
+                          Predeterminada
+                        </label>
+
+                        <button type="submit" className="ui-btn ui-btn--brand">
+                          Crear opción
+                        </button>
+                      </div>
+                    </form>
+
+                    {groupOptions.length === 0 ? (
+                      <p className="ui-caption">Este grupo todavía no tiene opciones.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {groupOptions.map((option) => {
+                          const consumptionRules = consumptionRulesByOption.get(option.id) ?? [];
+
+                          return (
+                            <div key={option.id} className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                              <form action={updateOption} className="space-y-4">
+                                <input type="hidden" name="catalog_item_id" value={row.id} />
+                                <input type="hidden" name="option_group_id" value={group.id} />
+                                <input type="hidden" name="option_id" value={option.id} />
+
+                                <div className="grid gap-4 lg:grid-cols-[1fr_150px_120px]">
+                                  <label className="space-y-2">
+                                    <span className="ui-label">Opción</span>
+                                    <input name="name" className="ui-input" defaultValue={option.name} required />
+                                  </label>
+
+                                  <label className="space-y-2">
+                                    <span className="ui-label">Adicional COP</span>
+                                    <input
+                                      name="price_delta_amount"
+                                      type="number"
+                                      min="0"
+                                      className="ui-input"
+                                      defaultValue={String(option.price_delta_amount ?? 0)}
+                                    />
+                                  </label>
+
+                                  <label className="space-y-2">
+                                    <span className="ui-label">Orden</span>
+                                    <input name="sort_order" type="number" min="0" className="ui-input" defaultValue={option.sort_order ?? 0} />
+                                  </label>
+                                </div>
+
+                                <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+                                  <label className="space-y-2">
+                                    <span className="ui-label">Código</span>
+                                    <input name="code" className="ui-input" defaultValue={option.code} required />
+                                  </label>
+
+                                  <label className="space-y-2">
+                                    <span className="ui-label">Descripción</span>
+                                    <input name="description" className="ui-input" defaultValue={option.description ?? ""} />
+                                  </label>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-4">
+                                  <span className="ui-chip">
+                                    {formatCopAdmin(option.price_delta_amount)}
+                                  </span>
+
+                                  <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                                    <input type="checkbox" name="is_default" defaultChecked={option.is_default} />
+                                    Predeterminada
+                                  </label>
+
+                                  <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                                    <input type="checkbox" name="is_active" defaultChecked={option.is_active} />
+                                    Activa
+                                  </label>
+
+                                  <button type="submit" className="ui-btn ui-btn--brand">
+                                    Guardar opción
+                                  </button>
+                                </div>
+                              </form>
+
+                              <div className="mt-3">
+                                <form action={disableOption}>
+                                  <input type="hidden" name="catalog_item_id" value={row.id} />
+                                  <input type="hidden" name="option_group_id" value={group.id} />
+                                  <input type="hidden" name="option_id" value={option.id} />
+                                  <button type="submit" className="ui-btn ui-btn--ghost">
+                                    Desactivar opción
+                                  </button>
+                                </form>
+                              </div>
+
+                              <div className="mt-5 space-y-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                                <div>
+                                  <div className="text-sm font-bold text-[var(--ui-text)]">Consumo operativo</div>
+                                  <p className="ui-caption">
+                                    Vincula esta opción con uno o más insumos/productos para descontarlos del LOC al preparar.
+                                  </p>
+                                </div>
+
+                                <form action={createConsumptionRule} className="space-y-4 rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                  <input type="hidden" name="catalog_item_id" value={row.id} />
+                                  <input type="hidden" name="option_id" value={option.id} />
+                                  <input type="hidden" name="is_active" value="true" />
+
+                                  <div className="grid gap-4 lg:grid-cols-[1fr_150px_140px_120px]">
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Insumo / producto a consumir</span>
+                                      <select name="product_id" className="ui-input" required>
+                                        <option value="">Selecciona insumo o producto</option>
+                                        {consumptionProducts.map((product) => (
+                                          <option key={product.id} value={product.id}>
+                                            {[
+                                              product.name ?? "Sin nombre",
+                                              product.sku ? `SKU ${product.sku}` : null,
+                                              product.product_type,
+                                            ].filter(Boolean).join(" · ")}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Cantidad stock</span>
+                                      <input name="quantity_per_option" type="number" min="0.0001" step="0.0001" className="ui-input" required />
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Unidad stock</span>
+                                      <select name="stock_unit_code" className="ui-input" defaultValue="">
+                                        <option value="">Usar unidad del producto</option>
+                                        {inventoryUnits.map((unit) => (
+                                          <option key={unit.code} value={unit.code}>
+                                            {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Orden</span>
+                                      <input name="sort_order" type="number" min="0" className="ui-input" defaultValue="0" />
+                                    </label>
+                                  </div>
+
+                                  <div className="grid gap-4 lg:grid-cols-[1fr_150px_150px]">
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Nombre regla</span>
+                                      <input name="name" className="ui-input" placeholder="Consumo de leche de almendra" required />
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Código opcional</span>
+                                      <input name="code" className="ui-input" placeholder="leche-almendra" />
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Factor conversión</span>
+                                      <input name="conversion_factor_to_stock" type="number" min="0.0001" step="0.0001" className="ui-input" defaultValue="1" />
+                                    </label>
+                                  </div>
+
+                                  <div className="grid gap-4 lg:grid-cols-[150px_150px_1fr]">
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Cantidad entrada</span>
+                                      <input name="input_quantity_per_option" type="number" min="0.0001" step="0.0001" className="ui-input" />
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Unidad entrada</span>
+                                      <select name="input_unit_code" className="ui-input" defaultValue="">
+                                        <option value="">Sin unidad</option>
+                                        {inventoryUnits.map((unit) => (
+                                          <option key={unit.code} value={unit.code}>
+                                            {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Perfil UOM opcional</span>
+                                      <select name="input_uom_profile_id" className="ui-input" defaultValue="">
+                                        <option value="">Sin perfil</option>
+                                        {uomProfiles.map((profile) => {
+                                          const product = consumptionProductById.get(profile.product_id);
+                                          return (
+                                            <option key={profile.id} value={profile.id}>
+                                              {(product?.name ?? "Producto") + " · " + profile.label}
+                                            </option>
+                                          );
+                                        })}
+                                      </select>
+                                    </label>
+                                  </div>
+
+                                  <div className="grid gap-4 lg:grid-cols-[220px_1fr_1fr]">
+                                    <label className="space-y-2">
+                                      <span className="ui-label">LOC de consumo</span>
+                                      <select name="source_location_strategy" className="ui-input" defaultValue="product_production_location">
+                                        <option value="product_production_location">LOC de preparación del producto</option>
+                                        <option value="explicit_location">LOC explícito</option>
+                                        <option value="explicit_position">Posición interna explícita</option>
+                                      </select>
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">LOC explícito</span>
+                                      <select name="source_location_id" className="ui-input" defaultValue="">
+                                        <option value="">Sin LOC explícito</option>
+                                        {inventoryLocations.map((location) => (
+                                          <option key={location.id} value={location.id}>
+                                            {[location.code, location.zone, location.location_type].filter(Boolean).join(" · ")}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Posición interna</span>
+                                      <select name="source_location_position_id" className="ui-input" defaultValue="">
+                                        <option value="">Sin posición</option>
+                                        {inventoryLocations.map((location) => {
+                                          const positions = positionsByLocation.get(location.id) ?? [];
+                                          if (positions.length === 0) return null;
+
+                                          return (
+                                            <optgroup key={location.id} label={location.code}>
+                                              {positions.map((position) => (
+                                                <option key={position.id} value={position.id}>
+                                                  {position.code} · {position.name}
+                                                </option>
+                                              ))}
+                                            </optgroup>
+                                          );
+                                        })}
+                                      </select>
+                                    </label>
+                                  </div>
+
+                                  <button type="submit" className="ui-btn ui-btn--brand">
+                                    Crear regla de consumo
+                                  </button>
+                                </form>
+
+                                {consumptionRules.length === 0 ? (
+                                  <p className="ui-caption">
+                                    Esta opción no tiene reglas de consumo. Si es solo una preferencia visual, puede quedar así.
+                                  </p>
+                                ) : (
+                                  <div className="space-y-3">
+                                    {consumptionRules.map((rule) => {
+                                      const product = consumptionProductById.get(rule.product_id);
+                                      const ruleProfiles = uomProfilesByProduct.get(rule.product_id) ?? [];
+
+                                      return (
+                                        <div key={rule.id} className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                          <form action={updateConsumptionRule} className="space-y-4">
+                                            <input type="hidden" name="catalog_item_id" value={row.id} />
+                                            <input type="hidden" name="option_id" value={option.id} />
+                                            <input type="hidden" name="consumption_rule_id" value={rule.id} />
+
+                                            <div className="grid gap-4 lg:grid-cols-[1fr_150px_140px_120px]">
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Insumo / producto</span>
+                                                <select name="product_id" className="ui-input" defaultValue={rule.product_id} required>
+                                                  {consumptionProducts.map((candidate) => (
+                                                    <option key={candidate.id} value={candidate.id}>
+                                                      {[
+                                                        candidate.name ?? "Sin nombre",
+                                                        candidate.sku ? `SKU ${candidate.sku}` : null,
+                                                        candidate.product_type,
+                                                      ].filter(Boolean).join(" · ")}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Cantidad stock</span>
+                                                <input
+                                                  name="quantity_per_option"
+                                                  type="number"
+                                                  min="0.0001"
+                                                  step="0.0001"
+                                                  className="ui-input"
+                                                  defaultValue={String(rule.quantity_per_option ?? "")}
+                                                  required
+                                                />
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Unidad stock</span>
+                                                <select name="stock_unit_code" className="ui-input" defaultValue={rule.stock_unit_code ?? ""}>
+                                                  <option value="">Usar unidad del producto</option>
+                                                  {inventoryUnits.map((unit) => (
+                                                    <option key={unit.code} value={unit.code}>
+                                                      {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Orden</span>
+                                                <input name="sort_order" type="number" min="0" className="ui-input" defaultValue={rule.sort_order ?? 0} />
+                                              </label>
+                                            </div>
+
+                                            <div className="grid gap-4 lg:grid-cols-[1fr_150px_150px]">
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Nombre regla</span>
+                                                <input name="name" className="ui-input" defaultValue={rule.name} required />
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Código</span>
+                                                <input name="code" className="ui-input" defaultValue={rule.code} required />
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Factor conversión</span>
+                                                <input
+                                                  name="conversion_factor_to_stock"
+                                                  type="number"
+                                                  min="0.0001"
+                                                  step="0.0001"
+                                                  className="ui-input"
+                                                  defaultValue={String(rule.conversion_factor_to_stock ?? 1)}
+                                                />
+                                              </label>
+                                            </div>
+
+                                            <div className="grid gap-4 lg:grid-cols-[150px_150px_1fr]">
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Cantidad entrada</span>
+                                                <input
+                                                  name="input_quantity_per_option"
+                                                  type="number"
+                                                  min="0.0001"
+                                                  step="0.0001"
+                                                  className="ui-input"
+                                                  defaultValue={rule.input_quantity_per_option == null ? "" : String(rule.input_quantity_per_option)}
+                                                />
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Unidad entrada</span>
+                                                <select name="input_unit_code" className="ui-input" defaultValue={rule.input_unit_code ?? ""}>
+                                                  <option value="">Sin unidad</option>
+                                                  {inventoryUnits.map((unit) => (
+                                                    <option key={unit.code} value={unit.code}>
+                                                      {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Perfil UOM</span>
+                                                <select name="input_uom_profile_id" className="ui-input" defaultValue={rule.input_uom_profile_id ?? ""}>
+                                                  <option value="">Sin perfil</option>
+                                                  {ruleProfiles.map((profile) => (
+                                                    <option key={profile.id} value={profile.id}>
+                                                      {profile.label}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </label>
+                                            </div>
+
+                                            <div className="grid gap-4 lg:grid-cols-[220px_1fr_1fr]">
+                                              <label className="space-y-2">
+                                                <span className="ui-label">LOC de consumo</span>
+                                                <select
+                                                  name="source_location_strategy"
+                                                  className="ui-input"
+                                                  defaultValue={parseSourceLocationStrategy(rule.source_location_strategy)}
+                                                >
+                                                  <option value="product_production_location">LOC de preparación del producto</option>
+                                                  <option value="explicit_location">LOC explícito</option>
+                                                  <option value="explicit_position">Posición interna explícita</option>
+                                                </select>
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">LOC explícito</span>
+                                                <select name="source_location_id" className="ui-input" defaultValue={rule.source_location_id ?? ""}>
+                                                  <option value="">Sin LOC explícito</option>
+                                                  {inventoryLocations.map((location) => (
+                                                    <option key={location.id} value={location.id}>
+                                                      {[location.code, location.zone, location.location_type].filter(Boolean).join(" · ")}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Posición interna</span>
+                                                <select name="source_location_position_id" className="ui-input" defaultValue={rule.source_location_position_id ?? ""}>
+                                                  <option value="">Sin posición</option>
+                                                  {inventoryLocations.map((location) => {
+                                                    const positions = positionsByLocation.get(location.id) ?? [];
+                                                    if (positions.length === 0) return null;
+
+                                                    return (
+                                                      <optgroup key={location.id} label={location.code}>
+                                                        {positions.map((position) => (
+                                                          <option key={position.id} value={position.id}>
+                                                            {position.code} · {position.name}
+                                                          </option>
+                                                        ))}
+                                                      </optgroup>
+                                                    );
+                                                  })}
+                                                </select>
+                                              </label>
+                                            </div>
+
+                                            <div className="flex flex-wrap items-center gap-4">
+                                              <span className="ui-chip">
+                                                Consume {formatQuantityAdmin(rule.quantity_per_option)} {rule.stock_unit_code || product?.stock_unit_code || product?.unit || "unidad"}
+                                              </span>
+
+                                              <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                                                <input type="checkbox" name="is_active" defaultChecked={rule.is_active} />
+                                                Activa
+                                              </label>
+
+                                              <button type="submit" className="ui-btn ui-btn--brand">
+                                                Guardar regla
+                                              </button>
+                                            </div>
+                                          </form>
+
+                                          <div className="mt-3">
+                                            <form action={disableConsumptionRule}>
+                                              <input type="hidden" name="catalog_item_id" value={row.id} />
+                                              <input type="hidden" name="option_id" value={option.id} />
+                                              <input type="hidden" name="consumption_rule_id" value={rule.id} />
+                                              <button type="submit" className="ui-btn ui-btn--ghost">
+                                                Desactivar regla
+                                              </button>
+                                            </form>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <form action={disableMenuItem}><input type="hidden" name="id" value={row.id} /><button type="submit" className="ui-btn ui-btn--ghost">Deshabilitar</button></form>
