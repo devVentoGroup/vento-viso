@@ -73,6 +73,7 @@ type CatalogItemOptionRow = {
   description: string | null;
   price_delta_amount: number | string;
   product_id: string | null;
+  effect_type: string;
   is_default: boolean;
   is_active: boolean;
   sort_order: number;
@@ -85,6 +86,7 @@ type CatalogItemOptionConsumptionRuleRow = {
   code: string;
   name: string;
   product_id: string;
+  effect_type: string;
   quantity_per_option: number | string;
   stock_unit_code: string | null;
   input_quantity_per_option: number | string | null;
@@ -97,6 +99,28 @@ type CatalogItemOptionConsumptionRuleRow = {
   is_active: boolean;
   sort_order: number;
   metadata: Record<string, unknown> | null;
+};
+
+type CatalogItemOptionRecipeEffectRow = {
+  id: string;
+  option_id: string;
+  effect_type: string;
+  target_ingredient_product_id: string;
+  recipe_component_code: string | null;
+  quantity_mode: string;
+  quantity_amount: number | string | null;
+  stock_unit_code: string | null;
+  is_active: boolean;
+  sort_order: number;
+  metadata: Record<string, unknown> | null;
+};
+
+type RecipeIngredientRow = {
+  id: string;
+  product_id: string;
+  ingredient_product_id: string;
+  quantity: number | string;
+  is_active: boolean | null;
 };
 
 type OperationalProductRow = {
@@ -216,6 +240,48 @@ function parseSourceLocationStrategy(value: FormDataEntryValue | string | null |
   const strategy = typeof value === "string" ? value.trim() : "";
   if (strategy === "explicit_location" || strategy === "explicit_position") return strategy;
   return "product_production_location";
+}
+
+function parseOptionEffectType(value: FormDataEntryValue | string | null | undefined) {
+  const effectType = typeof value === "string" ? value.trim() : "";
+  if (
+    effectType === "additive" ||
+    effectType === "replacement" ||
+    effectType === "removal"
+  ) {
+    return effectType;
+  }
+
+  return "preference";
+}
+
+function parseConsumptionEffectType(value: FormDataEntryValue | string | null | undefined) {
+  const effectType = typeof value === "string" ? value.trim() : "";
+  return effectType === "replacement" ? "replacement" : "additive";
+}
+
+function parseRecipeEffectType(value: FormDataEntryValue | string | null | undefined) {
+  const effectType = typeof value === "string" ? value.trim() : "";
+  return effectType === "replacement" ? "replacement" : "removal";
+}
+
+function parseRecipeEffectQuantityMode(value: FormDataEntryValue | string | null | undefined) {
+  const mode = typeof value === "string" ? value.trim() : "";
+  return mode === "fixed_quantity" ? "fixed_quantity" : "full_recipe_component";
+}
+
+function getEffectTypeLabel(value: string | null | undefined) {
+  switch (value) {
+    case "additive":
+      return "Extra";
+    case "replacement":
+      return "Reemplazo";
+    case "removal":
+      return "Retiro";
+    case "preference":
+    default:
+      return "Preferencia";
+  }
 }
 
 function slugify(value: string) {
@@ -766,6 +832,7 @@ async function createOption(formData: FormData) {
   const description = asText(formData.get("description")) || null;
   const code = asCatalogCode(formData.get("code"), name);
   const priceDeltaAmount = asNonNegativeNumber(formData.get("price_delta_amount"));
+  const effectType = parseOptionEffectType(formData.get("effect_type"));
   const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
 
   if (!itemId || !groupId || !name || !code) {
@@ -794,6 +861,7 @@ async function createOption(formData: FormData) {
       description,
       price_delta_amount: priceDeltaAmount,
       product_id: null,
+      effect_type: effectType,
       is_default: asBool(formData.get("is_default")),
       is_active: true,
       sort_order: sortOrder,
@@ -819,6 +887,7 @@ async function updateOption(formData: FormData) {
   const description = asText(formData.get("description")) || null;
   const code = asCatalogCode(formData.get("code"), name);
   const priceDeltaAmount = asNonNegativeNumber(formData.get("price_delta_amount"));
+  const effectType = parseOptionEffectType(formData.get("effect_type"));
   const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
 
   if (!itemId || !groupId || !optionId || !name || !code) {
@@ -845,6 +914,7 @@ async function updateOption(formData: FormData) {
       name,
       description,
       price_delta_amount: priceDeltaAmount,
+      effect_type: effectType,
       is_default: asBool(formData.get("is_default")),
       is_active: asBool(formData.get("is_active")),
       sort_order: sortOrder,
@@ -948,6 +1018,7 @@ function parseConsumptionRulePayload(formData: FormData) {
       code,
       name,
       product_id: productId,
+      effect_type: parseConsumptionEffectType(formData.get("effect_type")),
       quantity_per_option: quantityPerOption,
       stock_unit_code: asOptionalText(formData.get("stock_unit_code")),
       input_quantity_per_option: inputQuantityPerOption,
@@ -1052,6 +1123,275 @@ async function disableConsumptionRule(formData: FormData) {
   revalidatePath(`/menu/${itemId}`);
   redirect(`/menu/${itemId}?ok=${encodeURIComponent("Regla de consumo desactivada.")}`);
 }
+
+
+function parseRecipeEffectPayload(formData: FormData) {
+  const itemId = asText(formData.get("catalog_item_id"));
+  const optionId = asText(formData.get("option_id"));
+  const effectType = parseRecipeEffectType(formData.get("effect_type"));
+  const quantityMode = parseRecipeEffectQuantityMode(formData.get("quantity_mode"));
+  const quantityAmount = quantityMode === "fixed_quantity"
+    ? asOptionalPositiveNumber(formData.get("quantity_amount"))
+    : null;
+
+  return {
+    itemId,
+    optionId,
+    payload: {
+      effect_type: effectType,
+      target_ingredient_product_id: asText(formData.get("target_ingredient_product_id")),
+      recipe_component_code: asOptionalText(formData.get("recipe_component_code")),
+      quantity_mode: quantityMode,
+      quantity_amount: quantityAmount,
+      stock_unit_code: asOptionalText(formData.get("stock_unit_code")),
+      is_active: asBool(formData.get("is_active")),
+      sort_order: Math.round(asNonNegativeNumber(formData.get("sort_order"))),
+      metadata: {},
+    },
+    error: quantityMode === "fixed_quantity" && !quantityAmount
+      ? "La cantidad fija debe ser mayor a 0."
+      : "",
+  };
+}
+
+async function createRecipeEffect(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const { itemId, optionId, payload, error } = parseRecipeEffectPayload(formData);
+
+  if (!itemId || !optionId || !payload.target_ingredient_product_id) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para crear el efecto de receta.")}`);
+  }
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error)}`);
+  }
+
+  const { error: insertError } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_recipe_effects")
+    .insert({
+      option_id: optionId,
+      ...payload,
+      is_active: true,
+    });
+
+  if (insertError) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(insertError.message)}`);
+  }
+
+  await supabase
+    .schema("pass")
+    .from("catalog_item_options")
+    .update({ effect_type: payload.effect_type })
+    .eq("id", optionId);
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Efecto de receta creado.")}`);
+}
+
+async function updateRecipeEffect(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const effectId = asText(formData.get("recipe_effect_id"));
+  const { itemId, optionId, payload, error } = parseRecipeEffectPayload(formData);
+
+  if (!itemId || !optionId || !effectId || !payload.target_ingredient_product_id) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para actualizar el efecto de receta.")}`);
+  }
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error)}`);
+  }
+
+  const { error: updateError } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_recipe_effects")
+    .update(payload)
+    .eq("id", effectId)
+    .eq("option_id", optionId);
+
+  if (updateError) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(updateError.message)}`);
+  }
+
+  await supabase
+    .schema("pass")
+    .from("catalog_item_options")
+    .update({ effect_type: payload.effect_type })
+    .eq("id", optionId);
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Efecto de receta actualizado.")}`);
+}
+
+async function disableRecipeEffect(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const optionId = asText(formData.get("option_id"));
+  const effectId = asText(formData.get("recipe_effect_id"));
+
+  if (!itemId || !optionId || !effectId) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Efecto de receta invalido.")}`);
+  }
+
+  const { error } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_recipe_effects")
+    .update({ is_active: false })
+    .eq("id", effectId)
+    .eq("option_id", optionId);
+
+  if (error) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Efecto de receta desactivado.")}`);
+}
+
+async function createRemovalOptionFromRecipe(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const ingredientProductId = asText(formData.get("ingredient_product_id"));
+  const ingredientName = asText(formData.get("ingredient_name"));
+  const stockUnitCode = asOptionalText(formData.get("stock_unit_code"));
+
+  if (!itemId || !ingredientProductId || !ingredientName) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Ingrediente invalido para crear opcion de retiro.")}`);
+  }
+
+  const groupCode = "quitar-ingredientes";
+
+  const { data: existingGroup, error: existingGroupError } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .select("id")
+    .eq("catalog_item_id", itemId)
+    .eq("code", groupCode)
+    .maybeSingle();
+
+  if (existingGroupError) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(existingGroupError.message)}`);
+  }
+
+  let groupId = existingGroup?.id as string | undefined;
+
+  if (!groupId) {
+    const { data: createdGroup, error: groupError } = await supabase
+      .schema("pass")
+      .from("catalog_item_option_groups")
+      .insert({
+        catalog_item_id: itemId,
+        code: groupCode,
+        name: "Quitar ingredientes",
+        description: "Ingredientes que el cliente puede pedir retirar de este producto.",
+        selection_type: "multiple",
+        is_required: false,
+        min_select: 0,
+        max_select: 99,
+        sort_order: 900,
+        is_active: true,
+        metadata: { source: "recipe_removals" },
+      })
+      .select("id")
+      .single();
+
+    if (groupError || !createdGroup?.id) {
+      redirect(`/menu/${itemId}?error=${encodeURIComponent(groupError?.message || "No se pudo crear el grupo de retiros.")}`);
+    }
+
+    groupId = createdGroup.id;
+  }
+
+  const optionCode = `sin-${slugify(ingredientName)}`;
+
+  const { data: existingOption, error: existingOptionError } = await supabase
+    .schema("pass")
+    .from("catalog_item_options")
+    .select("id")
+    .eq("option_group_id", groupId)
+    .eq("code", optionCode)
+    .maybeSingle();
+
+  if (existingOptionError) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(existingOptionError.message)}`);
+  }
+
+  let optionId = existingOption?.id as string | undefined;
+
+  if (!optionId) {
+    const { data: createdOption, error: optionError } = await supabase
+      .schema("pass")
+      .from("catalog_item_options")
+      .insert({
+        option_group_id: groupId,
+        code: optionCode,
+        name: `Sin ${ingredientName}`,
+        description: `No consumir ${ingredientName} en la preparacion.`,
+        price_delta_amount: 0,
+        product_id: null,
+        effect_type: "removal",
+        is_default: false,
+        is_active: true,
+        sort_order: 0,
+        metadata: { source: "recipe_removals", ingredient_product_id: ingredientProductId },
+      })
+      .select("id")
+      .single();
+
+    if (optionError || !createdOption?.id) {
+      redirect(`/menu/${itemId}?error=${encodeURIComponent(optionError?.message || "No se pudo crear la opcion de retiro.")}`);
+    }
+
+    optionId = createdOption.id;
+  }
+
+  const { data: existingEffect, error: existingEffectError } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_recipe_effects")
+    .select("id")
+    .eq("option_id", optionId)
+    .eq("target_ingredient_product_id", ingredientProductId)
+    .eq("effect_type", "removal")
+    .maybeSingle();
+
+  if (existingEffectError) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(existingEffectError.message)}`);
+  }
+
+  if (!existingEffect) {
+    const { error: effectError } = await supabase
+      .schema("pass")
+      .from("catalog_item_option_recipe_effects")
+      .insert({
+        option_id: optionId,
+        effect_type: "removal",
+        target_ingredient_product_id: ingredientProductId,
+        recipe_component_code: slugify(ingredientName),
+        quantity_mode: "full_recipe_component",
+        quantity_amount: null,
+        stock_unit_code: stockUnitCode,
+        is_active: true,
+        sort_order: 0,
+        metadata: { source: "recipe_removals" },
+      });
+
+    if (effectError) {
+      redirect(`/menu/${itemId}?error=${encodeURIComponent(effectError.message)}`);
+    }
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent(`Opcion "Sin ${ingredientName}" creada.`)}`);
+}
+
 
 
 async function disableMenuItem(formData: FormData) {
@@ -1188,7 +1528,7 @@ export default async function MenuItemDetailPage({
     ? await supabase
       .schema("pass")
       .from("catalog_item_options")
-      .select("id,option_group_id,code,name,description,price_delta_amount,product_id,is_default,is_active,sort_order,metadata")
+      .select("id,option_group_id,code,name,description,price_delta_amount,product_id,effect_type,is_default,is_active,sort_order,metadata")
       .in("option_group_id", optionGroupIds)
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true })
@@ -1206,6 +1546,8 @@ export default async function MenuItemDetailPage({
 
   const [
     { data: consumptionRulesRaw },
+    { data: recipeEffectsRaw },
+    { data: recipeIngredientsRaw },
     { data: consumptionProductsRaw },
     { data: inventoryUnitsRaw },
     { data: productUomProfilesRaw },
@@ -1216,11 +1558,27 @@ export default async function MenuItemDetailPage({
       ? supabase
         .schema("pass")
         .from("catalog_item_option_consumption_rules")
-        .select("id,option_id,code,name,product_id,quantity_per_option,stock_unit_code,input_quantity_per_option,input_unit_code,conversion_factor_to_stock,input_uom_profile_id,source_location_strategy,source_location_id,source_location_position_id,is_active,sort_order,metadata")
+        .select("id,option_id,code,name,product_id,effect_type,quantity_per_option,stock_unit_code,input_quantity_per_option,input_unit_code,conversion_factor_to_stock,input_uom_profile_id,source_location_strategy,source_location_id,source_location_position_id,is_active,sort_order,metadata")
         .in("option_id", optionIds)
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true })
       : Promise.resolve({ data: [] as CatalogItemOptionConsumptionRuleRow[] }),
+    optionIds.length > 0
+      ? supabase
+        .schema("pass")
+        .from("catalog_item_option_recipe_effects")
+        .select("id,option_id,effect_type,target_ingredient_product_id,recipe_component_code,quantity_mode,quantity_amount,stock_unit_code,is_active,sort_order,metadata")
+        .in("option_id", optionIds)
+        .order("sort_order", { ascending: true })
+      : Promise.resolve({ data: [] as CatalogItemOptionRecipeEffectRow[] }),
+    row.product_id
+      ? supabase
+        .from("recipes")
+        .select("id,product_id,ingredient_product_id,quantity,is_active")
+        .eq("product_id", row.product_id)
+        .eq("is_active", true)
+        .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] as RecipeIngredientRow[] }),
     supabase
       .from("products")
       .select("id,name,sku,unit,stock_unit_code,product_type,is_active")
@@ -1259,6 +1617,14 @@ export default async function MenuItemDetailPage({
     consumptionRulesByOption.set(rule.option_id, current);
   }
 
+  const recipeEffectsByOption = new Map<string, CatalogItemOptionRecipeEffectRow[]>();
+
+  for (const effect of (recipeEffectsRaw ?? []) as CatalogItemOptionRecipeEffectRow[]) {
+    const current = recipeEffectsByOption.get(effect.option_id) ?? [];
+    current.push(effect);
+    recipeEffectsByOption.set(effect.option_id, current);
+  }
+
   const consumptionProducts = ((consumptionProductsRaw ?? []) as OperationalProductRow[]).sort((a, b) =>
     String(a.name ?? "").localeCompare(String(b.name ?? ""), "es-CO"),
   );
@@ -1282,6 +1648,13 @@ export default async function MenuItemDetailPage({
     current.push(position);
     positionsByLocation.set(position.location_id, current);
   }
+
+  const recipeIngredients = ((recipeIngredientsRaw ?? []) as RecipeIngredientRow[])
+    .map((ingredient) => ({
+      ...ingredient,
+      product: consumptionProductById.get(ingredient.ingredient_product_id) ?? null,
+    }))
+    .filter((ingredient) => Boolean(ingredient.product));
 
   const productsMap = new Map<
     string,
@@ -1402,6 +1775,55 @@ export default async function MenuItemDetailPage({
             Configura grupos, opciones y reglas de consumo operativo. Las opciones son lo que ve el cliente; las reglas de consumo definen qué insumo/producto se descuenta del LOC al preparar.
           </p>
         </div>
+
+        {recipeIngredients.length > 0 ? (
+          <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+            <div className="text-sm font-bold text-[var(--ui-text)]">Ingredientes retirables desde receta</div>
+            <p className="ui-caption mt-1">
+              Crea opciones “Sin X” a partir de ingredientes activos de la receta. Al preparar, ese ingrediente no debe consumirse.
+            </p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {recipeIngredients.map((ingredient) => {
+                const product = ingredient.product;
+                if (!product) return null;
+
+                return (
+                  <form
+                    key={ingredient.id}
+                    action={createRemovalOptionFromRecipe}
+                    className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3"
+                  >
+                    <input type="hidden" name="catalog_item_id" value={row.id} />
+                    <input type="hidden" name="ingredient_product_id" value={ingredient.ingredient_product_id} />
+                    <input type="hidden" name="ingredient_name" value={product.name ?? "Ingrediente"} />
+                    <input type="hidden" name="stock_unit_code" value={product.stock_unit_code || product.unit || ""} />
+
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-bold text-[var(--ui-text)]">
+                        {product.name ?? "Ingrediente"}
+                      </div>
+                      <div className="ui-caption">
+                        Receta: {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}
+                      </div>
+                    </div>
+
+                    <button type="submit" className="ui-btn ui-btn--ghost shrink-0">
+                      Crear “Sin”
+                    </button>
+                  </form>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-white p-4">
+            <div className="text-sm font-semibold text-[var(--ui-text)]">No hay ingredientes de receta para sugerir retiros.</div>
+            <p className="ui-caption mt-1">
+              Cuando el producto operacional tenga receta activa, aquí aparecerán ingredientes para crear opciones tipo “Sin X”.
+            </p>
+          </div>
+        )}
 
         <form action={createOptionGroup} className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
           <input type="hidden" name="catalog_item_id" value={row.id} />
@@ -1559,7 +1981,7 @@ export default async function MenuItemDetailPage({
                       <input type="hidden" name="catalog_item_id" value={row.id} />
                       <input type="hidden" name="option_group_id" value={group.id} />
 
-                      <div className="grid gap-4 lg:grid-cols-[1fr_150px_120px]">
+                      <div className="grid gap-4 lg:grid-cols-[1fr_150px_160px_120px]">
                         <label className="space-y-2">
                           <span className="ui-label">Nueva opción</span>
                           <input name="name" className="ui-input" placeholder="Entera, almendra, brownie..." required />
@@ -1568,6 +1990,16 @@ export default async function MenuItemDetailPage({
                         <label className="space-y-2">
                           <span className="ui-label">Adicional COP</span>
                           <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue="0" />
+                        </label>
+
+                        <label className="space-y-2">
+                          <span className="ui-label">Efecto</span>
+                          <select name="effect_type" className="ui-input" defaultValue="preference">
+                            <option value="preference">Preferencia</option>
+                            <option value="additive">Extra</option>
+                            <option value="replacement">Reemplazo</option>
+                            <option value="removal">Retiro</option>
+                          </select>
                         </label>
 
                         <label className="space-y-2">
@@ -1606,6 +2038,7 @@ export default async function MenuItemDetailPage({
                       <div className="space-y-3">
                         {groupOptions.map((option) => {
                           const consumptionRules = consumptionRulesByOption.get(option.id) ?? [];
+                          const recipeEffects = recipeEffectsByOption.get(option.id) ?? [];
 
                           return (
                             <div key={option.id} className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
@@ -1614,7 +2047,7 @@ export default async function MenuItemDetailPage({
                                 <input type="hidden" name="option_group_id" value={group.id} />
                                 <input type="hidden" name="option_id" value={option.id} />
 
-                                <div className="grid gap-4 lg:grid-cols-[1fr_150px_120px]">
+                                <div className="grid gap-4 lg:grid-cols-[1fr_150px_160px_120px]">
                                   <label className="space-y-2">
                                     <span className="ui-label">Opción</span>
                                     <input name="name" className="ui-input" defaultValue={option.name} required />
@@ -1629,6 +2062,16 @@ export default async function MenuItemDetailPage({
                                       className="ui-input"
                                       defaultValue={String(option.price_delta_amount ?? 0)}
                                     />
+                                  </label>
+
+                                  <label className="space-y-2">
+                                    <span className="ui-label">Efecto</span>
+                                    <select name="effect_type" className="ui-input" defaultValue={parseOptionEffectType(option.effect_type)}>
+                                      <option value="preference">Preferencia</option>
+                                      <option value="additive">Extra</option>
+                                      <option value="replacement">Reemplazo</option>
+                                      <option value="removal">Retiro</option>
+                                    </select>
                                   </label>
 
                                   <label className="space-y-2">
@@ -1652,6 +2095,10 @@ export default async function MenuItemDetailPage({
                                 <div className="flex flex-wrap items-center gap-4">
                                   <span className="ui-chip">
                                     {formatCopAdmin(option.price_delta_amount)}
+                                  </span>
+
+                                  <span className="ui-chip">
+                                    {getEffectTypeLabel(option.effect_type)}
                                   </span>
 
                                   <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
@@ -1679,6 +2126,207 @@ export default async function MenuItemDetailPage({
                                     Desactivar opción
                                   </button>
                                 </form>
+                              </div>
+
+                              <div className="mt-5 space-y-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                                <div>
+                                  <div className="text-sm font-bold text-[var(--ui-text)]">Efectos sobre receta</div>
+                                  <p className="ui-caption">
+                                    Úsalo para “Sin ingrediente” o reemplazos reales. Esto evita que el ingrediente base se descuente al preparar.
+                                  </p>
+                                </div>
+
+                                <form action={createRecipeEffect} className="space-y-4 rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                  <input type="hidden" name="catalog_item_id" value={row.id} />
+                                  <input type="hidden" name="option_id" value={option.id} />
+                                  <input type="hidden" name="is_active" value="true" />
+
+                                  <div className="grid gap-4 lg:grid-cols-[160px_1fr_180px_140px]">
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Tipo</span>
+                                      <select name="effect_type" className="ui-input" defaultValue={parseRecipeEffectType(option.effect_type)}>
+                                        <option value="removal">Retirar ingrediente</option>
+                                        <option value="replacement">Reemplazar ingrediente</option>
+                                      </select>
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Ingrediente de receta</span>
+                                      <select name="target_ingredient_product_id" className="ui-input" required>
+                                        <option value="">Selecciona ingrediente</option>
+                                        {recipeIngredients.map((ingredient) => {
+                                          const product = ingredient.product;
+                                          if (!product) return null;
+
+                                          return (
+                                            <option key={ingredient.id} value={ingredient.ingredient_product_id}>
+                                              {product.name ?? "Ingrediente"} · {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}
+                                            </option>
+                                          );
+                                        })}
+                                      </select>
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Modo cantidad</span>
+                                      <select name="quantity_mode" className="ui-input" defaultValue="full_recipe_component">
+                                        <option value="full_recipe_component">Todo el componente</option>
+                                        <option value="fixed_quantity">Cantidad fija</option>
+                                      </select>
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Cantidad fija</span>
+                                      <input name="quantity_amount" type="number" min="0.0001" step="0.0001" className="ui-input" />
+                                    </label>
+                                  </div>
+
+                                  <div className="grid gap-4 lg:grid-cols-[1fr_160px_120px]">
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Código componente opcional</span>
+                                      <input name="recipe_component_code" className="ui-input" placeholder="milk, sauce, onion..." />
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Unidad</span>
+                                      <select name="stock_unit_code" className="ui-input" defaultValue="">
+                                        <option value="">Usar unidad del ingrediente</option>
+                                        {inventoryUnits.map((unit) => (
+                                          <option key={unit.code} value={unit.code}>
+                                            {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Orden</span>
+                                      <input name="sort_order" type="number" min="0" className="ui-input" defaultValue="0" />
+                                    </label>
+                                  </div>
+
+                                  <button type="submit" className="ui-btn ui-btn--brand">
+                                    Crear efecto de receta
+                                  </button>
+                                </form>
+
+                                {recipeEffects.length === 0 ? (
+                                  <p className="ui-caption">
+                                    Esta opción no modifica la receta base.
+                                  </p>
+                                ) : (
+                                  <div className="space-y-3">
+                                    {recipeEffects.map((effect) => {
+                                      const targetProduct = consumptionProductById.get(effect.target_ingredient_product_id);
+
+                                      return (
+                                        <div key={effect.id} className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                          <form action={updateRecipeEffect} className="space-y-4">
+                                            <input type="hidden" name="catalog_item_id" value={row.id} />
+                                            <input type="hidden" name="option_id" value={option.id} />
+                                            <input type="hidden" name="recipe_effect_id" value={effect.id} />
+
+                                            <div className="grid gap-4 lg:grid-cols-[160px_1fr_180px_140px]">
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Tipo</span>
+                                                <select name="effect_type" className="ui-input" defaultValue={parseRecipeEffectType(effect.effect_type)}>
+                                                  <option value="removal">Retirar ingrediente</option>
+                                                  <option value="replacement">Reemplazar ingrediente</option>
+                                                </select>
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Ingrediente de receta</span>
+                                                <select name="target_ingredient_product_id" className="ui-input" defaultValue={effect.target_ingredient_product_id} required>
+                                                  {recipeIngredients.map((ingredient) => {
+                                                    const product = ingredient.product;
+                                                    if (!product) return null;
+
+                                                    return (
+                                                      <option key={ingredient.id} value={ingredient.ingredient_product_id}>
+                                                        {product.name ?? "Ingrediente"} · {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}
+                                                      </option>
+                                                    );
+                                                  })}
+                                                </select>
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Modo cantidad</span>
+                                                <select name="quantity_mode" className="ui-input" defaultValue={parseRecipeEffectQuantityMode(effect.quantity_mode)}>
+                                                  <option value="full_recipe_component">Todo el componente</option>
+                                                  <option value="fixed_quantity">Cantidad fija</option>
+                                                </select>
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Cantidad fija</span>
+                                                <input
+                                                  name="quantity_amount"
+                                                  type="number"
+                                                  min="0.0001"
+                                                  step="0.0001"
+                                                  className="ui-input"
+                                                  defaultValue={effect.quantity_amount == null ? "" : String(effect.quantity_amount)}
+                                                />
+                                              </label>
+                                            </div>
+
+                                            <div className="grid gap-4 lg:grid-cols-[1fr_160px_120px]">
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Código componente</span>
+                                                <input name="recipe_component_code" className="ui-input" defaultValue={effect.recipe_component_code ?? ""} />
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Unidad</span>
+                                                <select name="stock_unit_code" className="ui-input" defaultValue={effect.stock_unit_code ?? ""}>
+                                                  <option value="">Usar unidad del ingrediente</option>
+                                                  {inventoryUnits.map((unit) => (
+                                                    <option key={unit.code} value={unit.code}>
+                                                      {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Orden</span>
+                                                <input name="sort_order" type="number" min="0" className="ui-input" defaultValue={effect.sort_order ?? 0} />
+                                              </label>
+                                            </div>
+
+                                            <div className="flex flex-wrap items-center gap-4">
+                                              <span className="ui-chip">
+                                                {effect.effect_type === "replacement" ? "Reemplaza" : "Retira"} {targetProduct?.name ?? "ingrediente"}
+                                              </span>
+
+                                              <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                                                <input type="checkbox" name="is_active" defaultChecked={effect.is_active} />
+                                                Activo
+                                              </label>
+
+                                              <button type="submit" className="ui-btn ui-btn--brand">
+                                                Guardar efecto
+                                              </button>
+                                            </div>
+                                          </form>
+
+                                          <div className="mt-3">
+                                            <form action={disableRecipeEffect}>
+                                              <input type="hidden" name="catalog_item_id" value={row.id} />
+                                              <input type="hidden" name="option_id" value={option.id} />
+                                              <input type="hidden" name="recipe_effect_id" value={effect.id} />
+                                              <button type="submit" className="ui-btn ui-btn--ghost">
+                                                Desactivar efecto
+                                              </button>
+                                            </form>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
 
                               <div className="mt-5 space-y-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
@@ -1734,7 +2382,7 @@ export default async function MenuItemDetailPage({
                                     </label>
                                   </div>
 
-                                  <div className="grid gap-4 lg:grid-cols-[1fr_150px_150px]">
+                                  <div className="grid gap-4 lg:grid-cols-[1fr_150px_160px_150px]">
                                     <label className="space-y-2">
                                       <span className="ui-label">Nombre regla</span>
                                       <input name="name" className="ui-input" placeholder="Consumo de leche de almendra" required />
@@ -1743,6 +2391,14 @@ export default async function MenuItemDetailPage({
                                     <label className="space-y-2">
                                       <span className="ui-label">Código opcional</span>
                                       <input name="code" className="ui-input" placeholder="leche-almendra" />
+                                    </label>
+
+                                    <label className="space-y-2">
+                                      <span className="ui-label">Efecto consumo</span>
+                                      <select name="effect_type" className="ui-input" defaultValue={option.effect_type === "replacement" ? "replacement" : "additive"}>
+                                        <option value="additive">Extra / suma</option>
+                                        <option value="replacement">Sustituto</option>
+                                      </select>
                                     </label>
 
                                     <label className="space-y-2">
@@ -1898,7 +2554,7 @@ export default async function MenuItemDetailPage({
                                               </label>
                                             </div>
 
-                                            <div className="grid gap-4 lg:grid-cols-[1fr_150px_150px]">
+                                            <div className="grid gap-4 lg:grid-cols-[1fr_150px_160px_150px]">
                                               <label className="space-y-2">
                                                 <span className="ui-label">Nombre regla</span>
                                                 <input name="name" className="ui-input" defaultValue={rule.name} required />
@@ -1907,6 +2563,14 @@ export default async function MenuItemDetailPage({
                                               <label className="space-y-2">
                                                 <span className="ui-label">Código</span>
                                                 <input name="code" className="ui-input" defaultValue={rule.code} required />
+                                              </label>
+
+                                              <label className="space-y-2">
+                                                <span className="ui-label">Efecto consumo</span>
+                                                <select name="effect_type" className="ui-input" defaultValue={parseConsumptionEffectType(rule.effect_type)}>
+                                                  <option value="additive">Extra / suma</option>
+                                                  <option value="replacement">Sustituto</option>
+                                                </select>
                                               </label>
 
                                               <label className="space-y-2">
@@ -2010,7 +2674,7 @@ export default async function MenuItemDetailPage({
 
                                             <div className="flex flex-wrap items-center gap-4">
                                               <span className="ui-chip">
-                                                Consume {formatQuantityAdmin(rule.quantity_per_option)} {rule.stock_unit_code || product?.stock_unit_code || product?.unit || "unidad"}
+                                                {rule.effect_type === "replacement" ? "Sustituye con" : "Consume"} {formatQuantityAdmin(rule.quantity_per_option)} {rule.stock_unit_code || product?.stock_unit_code || product?.unit || "unidad"}
                                               </span>
 
                                               <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
