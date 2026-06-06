@@ -80,6 +80,15 @@ type CatalogItemOptionRow = {
   metadata: Record<string, unknown> | null;
 };
 
+type CommercialCatalogItemOptionRow = {
+  id: string;
+  name: string | null;
+  price_amount: number | string | null;
+  image_url: string | null;
+  category_label: string | null;
+  is_active: boolean | null;
+};
+
 type CatalogItemOptionConsumptionRuleRow = {
   id: string;
   option_id: string;
@@ -365,6 +374,59 @@ function getSimpleDefaultEffect(kind: SimpleGroupKind) {
 function getOptionSummary(option: CatalogItemOptionRow) {
   const price = Number(option.price_delta_amount ?? 0);
   return price > 0 ? `Suma ${formatCopAdmin(price)}` : "Sin costo adicional";
+}
+
+function getSelectionRuleLabel(group: CatalogItemOptionGroupRow) {
+  const isMultiple = parseSelectionType(group.selection_type) === "multiple";
+  if (group.is_required) {
+    return isMultiple ? `Debe escoger entre ${group.min_select} y ${group.max_select}` : "Debe escoger 1";
+  }
+
+  return isMultiple ? `Puede escoger hasta ${group.max_select}` : "Puede escoger 1";
+}
+
+function getModalBlockActionLabel(kind: SimpleGroupKind) {
+  switch (kind) {
+    case "extras":
+      return "Agregar extra";
+    case "removals":
+      return "Agregar ingrediente removible";
+    case "preferences":
+      return "Agregar preferencia";
+    case "recommendations":
+      return "Agregar producto sugerido";
+    case "choice":
+    default:
+      return "Agregar opción";
+  }
+}
+
+function getLinkedCatalogItemId(option: CatalogItemOptionRow) {
+  const metadata = option.metadata && typeof option.metadata === "object" && !Array.isArray(option.metadata)
+    ? option.metadata
+    : {};
+  const linkedCatalogItemId = metadata.linked_catalog_item_id;
+  return typeof linkedCatalogItemId === "string" && linkedCatalogItemId.trim()
+    ? linkedCatalogItemId.trim()
+    : null;
+}
+
+function getOptionDisplayName(
+  option: CatalogItemOptionRow,
+  linkedCatalogItemsById: Map<string, CommercialCatalogItemOptionRow>,
+) {
+  const linkedItemId = getLinkedCatalogItemId(option);
+  const linkedItem = linkedItemId ? linkedCatalogItemsById.get(linkedItemId) : null;
+  return linkedItem?.name || option.name;
+}
+
+function getOptionDisplayCategory(
+  option: CatalogItemOptionRow,
+  linkedCatalogItemsById: Map<string, CommercialCatalogItemOptionRow>,
+) {
+  const linkedItemId = getLinkedCatalogItemId(option);
+  const linkedItem = linkedItemId ? linkedCatalogItemsById.get(linkedItemId) : null;
+  return linkedItem?.category_label || option.description || "";
 }
 
 
@@ -1030,8 +1092,9 @@ async function createOption(formData: FormData) {
   const name = asText(formData.get("name"));
   const description = asText(formData.get("description")) || null;
   const priceDeltaAmount = asNonNegativeNumber(formData.get("price_delta_amount"));
+  const linkedCatalogItemId = asOptionalText(formData.get("linked_catalog_item_id"));
 
-  if (!itemId || !groupId || !name) {
+  if (!itemId || !groupId || (!name && !linkedCatalogItemId)) {
     redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Falta el nombre de la opción.")}`);
   }
 
@@ -1051,16 +1114,56 @@ async function createOption(formData: FormData) {
   const requestedEffect = asText(formData.get("effect_type"));
   const effectType = requestedEffect ? parseOptionEffectType(requestedEffect) : getSimpleDefaultEffect(groupKind);
   const sortOrder = await getNextOptionSortOrder(supabase, groupId);
+  let finalName = name;
+  let finalDescription = description;
+  let finalPriceDeltaAmount = priceDeltaAmount;
+  let linkedCatalogMetadata: Record<string, unknown> = {};
+
+  if (linkedCatalogItemId) {
+    const [{ data: currentItem }, { data: linkedItem, error: linkedError }] = await Promise.all([
+      supabase
+        .schema("pass")
+        .from("catalog_items")
+        .select("id,site_id")
+        .eq("id", itemId)
+        .maybeSingle(),
+      supabase
+        .schema("pass")
+        .from("catalog_items")
+        .select("id,site_id,name,description,price_amount,is_active")
+        .eq("id", linkedCatalogItemId)
+        .maybeSingle(),
+    ]);
+
+    if (
+      linkedError ||
+      !currentItem ||
+      !linkedItem ||
+      linkedItem.site_id !== currentItem.site_id ||
+      linkedItem.is_active === false
+    ) {
+      redirect(`/menu/${itemId}?error=${encodeURIComponent("El producto sugerido no está disponible en esta sede.")}`);
+    }
+
+    const linkedPrice = Number(linkedItem.price_amount ?? 0);
+    finalName = linkedItem.name || name;
+    finalDescription = description || linkedItem.description || null;
+    finalPriceDeltaAmount = Number.isFinite(linkedPrice) ? Math.max(0, linkedPrice) : 0;
+    linkedCatalogMetadata = {
+      linked_catalog_item_id: linkedItem.id,
+      linked_catalog_item_price_amount: finalPriceDeltaAmount,
+    };
+  }
 
   const { error } = await supabase
     .schema("pass")
     .from("catalog_item_options")
     .insert({
       option_group_id: groupId,
-      code: asCatalogCode(formData.get("code"), name),
-      name,
-      description,
-      price_delta_amount: priceDeltaAmount,
+      code: asCatalogCode(formData.get("code"), finalName),
+      name: finalName,
+      description: finalDescription,
+      price_delta_amount: finalPriceDeltaAmount,
       product_id: null,
       effect_type: effectType,
       is_default: asBool(formData.get("is_default")),
@@ -1068,6 +1171,7 @@ async function createOption(formData: FormData) {
       sort_order: sortOrder,
       metadata: {
         configured_from: "simple_product_page",
+        ...linkedCatalogMetadata,
       },
     });
 
@@ -1717,6 +1821,15 @@ export default async function MenuItemDetailPage({
     .select("site_id,product_id,name,sku,base_price,recipe_cost_amount")
     .order("name", { ascending: true });
 
+  const { data: commercialCatalogItemsRaw } = await supabase
+    .schema("pass")
+    .from("catalog_items")
+    .select("id,name,price_amount,image_url,category_label,is_active")
+    .eq("site_id", row.site_id)
+    .eq("is_active", true)
+    .neq("id", row.id)
+    .order("name", { ascending: true });
+
   const optionGroups = ((optionGroupsRaw ?? []) as CatalogItemOptionGroupRow[]).sort((a, b) => {
     if (Number(a.sort_order ?? 0) !== Number(b.sort_order ?? 0)) {
       return Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0);
@@ -1859,6 +1972,11 @@ export default async function MenuItemDetailPage({
     }))
     .filter((ingredient) => Boolean(ingredient.product));
 
+  const commercialCatalogItems = ((commercialCatalogItemsRaw ?? []) as CommercialCatalogItemOptionRow[])
+    .filter((item) => item.is_active !== false)
+    .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "es-CO"));
+  const commercialCatalogItemsById = new Map(commercialCatalogItems.map((item) => [item.id, item]));
+
   const productsMap = new Map<
     string,
     {
@@ -1928,6 +2046,13 @@ export default async function MenuItemDetailPage({
 
   const passModalEnabled = Boolean(presentation?.opens_detail_modal) || optionGroups.length > 0;
   const activeOptionCount = ((optionOptionsRaw ?? []) as CatalogItemOptionRow[]).filter((option) => option.is_active).length;
+  const defaultSelectedOptions = optionGroups.flatMap((group) =>
+    (optionsByGroup.get(group.id) ?? []).filter((option) => option.is_default && option.is_active),
+  );
+  const previewTotalAmount = Number(row.price_amount ?? 0) + defaultSelectedOptions.reduce((sum, option) => {
+    const parsed = Number(option.price_delta_amount ?? 0);
+    return sum + (Number.isFinite(parsed) ? parsed : 0);
+  }, 0);
   const readinessChecks = [
     { label: "Publicado en Pass", ok: row.is_active },
     { label: "Producto core asociado", ok: Boolean(row.product_id) },
@@ -2092,9 +2217,9 @@ export default async function MenuItemDetailPage({
       <div className="ui-panel space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="ui-h3">2. Personalización en Pass</div>
+            <div className="ui-h3">2. Constructor del modal en Pass</div>
             <p className="ui-caption">
-              Crea opciones como las verá el cliente: obligatorias, extras, preferencias, acompañamientos e ingredientes removibles.
+              Arma las secciones que verá el cliente cuando toque el producto: decisiones obligatorias, extras, ingredientes que puede quitar y productos sugeridos.
             </p>
           </div>
 
@@ -2106,23 +2231,112 @@ export default async function MenuItemDetailPage({
           </div>
         </div>
 
+        <div className="overflow-hidden rounded-[32px] border border-[var(--ui-border)] bg-[#FFFDF7] shadow-[var(--ui-shadow-2)]">
+          <div className="grid lg:grid-cols-[280px_minmax(0,1fr)]">
+            <div className="relative min-h-72 bg-[var(--ui-surface-2)]">
+              {row.image_url ? (
+                <img src={row.image_url} alt={row.name} className="h-full min-h-72 w-full object-cover" />
+              ) : (
+                <div className="flex h-full min-h-72 items-center justify-center text-sm font-black text-[var(--ui-muted)]">
+                  Sin imagen comercial
+                </div>
+              )}
+              <div className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-black text-[var(--ui-text)] shadow">
+                Preview del modal
+              </div>
+            </div>
+
+            <div className="space-y-5 p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-2xl font-black leading-tight text-[var(--ui-text)]">{row.name}</div>
+                  <p className="mt-2 max-w-2xl text-sm font-semibold leading-5 text-[var(--ui-muted)]">
+                    {row.description || "Agrega una descripción para que el cliente entienda rápido qué está comprando."}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-xl font-black text-[var(--ui-text)]">{formatCopAdmin(row.price_amount)}</div>
+                  {defaultSelectedOptions.length > 0 ? (
+                    <div className="ui-caption">con valores por defecto: {formatCopAdmin(previewTotalAmount)}</div>
+                  ) : null}
+                </div>
+              </div>
+
+              {optionGroups.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-white p-5">
+                  <div className="text-sm font-black text-[var(--ui-text)]">Este modal todavía no tiene secciones.</div>
+                  <p className="ui-caption mt-1">Crea un bloque abajo y aquí aparecerá como lo verá el cliente.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {optionGroups.map((group) => {
+                    const groupOptions = (optionsByGroup.get(group.id) ?? []).filter((option) => option.is_active);
+                    const groupKind = getSimpleGroupKind(group);
+
+                    return (
+                      <div key={group.id} className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-black text-[var(--ui-text)]">{group.name}</div>
+                            <div className="ui-caption">{getSelectionRuleLabel(group)}</div>
+                          </div>
+                          <span className="ui-chip">{getSimpleGroupLabel(groupKind)}</span>
+                        </div>
+
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {groupOptions.slice(0, 6).map((option) => {
+                            const optionName = getOptionDisplayName(option, commercialCatalogItemsById);
+                            const optionMeta = getOptionDisplayCategory(option, commercialCatalogItemsById);
+                            const price = Number(option.price_delta_amount ?? 0);
+
+                            return (
+                              <div key={option.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-bold text-[var(--ui-text)]">{optionName}</div>
+                                  {optionMeta ? <div className="ui-caption truncate">{optionMeta}</div> : null}
+                                </div>
+                                <div className="shrink-0 text-xs font-black text-[var(--ui-text)]">
+                                  {price > 0 ? `+ ${formatCopAdmin(price)}` : "Incluido"}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {groupOptions.length === 0 ? (
+                            <div className="ui-caption rounded-xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                              Este bloque no tiene opciones.
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="rounded-full bg-[var(--ui-brand)] px-4 py-3 text-center text-sm font-black text-white">
+                Agregar · {formatCopAdmin(previewTotalAmount)}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-            <div className="text-sm font-black text-[var(--ui-text)]">1. Crea una plantilla</div>
-            <p className="ui-caption mt-1">Elige el tipo de decisión que debe tomar el cliente.</p>
+            <div className="text-sm font-black text-[var(--ui-text)]">1. Crea un bloque</div>
+            <p className="ui-caption mt-1">Un bloque es una sección del modal, no una configuración técnica.</p>
           </div>
           <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
             <div className="text-sm font-black text-[var(--ui-text)]">2. Agrega opciones</div>
-            <p className="ui-caption mt-1">Define nombres, precios adicionales y valores por defecto.</p>
+            <p className="ui-caption mt-1">Cada opción es lo que el cliente puede tocar dentro de ese bloque.</p>
           </div>
           <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-            <div className="text-sm font-black text-[var(--ui-text)]">3. Revisa Pulso</div>
-            <p className="ui-caption mt-1">Pulso mostrará estas opciones al preparar el pedido.</p>
+            <div className="text-sm font-black text-[var(--ui-text)]">3. Mira el modal</div>
+            <p className="ui-caption mt-1">Si no se entiende en el preview, todavía no está listo.</p>
           </div>
         </div>
 
         <div>
-          <div className="text-sm font-black uppercase tracking-wide text-[var(--ui-muted)]">Plantillas rápidas</div>
+          <div className="text-sm font-black uppercase tracking-wide text-[var(--ui-muted)]">Crear bloques del modal</div>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
@@ -2131,7 +2345,7 @@ export default async function MenuItemDetailPage({
             <input type="hidden" name="group_kind" value="choice" />
 
             <div className="text-base font-black text-[var(--ui-text)]">Debe escoger una opción</div>
-            <p className="ui-caption mt-1">Para tamaño, tipo de leche, bebida o acompañamiento obligatorio.</p>
+            <p className="ui-caption mt-1">Úsalo cuando el cliente no pueda comprar sin responder: tamaño, bebida, base o acompañamiento.</p>
 
             <label className="mt-4 block space-y-2">
               <span className="ui-label">Nombre que verá el cliente</span>
@@ -2144,7 +2358,7 @@ export default async function MenuItemDetailPage({
             </label>
 
             <div className="mt-4 flex justify-end">
-              <button type="submit" className="ui-btn ui-btn--brand">Crear grupo</button>
+              <button type="submit" className="ui-btn ui-btn--brand">Crear bloque</button>
             </div>
           </form>
 
@@ -2153,7 +2367,7 @@ export default async function MenuItemDetailPage({
             <input type="hidden" name="group_kind" value="extras" />
 
             <div className="text-base font-black text-[var(--ui-text)]">Puede agregar extras</div>
-            <p className="ui-caption mt-1">Para queso extra, salsas, shot adicional o leche vegetal.</p>
+            <p className="ui-caption mt-1">Úsalo para aumentar el ticket: queso extra, salsas, shot adicional, topping o leche vegetal.</p>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_120px]">
               <label className="space-y-2">
@@ -2173,7 +2387,7 @@ export default async function MenuItemDetailPage({
             </label>
 
             <div className="mt-4 flex justify-end">
-              <button type="submit" className="ui-btn ui-btn--brand">Crear grupo</button>
+              <button type="submit" className="ui-btn ui-btn--brand">Crear bloque</button>
             </div>
           </form>
 
@@ -2182,7 +2396,7 @@ export default async function MenuItemDetailPage({
             <input type="hidden" name="group_kind" value="preferences" />
 
             <div className="text-base font-black text-[var(--ui-text)]">Preferencias de preparación</div>
-            <p className="ui-caption mt-1">Para sin azúcar, poca salsa, bien caliente o partido en dos.</p>
+            <p className="ui-caption mt-1">Úsalo para instrucciones que no cambian el precio: sin azúcar, poca salsa, bien caliente.</p>
 
             <label className="mt-4 block space-y-2">
               <span className="ui-label">Nombre que verá el cliente</span>
@@ -2190,7 +2404,7 @@ export default async function MenuItemDetailPage({
             </label>
 
             <div className="mt-4 flex justify-end">
-              <button type="submit" className="ui-btn ui-btn--brand">Crear grupo</button>
+              <button type="submit" className="ui-btn ui-btn--brand">Crear bloque</button>
             </div>
           </form>
 
@@ -2198,8 +2412,8 @@ export default async function MenuItemDetailPage({
             <input type="hidden" name="catalog_item_id" value={row.id} />
             <input type="hidden" name="group_kind" value="recommendations" />
 
-            <div className="text-base font-black text-[var(--ui-text)]">Recomendados o acompañamientos</div>
-            <p className="ui-caption mt-1">Para sugerir bebida, papas, postre o complemento.</p>
+            <div className="text-base font-black text-[var(--ui-text)]">También puedes agregar</div>
+            <p className="ui-caption mt-1">Úsalo para sugerir productos que ya se venden en Pass: bebidas, postres o acompañamientos.</p>
 
             <label className="mt-4 block space-y-2">
               <span className="ui-label">Nombre que verá el cliente</span>
@@ -2207,7 +2421,7 @@ export default async function MenuItemDetailPage({
             </label>
 
             <div className="mt-4 flex justify-end">
-              <button type="submit" className="ui-btn ui-btn--brand">Crear grupo</button>
+              <button type="submit" className="ui-btn ui-btn--brand">Crear bloque</button>
             </div>
           </form>
         </div>
@@ -2263,7 +2477,7 @@ export default async function MenuItemDetailPage({
 
         {optionGroups.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-[var(--ui-border)] bg-white p-6 text-center">
-            <div className="text-base font-black text-[var(--ui-text)]">Este producto todavía no tiene opciones.</div>
+            <div className="text-base font-black text-[var(--ui-text)]">Este modal todavía no tiene bloques.</div>
             <p className="ui-caption mt-1">
               Crea una de las tarjetas de arriba. Después podrás agregar opciones como “Leche de almendra”, “Queso extra” o “Sin cebolla”.
             </p>
@@ -2291,42 +2505,130 @@ export default async function MenuItemDetailPage({
                     </div>
                   </div>
 
+                  <details className="mt-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                    <summary className="cursor-pointer text-sm font-black text-[var(--ui-text)]">
+                      Ajustar pregunta y reglas del bloque
+                    </summary>
+
+                    <form action={updateOptionGroup} className="mt-4 space-y-4">
+                      <input type="hidden" name="catalog_item_id" value={row.id} />
+                      <input type="hidden" name="option_group_id" value={group.id} />
+                      <input type="hidden" name="code" value={group.code} />
+                      <input type="hidden" name="sort_order" value={String(group.sort_order ?? 0)} />
+
+                      <div className="grid gap-4 lg:grid-cols-[1fr_180px_120px_120px]">
+                        <label className="space-y-2">
+                          <span className="ui-label">Pregunta que verá el cliente</span>
+                          <input name="name" className="ui-input" defaultValue={group.name} required />
+                        </label>
+
+                        <label className="space-y-2">
+                          <span className="ui-label">Tipo de elección</span>
+                          <select name="selection_type" className="ui-input" defaultValue={group.selection_type}>
+                            <option value="single">Una opción</option>
+                            <option value="multiple">Varias opciones</option>
+                          </select>
+                        </label>
+
+                        <label className="space-y-2">
+                          <span className="ui-label">Mínimo</span>
+                          <input name="min_select" type="number" min="0" className="ui-input" defaultValue={String(group.min_select ?? 0)} />
+                        </label>
+
+                        <label className="space-y-2">
+                          <span className="ui-label">Máximo</span>
+                          <input name="max_select" type="number" min="1" className="ui-input" defaultValue={String(group.max_select ?? 1)} />
+                        </label>
+                      </div>
+
+                      <label className="block space-y-2">
+                        <span className="ui-label">Ayuda debajo de la pregunta</span>
+                        <input name="description" className="ui-input" defaultValue={group.description ?? ""} />
+                      </label>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap gap-4">
+                          <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                            <input type="checkbox" name="is_required" defaultChecked={group.is_required} />
+                            El cliente debe responder
+                          </label>
+                          <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                            <input type="checkbox" name="is_active" defaultChecked={group.is_active} />
+                            Mostrar bloque
+                          </label>
+                        </div>
+
+                        <button type="submit" className="ui-btn ui-btn--brand">
+                          Guardar reglas
+                        </button>
+                      </div>
+                    </form>
+                  </details>
+
                   <form action={createOption} className="mt-5 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
                     <input type="hidden" name="catalog_item_id" value={row.id} />
                     <input type="hidden" name="option_group_id" value={group.id} />
                     <input type="hidden" name="effect_type" value={optionEffectType} />
 
-                    <div className="grid gap-4 lg:grid-cols-[1fr_150px_auto] lg:items-end">
-                      <label className="space-y-2">
-                        <span className="ui-label">Nueva opción</span>
-                        <input name="name" className="ui-input" placeholder="Ej. Leche de almendra, queso extra, sin cebolla" required />
-                      </label>
+                    {groupKind === "recommendations" ? (
+                      <div className="space-y-4">
+                        <label className="space-y-2">
+                          <span className="ui-label">Producto que ya se vende en Pass</span>
+                          <select name="linked_catalog_item_id" className="ui-input" required>
+                            <option value="">Selecciona un producto comercial</option>
+                            {commercialCatalogItems.map((catalogItem) => (
+                              <option key={catalogItem.id} value={catalogItem.id}>
+                                {catalogItem.name || "Producto sin nombre"} · {formatCopAdmin(catalogItem.price_amount)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
 
-                      <label className="space-y-2">
-                        <span className="ui-label">Valor adicional</span>
-                        <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue="0" />
-                      </label>
+                        {commercialCatalogItems.length === 0 ? (
+                          <div className="ui-alert ui-alert--warn">
+                            No hay otros productos comerciales activos en esta sede para sugerir.
+                          </div>
+                        ) : null}
 
-                      <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
-                        <input type="checkbox" name="is_default" />
-                        Por defecto
-                      </label>
-                    </div>
+                        <label className="block space-y-2">
+                          <span className="ui-label">Texto opcional para el cliente</span>
+                          <input name="description" className="ui-input" placeholder="Ej. Combina muy bien con este producto." />
+                        </label>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid gap-4 lg:grid-cols-[1fr_150px_auto] lg:items-end">
+                          <label className="space-y-2">
+                            <span className="ui-label">Nueva opción</span>
+                            <input name="name" className="ui-input" placeholder="Ej. Leche de almendra, queso extra, sin cebolla" required />
+                          </label>
 
-                    <label className="mt-4 block space-y-2">
-                      <span className="ui-label">Descripción para el cliente</span>
-                      <input name="description" className="ui-input" placeholder="Opcional. Ej. Recomendado para bebidas calientes." />
-                    </label>
+                          <label className="space-y-2">
+                            <span className="ui-label">Valor adicional</span>
+                            <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue="0" />
+                          </label>
+
+                          <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
+                            <input type="checkbox" name="is_default" />
+                            Por defecto
+                          </label>
+                        </div>
+
+                        <label className="mt-4 block space-y-2">
+                          <span className="ui-label">Descripción para el cliente</span>
+                          <input name="description" className="ui-input" placeholder="Opcional. Ej. Recomendado para bebidas calientes." />
+                        </label>
+                      </>
+                    )}
 
                     <div className="mt-4 flex justify-end">
                       <button type="submit" className="ui-btn ui-btn--brand">
-                        Agregar opción
+                        {getModalBlockActionLabel(groupKind)}
                       </button>
                     </div>
                   </form>
-
                   {groupOptions.length === 0 ? (
-                    <p className="ui-caption mt-4">Este grupo todavía no tiene opciones.</p>
+                    <p className="ui-caption mt-4">Este bloque todavía no tiene opciones.</p>
                   ) : (
                     <div className="mt-5 space-y-3">
                       {groupOptions.map((option) => {
