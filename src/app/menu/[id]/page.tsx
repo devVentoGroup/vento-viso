@@ -1972,15 +1972,43 @@ export default async function MenuItemDetailPage({
 
 
       <div className="ui-panel space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="ui-h3">Personalización en Pass</div>
+            <p className="ui-caption">
+              Crea opciones como las verá el cliente: obligatorias, extras, preferencias, acompañamientos e ingredientes removibles.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <span className="ui-chip ui-chip--brand">{optionGroups.length} grupo{optionGroups.length === 1 ? "" : "s"}</span>
+            <span className={`ui-chip ${Boolean(presentation?.opens_detail_modal) || optionGroups.length > 0 ? "ui-chip--success" : ""}`}>
+              {Boolean(presentation?.opens_detail_modal) || optionGroups.length > 0 ? "Abre modal en Pass" : "Agregado directo"}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+            <div className="text-sm font-black text-[var(--ui-text)]">1. Crea una plantilla</div>
+            <p className="ui-caption mt-1">Elige el tipo de decisión que debe tomar el cliente.</p>
+          </div>
+          <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+            <div className="text-sm font-black text-[var(--ui-text)]">2. Agrega opciones</div>
+            <p className="ui-caption mt-1">Define nombres, precios adicionales y valores por defecto.</p>
+          </div>
+          <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+            <div className="text-sm font-black text-[var(--ui-text)]">3. Revisa operación</div>
+            <p className="ui-caption mt-1">Pulso mostrará estas opciones al preparar el pedido.</p>
+          </div>
+        </div>
+
         <div>
-          <div className="ui-h3">Configuración simple del producto</div>
-          <p className="ui-caption">
-            Configura lo que verá el cliente. Viso crea los códigos, el orden y los ajustes técnicos automáticamente.
-          </p>
+          <div className="text-sm font-black uppercase tracking-wide text-[var(--ui-muted)]">Plantillas rápidas</div>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
+          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)] transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)]">
             <input type="hidden" name="catalog_item_id" value={row.id} />
             <input type="hidden" name="group_kind" value="choice" />
 
@@ -2002,7 +2030,7 @@ export default async function MenuItemDetailPage({
             </div>
           </form>
 
-          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
+          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)] transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)]">
             <input type="hidden" name="catalog_item_id" value={row.id} />
             <input type="hidden" name="group_kind" value="extras" />
 
@@ -2031,7 +2059,7 @@ export default async function MenuItemDetailPage({
             </div>
           </form>
 
-          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
+          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)] transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)]">
             <input type="hidden" name="catalog_item_id" value={row.id} />
             <input type="hidden" name="group_kind" value="preferences" />
 
@@ -2048,7 +2076,7 @@ export default async function MenuItemDetailPage({
             </div>
           </form>
 
-          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
+          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)] transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)]">
             <input type="hidden" name="catalog_item_id" value={row.id} />
             <input type="hidden" name="group_kind" value="recommendations" />
 
