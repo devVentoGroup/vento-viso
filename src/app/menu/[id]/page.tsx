@@ -1926,55 +1926,173 @@ export default async function MenuItemDetailPage({
     }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
 
+  const passModalEnabled = Boolean(presentation?.opens_detail_modal) || optionGroups.length > 0;
+  const activeOptionCount = ((optionOptionsRaw ?? []) as CatalogItemOptionRow[]).filter((option) => option.is_active).length;
+  const readinessChecks = [
+    { label: "Publicado en Pass", ok: row.is_active },
+    { label: "Producto core asociado", ok: Boolean(row.product_id) },
+    { label: "Imagen comercial", ok: Boolean(row.image_url) },
+    { label: "Descripción clara", ok: Boolean(row.description?.trim()) },
+    { label: "Precio configurado", ok: Number(row.price_amount) > 0 },
+    { label: "Modalidades de venta", ok: (row.fulfillment_modes ?? []).length > 0 },
+    { label: "Opciones listas", ok: optionGroups.length === 0 || activeOptionCount > 0 },
+    { label: "Receta operativa", ok: recipeIngredients.length > 0 },
+  ];
+  const readyCount = readinessChecks.filter((check) => check.ok).length;
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Editar producto del menú"
-        subtitle="Edita la información principal y configura opciones para que cualquier persona pueda dejar el producto listo para vender."
+        subtitle="Configura cómo se vende, cómo se personaliza y cómo lo verá operación."
         actions={<Link href="/menu" className="ui-btn ui-btn--ghost">Volver</Link>}
       />
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
-      <MenuItemForm
-        mode="edit"
-        action={updateMenuItem}
-        sites={sites ?? []}
-        products={products}
-        categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
-        collections={(collectionsRaw ?? []) as CommercialCollectionRow[]}
-        initial={{
-          id: row.id,
-          code: row.code,
-          name: row.name,
-          description: row.description ?? "",
-          product_id: row.product_id ?? "",
-          price_amount: String(row.price_amount ?? 0),
-          compare_at_amount: row.compare_at_amount == null ? "" : String(row.compare_at_amount),
-          sort_order: String(row.sort_order ?? 0),
-          is_active: row.is_active,
-          is_featured: row.is_featured,
-          site_id: row.site_id,
-          commercial_collection_id: row.commercial_collection_id ?? "",
-          commercial_category_id: row.commercial_category_id ?? "",
-          category_label: row.category_label ?? "",
-          image_url: row.image_url ?? "",
-          badges_csv: (row.badges ?? []).join(", "),
-          fulfillment_delivery: (row.fulfillment_modes ?? []).includes("delivery"),
-          fulfillment_pickup: (row.fulfillment_modes ?? []).includes("pickup"),
-          fulfillment_on_premise: (row.fulfillment_modes ?? []).includes("on_premise"),
-          metadata_extra: Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : "",
-          pass_card_layout: parsePassCardLayout(presentation?.card_layout),
-          opens_detail_modal: Boolean(presentation?.opens_detail_modal),
-        }}
-      />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="space-y-6">
+          <div className="ui-panel space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="ui-h3">1. Venta y publicación</div>
+                <p className="ui-caption">
+                  Primero deja claro qué compra el cliente: nombre, precio, foto, categoría y disponibilidad.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <span className={`ui-chip ${row.is_active ? "ui-chip--success" : ""}`}>
+                  {row.is_active ? "Publicado" : "Oculto"}
+                </span>
+                <span className="ui-chip">{parsePassCardLayout(presentation?.card_layout) === "featured" ? "Tarjeta destacada" : "Tarjeta compacta"}</span>
+              </div>
+            </div>
+
+            <MenuItemForm
+              mode="edit"
+              action={updateMenuItem}
+              sites={sites ?? []}
+              products={products}
+              categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
+              collections={(collectionsRaw ?? []) as CommercialCollectionRow[]}
+              initial={{
+                id: row.id,
+                code: row.code,
+                name: row.name,
+                description: row.description ?? "",
+                product_id: row.product_id ?? "",
+                price_amount: String(row.price_amount ?? 0),
+                compare_at_amount: row.compare_at_amount == null ? "" : String(row.compare_at_amount),
+                sort_order: String(row.sort_order ?? 0),
+                is_active: row.is_active,
+                is_featured: row.is_featured,
+                site_id: row.site_id,
+                commercial_collection_id: row.commercial_collection_id ?? "",
+                commercial_category_id: row.commercial_category_id ?? "",
+                category_label: row.category_label ?? "",
+                image_url: row.image_url ?? "",
+                badges_csv: (row.badges ?? []).join(", "),
+                fulfillment_delivery: (row.fulfillment_modes ?? []).includes("delivery"),
+                fulfillment_pickup: (row.fulfillment_modes ?? []).includes("pickup"),
+                fulfillment_on_premise: (row.fulfillment_modes ?? []).includes("on_premise"),
+                metadata_extra: Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : "",
+                pass_card_layout: parsePassCardLayout(presentation?.card_layout),
+                opens_detail_modal: Boolean(presentation?.opens_detail_modal),
+              }}
+            />
+          </div>
+        </div>
+
+        <aside className="xl:sticky xl:top-6 xl:self-start">
+          <div className="ui-panel space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="ui-h3">Resumen de preparación</div>
+                <p className="ui-caption">Una lectura rápida de si el producto está listo para vender y operar.</p>
+              </div>
+              <span className={`ui-chip ${passModalEnabled ? "ui-chip--success" : ""}`}>
+                {passModalEnabled ? "Modal activo" : "Agregado directo"}
+              </span>
+            </div>
+
+            <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <div className="text-3xl font-black text-[var(--ui-text)]">{readyCount}/{readinessChecks.length}</div>
+                  <div className="ui-caption">puntos completos</div>
+                </div>
+                <div className={`ui-chip ${readyCount >= readinessChecks.length - 1 ? "ui-chip--success" : ""}`}>
+                  {readyCount >= readinessChecks.length - 1 ? "Casi listo" : "Faltan ajustes"}
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {readinessChecks.map((check) => (
+                  <div key={check.label} className="flex items-center justify-between gap-3 rounded-2xl bg-white px-3 py-2">
+                    <span className="text-sm font-bold text-[var(--ui-text)]">{check.label}</span>
+                    <span className={`text-xs font-black ${check.ok ? "text-emerald-700" : "text-amber-700"}`}>
+                      {check.ok ? "Listo" : "Revisar"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                <div className="text-lg font-black text-[var(--ui-text)]">{optionGroups.length}</div>
+                <div className="ui-caption">grupos</div>
+              </div>
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                <div className="text-lg font-black text-[var(--ui-text)]">{activeOptionCount}</div>
+                <div className="ui-caption">opciones</div>
+              </div>
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                <div className="text-lg font-black text-[var(--ui-text)]">{recipeIngredients.length}</div>
+                <div className="ui-caption">receta</div>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-[var(--ui-border)] bg-white p-4">
+              <div className="text-sm font-black text-[var(--ui-text)]">Cómo fluye después</div>
+              <div className="mt-3 space-y-3">
+                <div className="rounded-2xl bg-[var(--ui-surface-2)] p-3">
+                  <div className="text-sm font-black text-[var(--ui-text)]">Pass</div>
+                  <p className="ui-caption mt-1">
+                    {passModalEnabled
+                      ? "El cliente abre modal, elige opciones y agrega una variante al carrito."
+                      : "El cliente agrega el producto directo al carrito."}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-[var(--ui-surface-2)] p-3">
+                  <div className="text-sm font-black text-[var(--ui-text)]">Pulso</div>
+                  <p className="ui-caption mt-1">
+                    {activeOptionCount > 0
+                      ? "Operación verá cantidades, notas y opciones estructuradas por item."
+                      : "Operación verá el item simple con sus notas de pedido."}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-[var(--ui-surface-2)] p-3">
+                  <div className="text-sm font-black text-[var(--ui-text)]">Inventario</div>
+                  <p className="ui-caption mt-1">
+                    {recipeIngredients.length > 0
+                      ? "Tiene receta base para conectar consumos y opciones removibles."
+                      : "Todavía no tiene receta activa para consumo automático."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
 
 
       <div className="ui-panel space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="ui-h3">Personalización en Pass</div>
+            <div className="ui-h3">2. Personalización en Pass</div>
             <p className="ui-caption">
               Crea opciones como las verá el cliente: obligatorias, extras, preferencias, acompañamientos e ingredientes removibles.
             </p>
@@ -1982,8 +2100,8 @@ export default async function MenuItemDetailPage({
 
           <div className="flex flex-wrap gap-2">
             <span className="ui-chip ui-chip--brand">{optionGroups.length} grupo{optionGroups.length === 1 ? "" : "s"}</span>
-            <span className={`ui-chip ${Boolean(presentation?.opens_detail_modal) || optionGroups.length > 0 ? "ui-chip--success" : ""}`}>
-              {Boolean(presentation?.opens_detail_modal) || optionGroups.length > 0 ? "Abre modal en Pass" : "Agregado directo"}
+            <span className={`ui-chip ${passModalEnabled ? "ui-chip--success" : ""}`}>
+              {passModalEnabled ? "Abre modal en Pass" : "Agregado directo"}
             </span>
           </div>
         </div>
@@ -1998,7 +2116,7 @@ export default async function MenuItemDetailPage({
             <p className="ui-caption mt-1">Define nombres, precios adicionales y valores por defecto.</p>
           </div>
           <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-            <div className="text-sm font-black text-[var(--ui-text)]">3. Revisa operación</div>
+            <div className="text-sm font-black text-[var(--ui-text)]">3. Revisa Pulso</div>
             <p className="ui-caption mt-1">Pulso mostrará estas opciones al preparar el pedido.</p>
           </div>
         </div>

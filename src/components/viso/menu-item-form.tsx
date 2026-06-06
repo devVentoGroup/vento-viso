@@ -143,6 +143,11 @@ export function MenuItemForm({
   const [categoryLabel] = useState(initial.category_label);
   const [badgesCsv, setBadgesCsv] = useState(initial.badges_csv);
   const [imageUrl, setImageUrl] = useState(initial.image_url);
+  const [isActive, setIsActive] = useState(initial.is_active);
+  const [isFeatured, setIsFeatured] = useState(initial.is_featured);
+  const [fulfillmentDelivery, setFulfillmentDelivery] = useState(initial.fulfillment_delivery);
+  const [fulfillmentPickup, setFulfillmentPickup] = useState(initial.fulfillment_pickup);
+  const [fulfillmentOnPremise, setFulfillmentOnPremise] = useState(initial.fulfillment_on_premise);
   const [passCardLayout, setPassCardLayout] = useState(
     initial.pass_card_layout === "featured" ? "featured" : "compact",
   );
@@ -226,6 +231,22 @@ export function MenuItemForm({
   const selectedCategory = useMemo(() => {
     return visibleCategories.find((category) => category.id === commercialCategoryId) ?? null;
   }, [commercialCategoryId, visibleCategories]);
+
+  const liveBadges = useMemo(() => {
+    return badgesCsv
+      .split(",")
+      .map((badge) => badge.trim())
+      .filter(Boolean)
+      .slice(0, 3);
+  }, [badgesCsv]);
+
+  const liveFulfillmentLabels = useMemo(() => {
+    return [
+      fulfillmentDelivery ? "Domicilio" : null,
+      fulfillmentPickup ? "Recoger" : null,
+      fulfillmentOnPremise ? "En sitio" : null,
+    ].filter(Boolean);
+  }, [fulfillmentDelivery, fulfillmentPickup, fulfillmentOnPremise]);
 
   useEffect(() => {
     if (!commercialCollectionId) return;
@@ -494,7 +515,12 @@ export function MenuItemForm({
               <p className="ui-caption">Controla si el item aparece disponible en el menu de compras.</p>
             </div>
             <label className="flex items-center gap-3 text-sm font-semibold text-[var(--ui-text)]">
-              <input type="checkbox" name="is_active" defaultChecked={initial.is_active} />
+              <input
+                type="checkbox"
+                name="is_active"
+                checked={isActive}
+                onChange={(event) => setIsActive(event.target.checked)}
+              />
               Item activo
             </label>
           </div>
@@ -579,15 +605,30 @@ export function MenuItemForm({
             <span className="ui-label">Modalidades habilitadas</span>
             <div className="flex flex-wrap gap-3">
               <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                <input type="checkbox" name="fulfillment_delivery" defaultChecked={initial.fulfillment_delivery} />
+                <input
+                  type="checkbox"
+                  name="fulfillment_delivery"
+                  checked={fulfillmentDelivery}
+                  onChange={(event) => setFulfillmentDelivery(event.target.checked)}
+                />
                 Domicilio
               </label>
               <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                <input type="checkbox" name="fulfillment_pickup" defaultChecked={initial.fulfillment_pickup} />
+                <input
+                  type="checkbox"
+                  name="fulfillment_pickup"
+                  checked={fulfillmentPickup}
+                  onChange={(event) => setFulfillmentPickup(event.target.checked)}
+                />
                 Recoger
               </label>
               <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                <input type="checkbox" name="fulfillment_on_premise" defaultChecked={initial.fulfillment_on_premise} />
+                <input
+                  type="checkbox"
+                  name="fulfillment_on_premise"
+                  checked={fulfillmentOnPremise}
+                  onChange={(event) => setFulfillmentOnPremise(event.target.checked)}
+                />
                 En sitio
               </label>
             </div>
@@ -651,7 +692,12 @@ export function MenuItemForm({
             </div>
 
             <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
-              <input type="checkbox" name="is_featured" defaultChecked={initial.is_featured} />
+              <input
+                type="checkbox"
+                name="is_featured"
+                checked={isFeatured}
+                onChange={(event) => setIsFeatured(event.target.checked)}
+              />
               Mostrar en destacados
             </label>
           </div>
@@ -692,31 +738,48 @@ export function MenuItemForm({
       </div>
 
       <div className="ui-panel space-y-4">
-        <div className="ui-h3">Previsualizacion</div>
-        <div className="max-w-md overflow-hidden rounded-3xl border border-[var(--ui-border)] bg-white shadow-[var(--ui-shadow-1)]">
-          <div className="h-48 w-full bg-[var(--ui-surface-2)]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="ui-h3">Vista en vivo en Pass</div>
+            <p className="ui-caption">
+              Esta vista cambia mientras editas. Úsala para validar si cualquier persona entendería qué está comprando el cliente.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className={`ui-chip ${isActive ? "ui-chip--success" : ""}`}>
+              {isActive ? "Publicado" : "Oculto"}
+            </span>
+            <span className="ui-chip">{passCardLayout === "featured" ? "Destacada" : "Compacta"}</span>
+            <span className={`ui-chip ${opensDetailModal ? "ui-chip--success" : ""}`}>
+              {opensDetailModal ? "Abre modal" : "Agregado directo"}
+            </span>
+          </div>
+        </div>
+
+        <div className="max-w-md overflow-hidden rounded-[28px] border border-[var(--ui-border)] bg-[#FFFDF7] shadow-[var(--ui-shadow-2)]">
+          <div className="relative h-56 w-full bg-[var(--ui-surface-2)]">
             {imageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={imageUrl} alt={getPreviewTitle(name)} className="h-full w-full object-cover" />
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-sm text-[var(--ui-muted)]">
-                Sin imagen
+              <div className="flex h-full w-full items-center justify-center text-sm font-black text-[var(--ui-muted)]">
+                Sin imagen comercial
               </div>
             )}
-          </div>
-          <div className="space-y-3 p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-base font-semibold text-[var(--ui-text)]">{getPreviewTitle(name)}</div>
-                <div className="ui-caption">{siteLabel}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-base font-semibold text-[var(--ui-text)]">{asCop(priceAmount)}</div>
-                {compareAtAmount ? (
-                  <div className="ui-caption line-through">{asCop(compareAtAmount)}</div>
-                ) : null}
-              </div>
+            <div className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-black text-[var(--ui-text)] shadow">
+              {asCop(priceAmount)}
             </div>
+          </div>
+
+          <div className="space-y-4 p-5">
+            <div>
+              <div className="text-2xl font-black leading-tight text-[var(--ui-text)]">{getPreviewTitle(name)}</div>
+              <div className="ui-caption mt-1">{siteLabel}</div>
+              {compareAtAmount ? (
+                <div className="mt-1 text-sm font-bold text-[var(--ui-muted)] line-through">{asCop(compareAtAmount)}</div>
+              ) : null}
+            </div>
+
             <div className="flex flex-wrap gap-2">
               {selectedCollection ? (
                 <span className="ui-chip ui-chip--brand">
@@ -726,18 +789,21 @@ export function MenuItemForm({
               <span className="ui-chip">
                 {getPreviewCategory(selectedCategory?.name ?? selectedCategory?.code ?? categoryLabel)}
               </span>
-              {badgesCsv
-                .split(",")
-                .map((badge) => badge.trim())
-                .filter(Boolean)
-                .slice(0, 2)
-                .map((badge) => (
-                  <span key={badge} className="ui-chip ui-chip--brand">{badge}</span>
-                ))}
+              {liveFulfillmentLabels.map((label) => (
+                <span key={label} className="ui-chip">{label}</span>
+              ))}
+              {liveBadges.map((badge) => (
+                <span key={badge} className="ui-chip ui-chip--brand">{badge}</span>
+              ))}
             </div>
-            <p className="ui-body-muted text-sm">
+
+            <p className="ui-body-muted text-sm leading-5">
               {description.trim() || "Descripcion del producto comercial que vera el usuario al comprar."}
             </p>
+
+            <div className="rounded-full bg-[var(--ui-brand)] px-4 py-3 text-center text-sm font-black text-white">
+              {opensDetailModal ? `Agregar · ${asCop(priceAmount)}` : "Agregar al pedido"}
+            </div>
           </div>
         </div>
       </div>
