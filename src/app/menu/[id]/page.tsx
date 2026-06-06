@@ -284,6 +284,197 @@ function getEffectTypeLabel(value: string | null | undefined) {
   }
 }
 
+
+type SimpleGroupKind = "choice" | "extras" | "removals" | "preferences" | "recommendations";
+
+function readGroupMetadata(value: Record<string, unknown> | null | undefined) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function getSimpleGroupKind(group: CatalogItemOptionGroupRow): SimpleGroupKind {
+  const metadata = readGroupMetadata(group.metadata);
+  const preset = typeof metadata.preset === "string" ? metadata.preset : "";
+  const code = group.code.toLowerCase();
+  const name = group.name.toLowerCase();
+
+  if (preset === "extras" || code.includes("extra") || name.includes("extra") || name.includes("adicion")) {
+    return "extras";
+  }
+
+  if (preset === "removals" || code.includes("quitar") || name.includes("quitar") || name.includes("sin ")) {
+    return "removals";
+  }
+
+  if (preset === "recommendations" || name.includes("recomend") || name.includes("tambien")) {
+    return "recommendations";
+  }
+
+  if (preset === "preferences" || name.includes("preferencia") || name.includes("instruccion")) {
+    return "preferences";
+  }
+
+  return "choice";
+}
+
+function getSimpleGroupLabel(kind: SimpleGroupKind) {
+  switch (kind) {
+    case "extras":
+      return "Adiciones";
+    case "removals":
+      return "Quitar ingredientes";
+    case "preferences":
+      return "Preferencias";
+    case "recommendations":
+      return "Recomendados";
+    case "choice":
+    default:
+      return "Debe escoger";
+  }
+}
+
+function getSimpleGroupHelp(kind: SimpleGroupKind) {
+  switch (kind) {
+    case "extras":
+      return "Para queso extra, salsas, leche vegetal, shot adicional o complementos.";
+    case "removals":
+      return "Para opciones como “sin cebolla”, “sin tomate” o “sin salsa”.";
+    case "preferences":
+      return "Para instrucciones que no cambian inventario: poco dulce, bien caliente o partir en dos.";
+    case "recommendations":
+      return "Para sugerir acompañamientos, bebidas o postres.";
+    case "choice":
+    default:
+      return "Para tamaño, tipo de leche, bebida o acompañamiento obligatorio.";
+  }
+}
+
+function getSimpleDefaultEffect(kind: SimpleGroupKind) {
+  switch (kind) {
+    case "extras":
+    case "recommendations":
+      return "additive";
+    case "removals":
+      return "removal";
+    case "preferences":
+    case "choice":
+    default:
+      return "preference";
+  }
+}
+
+function getOptionSummary(option: CatalogItemOptionRow) {
+  const price = Number(option.price_delta_amount ?? 0);
+  return price > 0 ? `Suma ${formatCopAdmin(price)}` : "Sin costo adicional";
+}
+
+
+function parseSimpleGroupKind(value: FormDataEntryValue | string | null | undefined): SimpleGroupKind {
+  const kind = typeof value === "string" ? value.trim() : "";
+
+  if (
+    kind === "extras" ||
+    kind === "removals" ||
+    kind === "preferences" ||
+    kind === "recommendations"
+  ) {
+    return kind;
+  }
+
+  return "choice";
+}
+
+function getSimpleGroupCreationDefaults(kind: SimpleGroupKind) {
+  switch (kind) {
+    case "extras":
+      return {
+        name: "Adiciones",
+        description: "El cliente puede agregar extras o adicionales.",
+        selectionType: "multiple",
+        isRequired: false,
+        minSelect: 0,
+        maxSelect: 10,
+        sortBase: 200,
+      };
+    case "removals":
+      return {
+        name: "Quitar ingredientes",
+        description: "El cliente puede pedir retirar ingredientes.",
+        selectionType: "multiple",
+        isRequired: false,
+        minSelect: 0,
+        maxSelect: 99,
+        sortBase: 900,
+      };
+    case "preferences":
+      return {
+        name: "Preferencias",
+        description: "El cliente puede dejar instrucciones de preparación.",
+        selectionType: "multiple",
+        isRequired: false,
+        minSelect: 0,
+        maxSelect: 10,
+        sortBase: 700,
+      };
+    case "recommendations":
+      return {
+        name: "También puedes agregar",
+        description: "Productos o complementos recomendados.",
+        selectionType: "multiple",
+        isRequired: false,
+        minSelect: 0,
+        maxSelect: 10,
+        sortBase: 800,
+      };
+    case "choice":
+    default:
+      return {
+        name: "Elige una opción",
+        description: "El cliente debe escoger una opción.",
+        selectionType: "single",
+        isRequired: true,
+        minSelect: 1,
+        maxSelect: 1,
+        sortBase: 100,
+      };
+  }
+}
+
+async function getNextOptionGroupSortOrder(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  itemId: string,
+  fallbackBase: number,
+) {
+  const { data } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .select("sort_order")
+    .eq("catalog_item_id", itemId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const current = Number(data?.sort_order ?? fallbackBase - 10);
+  return Number.isFinite(current) ? current + 10 : fallbackBase;
+}
+
+async function getNextOptionSortOrder(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  groupId: string,
+) {
+  const { data } = await supabase
+    .schema("pass")
+    .from("catalog_item_options")
+    .select("sort_order")
+    .eq("option_group_id", groupId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const current = Number(data?.sort_order ?? -10);
+  return Number.isFinite(current) ? current + 10 : 0;
+}
+
+
 function slugify(value: string) {
   return value
     .normalize("NFD")
@@ -472,7 +663,7 @@ async function validateCommercialMenuReferences(
 
   if (!sellOption) {
     return {
-      error: "El producto operacional no esta habilitado para esta sede.",
+      error: "El producto base no esta habilitado para esta sede.",
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
@@ -706,7 +897,7 @@ async function updateMenuItem(formData: FormData) {
 
   revalidatePath(`/menu/${id}`);
   revalidatePath("/menu");
-  redirect("/menu?ok=" + encodeURIComponent("Item actualizado."));
+  redirect("/menu?ok=" + encodeURIComponent("Producto actualizado."));
 }
 
 
@@ -715,16 +906,21 @@ async function createOptionGroup(formData: FormData) {
   const supabase = await createClient();
 
   const itemId = asText(formData.get("catalog_item_id"));
-  const name = asText(formData.get("name"));
-  const description = asText(formData.get("description")) || null;
-  const selectionType = parseSelectionType(formData.get("selection_type"));
-  const isRequired = asBool(formData.get("is_required"));
-  const { minSelect, maxSelect } = normalizeSelectBounds(formData, selectionType, isRequired);
-  const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
+  const groupKind = parseSimpleGroupKind(formData.get("group_kind"));
+  const defaults = getSimpleGroupCreationDefaults(groupKind);
+  const name = asText(formData.get("name")) || defaults.name;
+  const description = asText(formData.get("description")) || defaults.description;
+  const selectionType = defaults.selectionType;
+  const isRequired = defaults.isRequired;
+  const requestedMax = Math.round(asNonNegativeNumber(formData.get("max_select")));
+  const maxSelect = selectionType === "single"
+    ? 1
+    : Math.max(defaults.maxSelect, requestedMax || defaults.maxSelect);
+  const sortOrder = await getNextOptionGroupSortOrder(supabase, itemId, defaults.sortBase);
   const code = asCatalogCode(formData.get("code"), name);
 
   if (!itemId || !name || !code) {
-    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para crear el grupo de opciones.")}`);
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Falta el nombre del grupo.")}`);
   }
 
   const { error } = await supabase
@@ -737,11 +933,14 @@ async function createOptionGroup(formData: FormData) {
       description,
       selection_type: selectionType,
       is_required: isRequired,
-      min_select: minSelect,
+      min_select: defaults.minSelect,
       max_select: maxSelect,
       sort_order: sortOrder,
       is_active: true,
-      metadata: {},
+      metadata: {
+        preset: groupKind,
+        configured_from: "simple_product_page",
+      },
     });
 
   if (error) {
@@ -749,7 +948,7 @@ async function createOptionGroup(formData: FormData) {
   }
 
   revalidatePath(`/menu/${itemId}`);
-  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Grupo de opciones creado.")}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Grupo creado.")}`);
 }
 
 async function updateOptionGroup(formData: FormData) {
@@ -830,33 +1029,35 @@ async function createOption(formData: FormData) {
   const groupId = asText(formData.get("option_group_id"));
   const name = asText(formData.get("name"));
   const description = asText(formData.get("description")) || null;
-  const code = asCatalogCode(formData.get("code"), name);
   const priceDeltaAmount = asNonNegativeNumber(formData.get("price_delta_amount"));
-  const effectType = parseOptionEffectType(formData.get("effect_type"));
-  const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
 
-  if (!itemId || !groupId || !name || !code) {
-    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para crear la opcion.")}`);
+  if (!itemId || !groupId || !name) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Falta el nombre de la opción.")}`);
   }
 
   const { data: group, error: groupError } = await supabase
     .schema("pass")
     .from("catalog_item_option_groups")
-    .select("id,catalog_item_id")
+    .select("id,catalog_item_id,code,name,selection_type,metadata")
     .eq("id", groupId)
     .eq("catalog_item_id", itemId)
     .maybeSingle();
 
   if (groupError || !group) {
-    redirect(`/menu/${itemId}?error=${encodeURIComponent(groupError?.message || "El grupo de opciones no pertenece a este item.")}`);
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(groupError?.message || "El grupo no pertenece a este producto.")}`);
   }
+
+  const groupKind = getSimpleGroupKind(group as CatalogItemOptionGroupRow);
+  const requestedEffect = asText(formData.get("effect_type"));
+  const effectType = requestedEffect ? parseOptionEffectType(requestedEffect) : getSimpleDefaultEffect(groupKind);
+  const sortOrder = await getNextOptionSortOrder(supabase, groupId);
 
   const { error } = await supabase
     .schema("pass")
     .from("catalog_item_options")
     .insert({
       option_group_id: groupId,
-      code,
+      code: asCatalogCode(formData.get("code"), name),
       name,
       description,
       price_delta_amount: priceDeltaAmount,
@@ -865,7 +1066,9 @@ async function createOption(formData: FormData) {
       is_default: asBool(formData.get("is_default")),
       is_active: true,
       sort_order: sortOrder,
-      metadata: {},
+      metadata: {
+        configured_from: "simple_product_page",
+      },
     });
 
   if (error) {
@@ -873,7 +1076,7 @@ async function createOption(formData: FormData) {
   }
 
   revalidatePath(`/menu/${itemId}`);
-  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Opcion creada.")}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Opción creada.")}`);
 }
 
 async function updateOption(formData: FormData) {
@@ -1298,7 +1501,7 @@ async function createRemovalOptionFromRecipe(formData: FormData) {
         max_select: 99,
         sort_order: 900,
         is_active: true,
-        metadata: { source: "recipe_removals" },
+        metadata: { preset: "removals", source: "recipe_removals", configured_from: "simple_product_page" },
       })
       .select("id")
       .single();
@@ -1341,7 +1544,7 @@ async function createRemovalOptionFromRecipe(formData: FormData) {
         is_default: false,
         is_active: true,
         sort_order: 0,
-        metadata: { source: "recipe_removals", ingredient_product_id: ingredientProductId },
+        metadata: { preset: "removals", source: "recipe_removals", configured_from: "simple_product_page", ingredient_product_id: ingredientProductId },
       })
       .select("id")
       .single();
@@ -1399,7 +1602,7 @@ async function disableMenuItem(formData: FormData) {
   const supabase = await createClient();
   const id = asText(formData.get("id"));
   if (!id) {
-    redirect("/menu?error=" + encodeURIComponent("Item invalido."));
+    redirect("/menu?error=" + encodeURIComponent("Producto inválido."));
   }
 
   const { error } = await supabase.schema("pass").from("catalog_items").update({ is_active: false }).eq("id", id);
@@ -1409,7 +1612,7 @@ async function disableMenuItem(formData: FormData) {
 
   revalidatePath(`/menu/${id}`);
   revalidatePath("/menu");
-  redirect(`/menu/${id}?ok=${encodeURIComponent("Item deshabilitado.")}`);
+  redirect(`/menu/${id}?ok=${encodeURIComponent("Producto deshabilitado.")}`);
 }
 
 async function deleteMenuItem(formData: FormData) {
@@ -1417,7 +1620,7 @@ async function deleteMenuItem(formData: FormData) {
   const supabase = await createClient();
   const id = asText(formData.get("id"));
   if (!id) {
-    redirect("/menu?error=" + encodeURIComponent("Item invalido."));
+    redirect("/menu?error=" + encodeURIComponent("Producto inválido."));
   }
 
   const { error } = await supabase.schema("pass").from("catalog_items").delete().eq("id", id);
@@ -1426,7 +1629,7 @@ async function deleteMenuItem(formData: FormData) {
   }
 
   revalidatePath("/menu");
-  redirect("/menu?ok=" + encodeURIComponent("Item eliminado."));
+  redirect("/menu?ok=" + encodeURIComponent("Producto eliminado."));
 }
 
 function safeDecode(value: string | null | undefined) {
@@ -1501,7 +1704,7 @@ export default async function MenuItemDetailPage({
   ]);
 
   if (!item) {
-    redirect("/menu?error=" + encodeURIComponent("Item no encontrado."));
+    redirect("/menu?error=" + encodeURIComponent("Producto no encontrado."));
   }
 
   const row = item as CatalogItemRow;
@@ -1726,8 +1929,8 @@ export default async function MenuItemDetailPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Editar item comercial"
-        subtitle="Ajusta la publicación comercial por sede: categoría comercial, precio, foto y disponibilidad."
+        title="Editar producto del menú"
+        subtitle="Edita la información principal y configura opciones para que cualquier persona pueda dejar el producto listo para vender."
         actions={<Link href="/menu" className="ui-btn ui-btn--ghost">Volver</Link>}
       />
 
@@ -1770,17 +1973,104 @@ export default async function MenuItemDetailPage({
 
       <div className="ui-panel space-y-6">
         <div>
-          <div className="ui-h3">Opciones configurables</div>
+          <div className="ui-h3">Configuración simple del producto</div>
           <p className="ui-caption">
-            Configura grupos, opciones y reglas de consumo operativo. Las opciones son lo que ve el cliente; las reglas de consumo definen qué insumo/producto se descuenta del LOC al preparar.
+            Configura lo que verá el cliente. Viso crea los códigos, el orden y los ajustes técnicos automáticamente.
           </p>
         </div>
 
+        <div className="grid gap-4 lg:grid-cols-2">
+          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
+            <input type="hidden" name="catalog_item_id" value={row.id} />
+            <input type="hidden" name="group_kind" value="choice" />
+
+            <div className="text-base font-black text-[var(--ui-text)]">Debe escoger una opción</div>
+            <p className="ui-caption mt-1">Para tamaño, tipo de leche, bebida o acompañamiento obligatorio.</p>
+
+            <label className="mt-4 block space-y-2">
+              <span className="ui-label">Nombre que verá el cliente</span>
+              <input name="name" className="ui-input" placeholder="Ej. Elige tu bebida" required />
+            </label>
+
+            <label className="mt-4 block space-y-2">
+              <span className="ui-label">Ayuda opcional</span>
+              <input name="description" className="ui-input" placeholder="Ej. Escoge una bebida para acompañar." />
+            </label>
+
+            <div className="mt-4 flex justify-end">
+              <button type="submit" className="ui-btn ui-btn--brand">Crear grupo</button>
+            </div>
+          </form>
+
+          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
+            <input type="hidden" name="catalog_item_id" value={row.id} />
+            <input type="hidden" name="group_kind" value="extras" />
+
+            <div className="text-base font-black text-[var(--ui-text)]">Puede agregar extras</div>
+            <p className="ui-caption mt-1">Para queso extra, salsas, shot adicional o leche vegetal.</p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_120px]">
+              <label className="space-y-2">
+                <span className="ui-label">Nombre que verá el cliente</span>
+                <input name="name" className="ui-input" placeholder="Ej. Adiciones" required />
+              </label>
+
+              <label className="space-y-2">
+                <span className="ui-label">Máximo</span>
+                <input name="max_select" type="number" min="1" className="ui-input" defaultValue="10" />
+              </label>
+            </div>
+
+            <label className="mt-4 block space-y-2">
+              <span className="ui-label">Ayuda opcional</span>
+              <input name="description" className="ui-input" placeholder="Ej. Puedes escoger hasta 3 adiciones." />
+            </label>
+
+            <div className="mt-4 flex justify-end">
+              <button type="submit" className="ui-btn ui-btn--brand">Crear grupo</button>
+            </div>
+          </form>
+
+          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
+            <input type="hidden" name="catalog_item_id" value={row.id} />
+            <input type="hidden" name="group_kind" value="preferences" />
+
+            <div className="text-base font-black text-[var(--ui-text)]">Preferencias de preparación</div>
+            <p className="ui-caption mt-1">Para sin azúcar, poca salsa, bien caliente o partido en dos.</p>
+
+            <label className="mt-4 block space-y-2">
+              <span className="ui-label">Nombre que verá el cliente</span>
+              <input name="name" className="ui-input" placeholder="Ej. Preferencias" required />
+            </label>
+
+            <div className="mt-4 flex justify-end">
+              <button type="submit" className="ui-btn ui-btn--brand">Crear grupo</button>
+            </div>
+          </form>
+
+          <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
+            <input type="hidden" name="catalog_item_id" value={row.id} />
+            <input type="hidden" name="group_kind" value="recommendations" />
+
+            <div className="text-base font-black text-[var(--ui-text)]">Recomendados o acompañamientos</div>
+            <p className="ui-caption mt-1">Para sugerir bebida, papas, postre o complemento.</p>
+
+            <label className="mt-4 block space-y-2">
+              <span className="ui-label">Nombre que verá el cliente</span>
+              <input name="name" className="ui-input" placeholder="Ej. También puedes agregar" required />
+            </label>
+
+            <div className="mt-4 flex justify-end">
+              <button type="submit" className="ui-btn ui-btn--brand">Crear grupo</button>
+            </div>
+          </form>
+        </div>
+
         {recipeIngredients.length > 0 ? (
-          <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-            <div className="text-sm font-bold text-[var(--ui-text)]">Ingredientes retirables desde receta</div>
+          <div className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
+            <div className="text-base font-black text-[var(--ui-text)]">Ingredientes que el cliente puede quitar</div>
             <p className="ui-caption mt-1">
-              Crea opciones “Sin X” a partir de ingredientes activos de la receta. Al preparar, ese ingrediente no debe consumirse.
+              Presiona “Permitir quitar” y Viso crea automáticamente la opción “Sin X”. Al preparar, ese ingrediente no debe descontarse.
             </p>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -1809,7 +2099,7 @@ export default async function MenuItemDetailPage({
                     </div>
 
                     <button type="submit" className="ui-btn ui-btn--ghost shrink-0">
-                      Crear “Sin”
+                      Permitir quitar
                     </button>
                   </form>
                 );
@@ -1817,899 +2107,378 @@ export default async function MenuItemDetailPage({
             </div>
           </div>
         ) : (
-          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-white p-4">
-            <div className="text-sm font-semibold text-[var(--ui-text)]">No hay ingredientes de receta para sugerir retiros.</div>
+          <div className="rounded-3xl border border-dashed border-[var(--ui-border)] bg-white p-5">
+            <div className="text-sm font-bold text-[var(--ui-text)]">Este producto no tiene receta activa.</div>
             <p className="ui-caption mt-1">
-              Cuando el producto operacional tenga receta activa, aquí aparecerán ingredientes para crear opciones tipo “Sin X”.
+              Cuando tenga receta, aquí aparecerán los ingredientes que se pueden convertir en opciones “Sin X”.
             </p>
           </div>
         )}
 
-        <form action={createOptionGroup} className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-          <input type="hidden" name="catalog_item_id" value={row.id} />
-
-          <div className="grid gap-4 lg:grid-cols-[1fr_140px_140px_120px]">
-            <label className="space-y-2">
-              <span className="ui-label">Nuevo grupo</span>
-              <input name="name" className="ui-input" placeholder="Leche, tamaño, acompañante..." required />
-            </label>
-
-            <label className="space-y-2">
-              <span className="ui-label">Tipo</span>
-              <select name="selection_type" className="ui-input" defaultValue="single">
-                <option value="single">Única</option>
-                <option value="multiple">Múltiple</option>
-              </select>
-            </label>
-
-            <label className="space-y-2">
-              <span className="ui-label">Máximo</span>
-              <input name="max_select" type="number" min="1" className="ui-input" defaultValue="1" />
-            </label>
-
-            <label className="space-y-2">
-              <span className="ui-label">Orden</span>
-              <input name="sort_order" type="number" min="0" className="ui-input" defaultValue="0" />
-            </label>
-          </div>
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_140px_auto] lg:items-end">
-            <label className="space-y-2">
-              <span className="ui-label">Código opcional</span>
-              <input name="code" className="ui-input" placeholder="leche, tamano, acompanante" />
-            </label>
-
-            <label className="space-y-2">
-              <span className="ui-label">Mínimo</span>
-              <input name="min_select" type="number" min="0" className="ui-input" defaultValue="0" />
-            </label>
-
-            <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
-              <input type="checkbox" name="is_required" />
-              Obligatorio
-            </label>
-          </div>
-
-          <label className="mt-4 block space-y-2">
-            <span className="ui-label">Descripción opcional</span>
-            <input name="description" className="ui-input" placeholder="El cliente debe escoger una opción de este grupo." />
-          </label>
-
-          <div className="mt-4">
-            <button type="submit" className="ui-btn ui-btn--brand">
-              Crear grupo
-            </button>
-          </div>
-        </form>
-
         {optionGroups.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-white p-5">
-            <div className="text-sm font-semibold text-[var(--ui-text)]">Este producto aún no tiene opciones configurables.</div>
+          <div className="rounded-3xl border border-dashed border-[var(--ui-border)] bg-white p-6 text-center">
+            <div className="text-base font-black text-[var(--ui-text)]">Este producto todavía no tiene opciones.</div>
             <p className="ui-caption mt-1">
-              Crea un grupo para empezar. Después podrás agregar opciones y reglas de consumo.
+              Crea una de las tarjetas de arriba. Después podrás agregar opciones como “Leche de almendra”, “Queso extra” o “Sin cebolla”.
             </p>
           </div>
         ) : (
           <div className="space-y-5">
             {optionGroups.map((group) => {
               const groupOptions = optionsByGroup.get(group.id) ?? [];
+              const groupKind = getSimpleGroupKind(group);
+              const optionEffectType = getSimpleDefaultEffect(groupKind);
+              const isMultiple = parseSelectionType(group.selection_type) === "multiple";
 
               return (
                 <div key={group.id} className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
-                  <form action={updateOptionGroup} className="space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-lg font-black text-[var(--ui-text)]">{group.name}</div>
+                      <p className="ui-caption mt-1">{getSimpleGroupHelp(groupKind)}</p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <span className="ui-chip">{getSimpleGroupLabel(groupKind)}</span>
+                      <span className="ui-chip">{group.is_required ? "Obligatorio" : "Opcional"}</span>
+                      <span className="ui-chip">{isMultiple ? `Máximo ${group.max_select}` : "Una opción"}</span>
+                    </div>
+                  </div>
+
+                  <form action={createOption} className="mt-5 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
                     <input type="hidden" name="catalog_item_id" value={row.id} />
                     <input type="hidden" name="option_group_id" value={group.id} />
+                    <input type="hidden" name="effect_type" value={optionEffectType} />
 
-                    <div className="grid gap-4 lg:grid-cols-[1fr_140px_120px_120px_120px]">
+                    <div className="grid gap-4 lg:grid-cols-[1fr_150px_auto] lg:items-end">
                       <label className="space-y-2">
-                        <span className="ui-label">Grupo</span>
-                        <input name="name" className="ui-input" defaultValue={group.name} required />
+                        <span className="ui-label">Nueva opción</span>
+                        <input name="name" className="ui-input" placeholder="Ej. Leche de almendra, queso extra, sin cebolla" required />
                       </label>
 
                       <label className="space-y-2">
-                        <span className="ui-label">Tipo</span>
-                        <select name="selection_type" className="ui-input" defaultValue={parseSelectionType(group.selection_type)}>
-                          <option value="single">Única</option>
-                          <option value="multiple">Múltiple</option>
-                        </select>
+                        <span className="ui-label">Valor adicional</span>
+                        <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue="0" />
                       </label>
 
-                      <label className="space-y-2">
-                        <span className="ui-label">Mínimo</span>
-                        <input name="min_select" type="number" min="0" className="ui-input" defaultValue={group.min_select ?? 0} />
-                      </label>
-
-                      <label className="space-y-2">
-                        <span className="ui-label">Máximo</span>
-                        <input name="max_select" type="number" min="1" className="ui-input" defaultValue={group.max_select ?? 1} />
-                      </label>
-
-                      <label className="space-y-2">
-                        <span className="ui-label">Orden</span>
-                        <input name="sort_order" type="number" min="0" className="ui-input" defaultValue={group.sort_order ?? 0} />
+                      <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
+                        <input type="checkbox" name="is_default" />
+                        Por defecto
                       </label>
                     </div>
 
-                    <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-                      <label className="space-y-2">
-                        <span className="ui-label">Código</span>
-                        <input name="code" className="ui-input" defaultValue={group.code} required />
-                      </label>
+                    <label className="mt-4 block space-y-2">
+                      <span className="ui-label">Descripción para el cliente</span>
+                      <input name="description" className="ui-input" placeholder="Opcional. Ej. Recomendado para bebidas calientes." />
+                    </label>
 
-                      <label className="space-y-2">
-                        <span className="ui-label">Descripción</span>
-                        <input name="description" className="ui-input" defaultValue={group.description ?? ""} />
-                      </label>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-4">
-                      <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                        <input type="checkbox" name="is_required" defaultChecked={group.is_required} />
-                        Obligatorio
-                      </label>
-
-                      <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                        <input type="checkbox" name="is_active" defaultChecked={group.is_active} />
-                        Activo
-                      </label>
-
+                    <div className="mt-4 flex justify-end">
                       <button type="submit" className="ui-btn ui-btn--brand">
-                        Guardar grupo
+                        Agregar opción
                       </button>
                     </div>
                   </form>
 
-                  <div className="mt-3">
-                    <form action={disableOptionGroup}>
-                      <input type="hidden" name="catalog_item_id" value={row.id} />
-                      <input type="hidden" name="option_group_id" value={group.id} />
-                      <button type="submit" className="ui-btn ui-btn--ghost">
-                        Desactivar grupo
-                      </button>
-                    </form>
-                  </div>
+                  {groupOptions.length === 0 ? (
+                    <p className="ui-caption mt-4">Este grupo todavía no tiene opciones.</p>
+                  ) : (
+                    <div className="mt-5 space-y-3">
+                      {groupOptions.map((option) => {
+                        const consumptionRules = consumptionRulesByOption.get(option.id) ?? [];
+                        const recipeEffects = recipeEffectsByOption.get(option.id) ?? [];
+                        const currentEffectType = parseOptionEffectType(option.effect_type);
+                        const optionFormId = `option-form-${option.id}`;
 
-                  <div className="mt-6 space-y-3 border-t border-[var(--ui-border)] pt-5">
-                    <div>
-                      <div className="text-sm font-bold text-[var(--ui-text)]">Opciones</div>
-                      <p className="ui-caption">
-                        Cada opción puede sumar precio y tener reglas de consumo de inventario.
-                      </p>
-                    </div>
+                        return (
+                          <div key={option.id} className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                            <form id={optionFormId} action={updateOption} className="space-y-4">
+                              <input type="hidden" name="catalog_item_id" value={row.id} />
+                              <input type="hidden" name="option_group_id" value={group.id} />
+                              <input type="hidden" name="option_id" value={option.id} />
+                              <input type="hidden" name="effect_type" value={currentEffectType} />
+                              <input type="hidden" name="code" value={option.code} />
+                              <input type="hidden" name="sort_order" value={String(option.sort_order ?? 0)} />
 
-                    <form action={createOption} className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                      <input type="hidden" name="catalog_item_id" value={row.id} />
-                      <input type="hidden" name="option_group_id" value={group.id} />
+                              <div className="grid gap-4 lg:grid-cols-[1fr_150px_auto_auto] lg:items-end">
+                                <label className="space-y-2">
+                                  <span className="ui-label">Opción</span>
+                                  <input name="name" className="ui-input" defaultValue={option.name} required />
+                                </label>
 
-                      <div className="grid gap-4 lg:grid-cols-[1fr_150px_160px_120px]">
-                        <label className="space-y-2">
-                          <span className="ui-label">Nueva opción</span>
-                          <input name="name" className="ui-input" placeholder="Entera, almendra, brownie..." required />
-                        </label>
+                                <label className="space-y-2">
+                                  <span className="ui-label">Valor adicional</span>
+                                  <input
+                                    name="price_delta_amount"
+                                    type="number"
+                                    min="0"
+                                    className="ui-input"
+                                    defaultValue={String(option.price_delta_amount ?? 0)}
+                                  />
+                                </label>
 
-                        <label className="space-y-2">
-                          <span className="ui-label">Adicional COP</span>
-                          <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue="0" />
-                        </label>
+                                <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
+                                  <input type="checkbox" name="is_default" defaultChecked={option.is_default} />
+                                  Por defecto
+                                </label>
 
-                        <label className="space-y-2">
-                          <span className="ui-label">Efecto</span>
-                          <select name="effect_type" className="ui-input" defaultValue="preference">
-                            <option value="preference">Preferencia</option>
-                            <option value="additive">Extra</option>
-                            <option value="replacement">Reemplazo</option>
-                            <option value="removal">Retiro</option>
-                          </select>
-                        </label>
+                                <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
+                                  <input type="checkbox" name="is_active" defaultChecked={option.is_active} />
+                                  Mostrar
+                                </label>
+                              </div>
 
-                        <label className="space-y-2">
-                          <span className="ui-label">Orden</span>
-                          <input name="sort_order" type="number" min="0" className="ui-input" defaultValue="0" />
-                        </label>
-                      </div>
+                              <label className="block space-y-2">
+                                <span className="ui-label">Descripción para el cliente</span>
+                                <input name="description" className="ui-input" defaultValue={option.description ?? ""} />
+                              </label>
+                            </form>
 
-                      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
-                        <label className="space-y-2">
-                          <span className="ui-label">Código opcional</span>
-                          <input name="code" className="ui-input" placeholder="almendra, brownie..." />
-                        </label>
+                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="ui-chip">{getOptionSummary(option)}</span>
+                                <span className="ui-chip">{getEffectTypeLabel(option.effect_type)}</span>
+                              </div>
 
-                        <label className="space-y-2">
-                          <span className="ui-label">Descripción opcional</span>
-                          <input name="description" className="ui-input" />
-                        </label>
-                      </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button type="submit" form={optionFormId} className="ui-btn ui-btn--brand">
+                                  Guardar opción
+                                </button>
 
-                      <div className="mt-4 flex flex-wrap items-center gap-4">
-                        <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                          <input type="checkbox" name="is_default" />
-                          Predeterminada
-                        </label>
-
-                        <button type="submit" className="ui-btn ui-btn--brand">
-                          Crear opción
-                        </button>
-                      </div>
-                    </form>
-
-                    {groupOptions.length === 0 ? (
-                      <p className="ui-caption">Este grupo todavía no tiene opciones.</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {groupOptions.map((option) => {
-                          const consumptionRules = consumptionRulesByOption.get(option.id) ?? [];
-                          const recipeEffects = recipeEffectsByOption.get(option.id) ?? [];
-
-                          return (
-                            <div key={option.id} className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-                              <form action={updateOption} className="space-y-4">
-                                <input type="hidden" name="catalog_item_id" value={row.id} />
-                                <input type="hidden" name="option_group_id" value={group.id} />
-                                <input type="hidden" name="option_id" value={option.id} />
-
-                                <div className="grid gap-4 lg:grid-cols-[1fr_150px_160px_120px]">
-                                  <label className="space-y-2">
-                                    <span className="ui-label">Opción</span>
-                                    <input name="name" className="ui-input" defaultValue={option.name} required />
-                                  </label>
-
-                                  <label className="space-y-2">
-                                    <span className="ui-label">Adicional COP</span>
-                                    <input
-                                      name="price_delta_amount"
-                                      type="number"
-                                      min="0"
-                                      className="ui-input"
-                                      defaultValue={String(option.price_delta_amount ?? 0)}
-                                    />
-                                  </label>
-
-                                  <label className="space-y-2">
-                                    <span className="ui-label">Efecto</span>
-                                    <select name="effect_type" className="ui-input" defaultValue={parseOptionEffectType(option.effect_type)}>
-                                      <option value="preference">Preferencia</option>
-                                      <option value="additive">Extra</option>
-                                      <option value="replacement">Reemplazo</option>
-                                      <option value="removal">Retiro</option>
-                                    </select>
-                                  </label>
-
-                                  <label className="space-y-2">
-                                    <span className="ui-label">Orden</span>
-                                    <input name="sort_order" type="number" min="0" className="ui-input" defaultValue={option.sort_order ?? 0} />
-                                  </label>
-                                </div>
-
-                                <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-                                  <label className="space-y-2">
-                                    <span className="ui-label">Código</span>
-                                    <input name="code" className="ui-input" defaultValue={option.code} required />
-                                  </label>
-
-                                  <label className="space-y-2">
-                                    <span className="ui-label">Descripción</span>
-                                    <input name="description" className="ui-input" defaultValue={option.description ?? ""} />
-                                  </label>
-                                </div>
-
-                                <div className="flex flex-wrap items-center gap-4">
-                                  <span className="ui-chip">
-                                    {formatCopAdmin(option.price_delta_amount)}
-                                  </span>
-
-                                  <span className="ui-chip">
-                                    {getEffectTypeLabel(option.effect_type)}
-                                  </span>
-
-                                  <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                    <input type="checkbox" name="is_default" defaultChecked={option.is_default} />
-                                    Predeterminada
-                                  </label>
-
-                                  <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                    <input type="checkbox" name="is_active" defaultChecked={option.is_active} />
-                                    Activa
-                                  </label>
-
-                                  <button type="submit" className="ui-btn ui-btn--brand">
-                                    Guardar opción
-                                  </button>
-                                </div>
-                              </form>
-
-                              <div className="mt-3">
                                 <form action={disableOption}>
                                   <input type="hidden" name="catalog_item_id" value={row.id} />
                                   <input type="hidden" name="option_group_id" value={group.id} />
                                   <input type="hidden" name="option_id" value={option.id} />
                                   <button type="submit" className="ui-btn ui-btn--ghost">
-                                    Desactivar opción
+                                    Ocultar opción
                                   </button>
                                 </form>
                               </div>
+                            </div>
 
-                              <div className="mt-5 space-y-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                                <div>
-                                  <div className="text-sm font-bold text-[var(--ui-text)]">Efectos sobre receta</div>
-                                  <p className="ui-caption">
-                                    Úsalo para “Sin ingrediente” o reemplazos reales. Esto evita que el ingrediente base se descuente al preparar.
+                            <details className="mt-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                              <summary className="cursor-pointer text-sm font-black text-[var(--ui-text)]">
+                                Inventario avanzado
+                              </summary>
+
+                              <div className="mt-4 space-y-5">
+                                <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                  <div className="text-sm font-bold text-[var(--ui-text)]">Descontar un insumo cuando el cliente elija esta opción</div>
+                                  <p className="ui-caption mt-1">
+                                    Úsalo para extras o sustitutos. Ejemplo: si el cliente elige leche de almendra, descuenta leche de almendra.
                                   </p>
-                                </div>
 
-                                <form action={createRecipeEffect} className="space-y-4 rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-                                  <input type="hidden" name="catalog_item_id" value={row.id} />
-                                  <input type="hidden" name="option_id" value={option.id} />
-                                  <input type="hidden" name="is_active" value="true" />
+                                  <form action={createConsumptionRule} className="mt-4 space-y-4">
+                                    <input type="hidden" name="catalog_item_id" value={row.id} />
+                                    <input type="hidden" name="option_id" value={option.id} />
+                                    <input type="hidden" name="is_active" value="true" />
+                                    <input type="hidden" name="effect_type" value={currentEffectType === "replacement" ? "replacement" : "additive"} />
+                                    <input type="hidden" name="name" value={`Consumo de ${option.name}`} />
+                                    <input type="hidden" name="code" value={`consumo-${option.code}`} />
+                                    <input type="hidden" name="sort_order" value="0" />
+                                    <input type="hidden" name="source_location_strategy" value="product_production_location" />
+                                    <input type="hidden" name="conversion_factor_to_stock" value="1" />
 
-                                  <div className="grid gap-4 lg:grid-cols-[160px_1fr_180px_140px]">
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Tipo</span>
-                                      <select name="effect_type" className="ui-input" defaultValue={parseRecipeEffectType(option.effect_type)}>
-                                        <option value="removal">Retirar ingrediente</option>
-                                        <option value="replacement">Reemplazar ingrediente</option>
-                                      </select>
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Ingrediente de receta</span>
-                                      <select name="target_ingredient_product_id" className="ui-input" required>
-                                        <option value="">Selecciona ingrediente</option>
-                                        {recipeIngredients.map((ingredient) => {
-                                          const product = ingredient.product;
-                                          if (!product) return null;
-
-                                          return (
-                                            <option key={ingredient.id} value={ingredient.ingredient_product_id}>
-                                              {product.name ?? "Ingrediente"} · {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}
+                                    <div className="grid gap-4 lg:grid-cols-[1fr_150px_150px]">
+                                      <label className="space-y-2">
+                                        <span className="ui-label">Insumo o producto</span>
+                                        <select name="product_id" className="ui-input" required>
+                                          <option value="">Selecciona</option>
+                                          {consumptionProducts.map((product) => (
+                                            <option key={product.id} value={product.id}>
+                                              {product.name ?? "Sin nombre"}
                                             </option>
-                                          );
-                                        })}
-                                      </select>
-                                    </label>
+                                          ))}
+                                        </select>
+                                      </label>
 
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Modo cantidad</span>
-                                      <select name="quantity_mode" className="ui-input" defaultValue="full_recipe_component">
-                                        <option value="full_recipe_component">Todo el componente</option>
-                                        <option value="fixed_quantity">Cantidad fija</option>
-                                      </select>
-                                    </label>
+                                      <label className="space-y-2">
+                                        <span className="ui-label">Cantidad</span>
+                                        <input name="quantity_per_option" type="number" min="0.0001" step="0.0001" className="ui-input" required />
+                                      </label>
 
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Cantidad fija</span>
-                                      <input name="quantity_amount" type="number" min="0.0001" step="0.0001" className="ui-input" />
-                                    </label>
-                                  </div>
-
-                                  <div className="grid gap-4 lg:grid-cols-[1fr_160px_120px]">
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Código componente opcional</span>
-                                      <input name="recipe_component_code" className="ui-input" placeholder="milk, sauce, onion..." />
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Unidad</span>
-                                      <select name="stock_unit_code" className="ui-input" defaultValue="">
-                                        <option value="">Usar unidad del ingrediente</option>
-                                        {inventoryUnits.map((unit) => (
-                                          <option key={unit.code} value={unit.code}>
-                                            {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Orden</span>
-                                      <input name="sort_order" type="number" min="0" className="ui-input" defaultValue="0" />
-                                    </label>
-                                  </div>
-
-                                  <button type="submit" className="ui-btn ui-btn--brand">
-                                    Crear efecto de receta
-                                  </button>
-                                </form>
-
-                                {recipeEffects.length === 0 ? (
-                                  <p className="ui-caption">
-                                    Esta opción no modifica la receta base.
-                                  </p>
-                                ) : (
-                                  <div className="space-y-3">
-                                    {recipeEffects.map((effect) => {
-                                      const targetProduct = consumptionProductById.get(effect.target_ingredient_product_id);
-
-                                      return (
-                                        <div key={effect.id} className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-                                          <form action={updateRecipeEffect} className="space-y-4">
-                                            <input type="hidden" name="catalog_item_id" value={row.id} />
-                                            <input type="hidden" name="option_id" value={option.id} />
-                                            <input type="hidden" name="recipe_effect_id" value={effect.id} />
-
-                                            <div className="grid gap-4 lg:grid-cols-[160px_1fr_180px_140px]">
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Tipo</span>
-                                                <select name="effect_type" className="ui-input" defaultValue={parseRecipeEffectType(effect.effect_type)}>
-                                                  <option value="removal">Retirar ingrediente</option>
-                                                  <option value="replacement">Reemplazar ingrediente</option>
-                                                </select>
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Ingrediente de receta</span>
-                                                <select name="target_ingredient_product_id" className="ui-input" defaultValue={effect.target_ingredient_product_id} required>
-                                                  {recipeIngredients.map((ingredient) => {
-                                                    const product = ingredient.product;
-                                                    if (!product) return null;
-
-                                                    return (
-                                                      <option key={ingredient.id} value={ingredient.ingredient_product_id}>
-                                                        {product.name ?? "Ingrediente"} · {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}
-                                                      </option>
-                                                    );
-                                                  })}
-                                                </select>
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Modo cantidad</span>
-                                                <select name="quantity_mode" className="ui-input" defaultValue={parseRecipeEffectQuantityMode(effect.quantity_mode)}>
-                                                  <option value="full_recipe_component">Todo el componente</option>
-                                                  <option value="fixed_quantity">Cantidad fija</option>
-                                                </select>
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Cantidad fija</span>
-                                                <input
-                                                  name="quantity_amount"
-                                                  type="number"
-                                                  min="0.0001"
-                                                  step="0.0001"
-                                                  className="ui-input"
-                                                  defaultValue={effect.quantity_amount == null ? "" : String(effect.quantity_amount)}
-                                                />
-                                              </label>
-                                            </div>
-
-                                            <div className="grid gap-4 lg:grid-cols-[1fr_160px_120px]">
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Código componente</span>
-                                                <input name="recipe_component_code" className="ui-input" defaultValue={effect.recipe_component_code ?? ""} />
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Unidad</span>
-                                                <select name="stock_unit_code" className="ui-input" defaultValue={effect.stock_unit_code ?? ""}>
-                                                  <option value="">Usar unidad del ingrediente</option>
-                                                  {inventoryUnits.map((unit) => (
-                                                    <option key={unit.code} value={unit.code}>
-                                                      {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
-                                                    </option>
-                                                  ))}
-                                                </select>
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Orden</span>
-                                                <input name="sort_order" type="number" min="0" className="ui-input" defaultValue={effect.sort_order ?? 0} />
-                                              </label>
-                                            </div>
-
-                                            <div className="flex flex-wrap items-center gap-4">
-                                              <span className="ui-chip">
-                                                {effect.effect_type === "replacement" ? "Reemplaza" : "Retira"} {targetProduct?.name ?? "ingrediente"}
-                                              </span>
-
-                                              <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                                <input type="checkbox" name="is_active" defaultChecked={effect.is_active} />
-                                                Activo
-                                              </label>
-
-                                              <button type="submit" className="ui-btn ui-btn--brand">
-                                                Guardar efecto
-                                              </button>
-                                            </div>
-                                          </form>
-
-                                          <div className="mt-3">
-                                            <form action={disableRecipeEffect}>
-                                              <input type="hidden" name="catalog_item_id" value={row.id} />
-                                              <input type="hidden" name="option_id" value={option.id} />
-                                              <input type="hidden" name="recipe_effect_id" value={effect.id} />
-                                              <button type="submit" className="ui-btn ui-btn--ghost">
-                                                Desactivar efecto
-                                              </button>
-                                            </form>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className="mt-5 space-y-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                                <div>
-                                  <div className="text-sm font-bold text-[var(--ui-text)]">Consumo operativo</div>
-                                  <p className="ui-caption">
-                                    Vincula esta opción con uno o más insumos/productos para descontarlos del LOC al preparar.
-                                  </p>
-                                </div>
-
-                                <form action={createConsumptionRule} className="space-y-4 rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-                                  <input type="hidden" name="catalog_item_id" value={row.id} />
-                                  <input type="hidden" name="option_id" value={option.id} />
-                                  <input type="hidden" name="is_active" value="true" />
-
-                                  <div className="grid gap-4 lg:grid-cols-[1fr_150px_140px_120px]">
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Insumo / producto a consumir</span>
-                                      <select name="product_id" className="ui-input" required>
-                                        <option value="">Selecciona insumo o producto</option>
-                                        {consumptionProducts.map((product) => (
-                                          <option key={product.id} value={product.id}>
-                                            {[
-                                              product.name ?? "Sin nombre",
-                                              product.sku ? `SKU ${product.sku}` : null,
-                                              product.product_type,
-                                            ].filter(Boolean).join(" · ")}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Cantidad stock</span>
-                                      <input name="quantity_per_option" type="number" min="0.0001" step="0.0001" className="ui-input" required />
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Unidad stock</span>
-                                      <select name="stock_unit_code" className="ui-input" defaultValue="">
-                                        <option value="">Usar unidad del producto</option>
-                                        {inventoryUnits.map((unit) => (
-                                          <option key={unit.code} value={unit.code}>
-                                            {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Orden</span>
-                                      <input name="sort_order" type="number" min="0" className="ui-input" defaultValue="0" />
-                                    </label>
-                                  </div>
-
-                                  <div className="grid gap-4 lg:grid-cols-[1fr_150px_160px_150px]">
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Nombre regla</span>
-                                      <input name="name" className="ui-input" placeholder="Consumo de leche de almendra" required />
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Código opcional</span>
-                                      <input name="code" className="ui-input" placeholder="leche-almendra" />
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Efecto consumo</span>
-                                      <select name="effect_type" className="ui-input" defaultValue={option.effect_type === "replacement" ? "replacement" : "additive"}>
-                                        <option value="additive">Extra / suma</option>
-                                        <option value="replacement">Sustituto</option>
-                                      </select>
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Factor conversión</span>
-                                      <input name="conversion_factor_to_stock" type="number" min="0.0001" step="0.0001" className="ui-input" defaultValue="1" />
-                                    </label>
-                                  </div>
-
-                                  <div className="grid gap-4 lg:grid-cols-[150px_150px_1fr]">
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Cantidad entrada</span>
-                                      <input name="input_quantity_per_option" type="number" min="0.0001" step="0.0001" className="ui-input" />
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Unidad entrada</span>
-                                      <select name="input_unit_code" className="ui-input" defaultValue="">
-                                        <option value="">Sin unidad</option>
-                                        {inventoryUnits.map((unit) => (
-                                          <option key={unit.code} value={unit.code}>
-                                            {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
-
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Perfil UOM opcional</span>
-                                      <select name="input_uom_profile_id" className="ui-input" defaultValue="">
-                                        <option value="">Sin perfil</option>
-                                        {uomProfiles.map((profile) => {
-                                          const product = consumptionProductById.get(profile.product_id);
-                                          return (
-                                            <option key={profile.id} value={profile.id}>
-                                              {(product?.name ?? "Producto") + " · " + profile.label}
+                                      <label className="space-y-2">
+                                        <span className="ui-label">Unidad</span>
+                                        <select name="stock_unit_code" className="ui-input" defaultValue="">
+                                          <option value="">Usar unidad del producto</option>
+                                          {inventoryUnits.map((unit) => (
+                                            <option key={unit.code} value={unit.code}>
+                                              {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
                                             </option>
-                                          );
-                                        })}
-                                      </select>
-                                    </label>
-                                  </div>
+                                          ))}
+                                        </select>
+                                      </label>
+                                    </div>
 
-                                  <div className="grid gap-4 lg:grid-cols-[220px_1fr_1fr]">
-                                    <label className="space-y-2">
-                                      <span className="ui-label">LOC de consumo</span>
-                                      <select name="source_location_strategy" className="ui-input" defaultValue="product_production_location">
-                                        <option value="product_production_location">LOC de preparación del producto</option>
-                                        <option value="explicit_location">LOC explícito</option>
-                                        <option value="explicit_position">Posición interna explícita</option>
-                                      </select>
-                                    </label>
+                                    <div className="flex justify-end">
+                                      <button type="submit" className="ui-btn ui-btn--brand">
+                                        Guardar consumo
+                                      </button>
+                                    </div>
+                                  </form>
 
-                                    <label className="space-y-2">
-                                      <span className="ui-label">LOC explícito</span>
-                                      <select name="source_location_id" className="ui-input" defaultValue="">
-                                        <option value="">Sin LOC explícito</option>
-                                        {inventoryLocations.map((location) => (
-                                          <option key={location.id} value={location.id}>
-                                            {[location.code, location.zone, location.location_type].filter(Boolean).join(" · ")}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
+                                  {consumptionRules.length > 0 ? (
+                                    <div className="mt-4 space-y-2">
+                                      {consumptionRules.map((rule) => {
+                                        const product = consumptionProductById.get(rule.product_id);
 
-                                    <label className="space-y-2">
-                                      <span className="ui-label">Posición interna</span>
-                                      <select name="source_location_position_id" className="ui-input" defaultValue="">
-                                        <option value="">Sin posición</option>
-                                        {inventoryLocations.map((location) => {
-                                          const positions = positionsByLocation.get(location.id) ?? [];
-                                          if (positions.length === 0) return null;
-
-                                          return (
-                                            <optgroup key={location.id} label={location.code}>
-                                              {positions.map((position) => (
-                                                <option key={position.id} value={position.id}>
-                                                  {position.code} · {position.name}
-                                                </option>
-                                              ))}
-                                            </optgroup>
-                                          );
-                                        })}
-                                      </select>
-                                    </label>
-                                  </div>
-
-                                  <button type="submit" className="ui-btn ui-btn--brand">
-                                    Crear regla de consumo
-                                  </button>
-                                </form>
-
-                                {consumptionRules.length === 0 ? (
-                                  <p className="ui-caption">
-                                    Esta opción no tiene reglas de consumo. Si es solo una preferencia visual, puede quedar así.
-                                  </p>
-                                ) : (
-                                  <div className="space-y-3">
-                                    {consumptionRules.map((rule) => {
-                                      const product = consumptionProductById.get(rule.product_id);
-                                      const ruleProfiles = uomProfilesByProduct.get(rule.product_id) ?? [];
-
-                                      return (
-                                        <div key={rule.id} className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-                                          <form action={updateConsumptionRule} className="space-y-4">
-                                            <input type="hidden" name="catalog_item_id" value={row.id} />
-                                            <input type="hidden" name="option_id" value={option.id} />
-                                            <input type="hidden" name="consumption_rule_id" value={rule.id} />
-
-                                            <div className="grid gap-4 lg:grid-cols-[1fr_150px_140px_120px]">
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Insumo / producto</span>
-                                                <select name="product_id" className="ui-input" defaultValue={rule.product_id} required>
-                                                  {consumptionProducts.map((candidate) => (
-                                                    <option key={candidate.id} value={candidate.id}>
-                                                      {[
-                                                        candidate.name ?? "Sin nombre",
-                                                        candidate.sku ? `SKU ${candidate.sku}` : null,
-                                                        candidate.product_type,
-                                                      ].filter(Boolean).join(" · ")}
-                                                    </option>
-                                                  ))}
-                                                </select>
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Cantidad stock</span>
-                                                <input
-                                                  name="quantity_per_option"
-                                                  type="number"
-                                                  min="0.0001"
-                                                  step="0.0001"
-                                                  className="ui-input"
-                                                  defaultValue={String(rule.quantity_per_option ?? "")}
-                                                  required
-                                                />
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Unidad stock</span>
-                                                <select name="stock_unit_code" className="ui-input" defaultValue={rule.stock_unit_code ?? ""}>
-                                                  <option value="">Usar unidad del producto</option>
-                                                  {inventoryUnits.map((unit) => (
-                                                    <option key={unit.code} value={unit.code}>
-                                                      {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
-                                                    </option>
-                                                  ))}
-                                                </select>
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Orden</span>
-                                                <input name="sort_order" type="number" min="0" className="ui-input" defaultValue={rule.sort_order ?? 0} />
-                                              </label>
+                                        return (
+                                          <div key={rule.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                                            <div className="text-sm font-semibold text-[var(--ui-text)]">
+                                              {product?.name ?? "Insumo"} · {formatQuantityAdmin(rule.quantity_per_option)} {rule.stock_unit_code || product?.stock_unit_code || product?.unit || "unidad"}
                                             </div>
 
-                                            <div className="grid gap-4 lg:grid-cols-[1fr_150px_160px_150px]">
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Nombre regla</span>
-                                                <input name="name" className="ui-input" defaultValue={rule.name} required />
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Código</span>
-                                                <input name="code" className="ui-input" defaultValue={rule.code} required />
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Efecto consumo</span>
-                                                <select name="effect_type" className="ui-input" defaultValue={parseConsumptionEffectType(rule.effect_type)}>
-                                                  <option value="additive">Extra / suma</option>
-                                                  <option value="replacement">Sustituto</option>
-                                                </select>
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Factor conversión</span>
-                                                <input
-                                                  name="conversion_factor_to_stock"
-                                                  type="number"
-                                                  min="0.0001"
-                                                  step="0.0001"
-                                                  className="ui-input"
-                                                  defaultValue={String(rule.conversion_factor_to_stock ?? 1)}
-                                                />
-                                              </label>
-                                            </div>
-
-                                            <div className="grid gap-4 lg:grid-cols-[150px_150px_1fr]">
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Cantidad entrada</span>
-                                                <input
-                                                  name="input_quantity_per_option"
-                                                  type="number"
-                                                  min="0.0001"
-                                                  step="0.0001"
-                                                  className="ui-input"
-                                                  defaultValue={rule.input_quantity_per_option == null ? "" : String(rule.input_quantity_per_option)}
-                                                />
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Unidad entrada</span>
-                                                <select name="input_unit_code" className="ui-input" defaultValue={rule.input_unit_code ?? ""}>
-                                                  <option value="">Sin unidad</option>
-                                                  {inventoryUnits.map((unit) => (
-                                                    <option key={unit.code} value={unit.code}>
-                                                      {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
-                                                    </option>
-                                                  ))}
-                                                </select>
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Perfil UOM</span>
-                                                <select name="input_uom_profile_id" className="ui-input" defaultValue={rule.input_uom_profile_id ?? ""}>
-                                                  <option value="">Sin perfil</option>
-                                                  {ruleProfiles.map((profile) => (
-                                                    <option key={profile.id} value={profile.id}>
-                                                      {profile.label}
-                                                    </option>
-                                                  ))}
-                                                </select>
-                                              </label>
-                                            </div>
-
-                                            <div className="grid gap-4 lg:grid-cols-[220px_1fr_1fr]">
-                                              <label className="space-y-2">
-                                                <span className="ui-label">LOC de consumo</span>
-                                                <select
-                                                  name="source_location_strategy"
-                                                  className="ui-input"
-                                                  defaultValue={parseSourceLocationStrategy(rule.source_location_strategy)}
-                                                >
-                                                  <option value="product_production_location">LOC de preparación del producto</option>
-                                                  <option value="explicit_location">LOC explícito</option>
-                                                  <option value="explicit_position">Posición interna explícita</option>
-                                                </select>
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">LOC explícito</span>
-                                                <select name="source_location_id" className="ui-input" defaultValue={rule.source_location_id ?? ""}>
-                                                  <option value="">Sin LOC explícito</option>
-                                                  {inventoryLocations.map((location) => (
-                                                    <option key={location.id} value={location.id}>
-                                                      {[location.code, location.zone, location.location_type].filter(Boolean).join(" · ")}
-                                                    </option>
-                                                  ))}
-                                                </select>
-                                              </label>
-
-                                              <label className="space-y-2">
-                                                <span className="ui-label">Posición interna</span>
-                                                <select name="source_location_position_id" className="ui-input" defaultValue={rule.source_location_position_id ?? ""}>
-                                                  <option value="">Sin posición</option>
-                                                  {inventoryLocations.map((location) => {
-                                                    const positions = positionsByLocation.get(location.id) ?? [];
-                                                    if (positions.length === 0) return null;
-
-                                                    return (
-                                                      <optgroup key={location.id} label={location.code}>
-                                                        {positions.map((position) => (
-                                                          <option key={position.id} value={position.id}>
-                                                            {position.code} · {position.name}
-                                                          </option>
-                                                        ))}
-                                                      </optgroup>
-                                                    );
-                                                  })}
-                                                </select>
-                                              </label>
-                                            </div>
-
-                                            <div className="flex flex-wrap items-center gap-4">
-                                              <span className="ui-chip">
-                                                {rule.effect_type === "replacement" ? "Sustituye con" : "Consume"} {formatQuantityAdmin(rule.quantity_per_option)} {rule.stock_unit_code || product?.stock_unit_code || product?.unit || "unidad"}
-                                              </span>
-
-                                              <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                                <input type="checkbox" name="is_active" defaultChecked={rule.is_active} />
-                                                Activa
-                                              </label>
-
-                                              <button type="submit" className="ui-btn ui-btn--brand">
-                                                Guardar regla
-                                              </button>
-                                            </div>
-                                          </form>
-
-                                          <div className="mt-3">
                                             <form action={disableConsumptionRule}>
                                               <input type="hidden" name="catalog_item_id" value={row.id} />
                                               <input type="hidden" name="option_id" value={option.id} />
                                               <input type="hidden" name="consumption_rule_id" value={rule.id} />
                                               <button type="submit" className="ui-btn ui-btn--ghost">
-                                                Desactivar regla
+                                                Quitar consumo
                                               </button>
                                             </form>
                                           </div>
-                                        </div>
-                                      );
-                                    })}
+                                        );
+                                      })}
+                                    </div>
+                                  ) : null}
+                                </div>
+
+                                {recipeIngredients.length > 0 ? (
+                                  <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                    <div className="text-sm font-bold text-[var(--ui-text)]">Si esta opción reemplaza un ingrediente de la receta</div>
+                                    <p className="ui-caption mt-1">
+                                      Ejemplo: leche de almendra reemplaza leche entera. Así el sistema no descuenta ambas.
+                                    </p>
+
+                                    <form action={createRecipeEffect} className="mt-4 space-y-4">
+                                      <input type="hidden" name="catalog_item_id" value={row.id} />
+                                      <input type="hidden" name="option_id" value={option.id} />
+                                      <input type="hidden" name="effect_type" value="replacement" />
+                                      <input type="hidden" name="quantity_mode" value="full_recipe_component" />
+                                      <input type="hidden" name="is_active" value="true" />
+                                      <input type="hidden" name="sort_order" value="0" />
+
+                                      <label className="space-y-2">
+                                        <span className="ui-label">Ingrediente que deja de descontarse</span>
+                                        <select name="target_ingredient_product_id" className="ui-input" required>
+                                          <option value="">Selecciona ingrediente</option>
+                                          {recipeIngredients.map((ingredient) => {
+                                            const product = ingredient.product;
+                                            if (!product) return null;
+
+                                            return (
+                                              <option key={ingredient.id} value={ingredient.ingredient_product_id}>
+                                                {product.name ?? "Ingrediente"} · {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}
+                                              </option>
+                                            );
+                                          })}
+                                        </select>
+                                      </label>
+
+                                      <div className="flex justify-end">
+                                        <button type="submit" className="ui-btn ui-btn--brand">
+                                          Guardar reemplazo
+                                        </button>
+                                      </div>
+                                    </form>
+
+                                    {recipeEffects.length > 0 ? (
+                                      <div className="mt-4 space-y-2">
+                                        {recipeEffects.map((effect) => {
+                                          const targetProduct = consumptionProductById.get(effect.target_ingredient_product_id);
+
+                                          return (
+                                            <div key={effect.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                                              <div className="text-sm font-semibold text-[var(--ui-text)]">
+                                                {effect.effect_type === "replacement" ? "Reemplaza" : "Quita"} {targetProduct?.name ?? "ingrediente"}
+                                              </div>
+
+                                              <form action={disableRecipeEffect}>
+                                                <input type="hidden" name="catalog_item_id" value={row.id} />
+                                                <input type="hidden" name="option_id" value={option.id} />
+                                                <input type="hidden" name="recipe_effect_id" value={effect.id} />
+                                                <button type="submit" className="ui-btn ui-btn--ghost">
+                                                  Quitar ajuste
+                                                </button>
+                                              </form>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : null}
                                   </div>
-                                )}
+                                ) : null}
                               </div>
-                            </div>
-                          );
-                        })}
+                            </details>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <details className="mt-5 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                    <summary className="cursor-pointer text-sm font-black text-[var(--ui-text)]">
+                      Editar nombre y reglas del grupo
+                    </summary>
+
+                    <form action={updateOptionGroup} className="mt-4 space-y-4">
+                      <input type="hidden" name="catalog_item_id" value={row.id} />
+                      <input type="hidden" name="option_group_id" value={group.id} />
+                      <input type="hidden" name="selection_type" value={parseSelectionType(group.selection_type)} />
+                      <input type="hidden" name="code" value={group.code} />
+                      <input type="hidden" name="sort_order" value={String(group.sort_order ?? 0)} />
+                      <input type="hidden" name="min_select" value={group.is_required ? "1" : "0"} />
+
+                      <div className="grid gap-4 lg:grid-cols-[1fr_140px_auto_auto] lg:items-end">
+                        <label className="space-y-2">
+                          <span className="ui-label">Nombre del grupo</span>
+                          <input name="name" className="ui-input" defaultValue={group.name} required />
+                        </label>
+
+                        {isMultiple ? (
+                          <label className="space-y-2">
+                            <span className="ui-label">Máximo</span>
+                            <input name="max_select" type="number" min="1" className="ui-input" defaultValue={group.max_select ?? 1} />
+                          </label>
+                        ) : (
+                          <input type="hidden" name="max_select" value="1" />
+                        )}
+
+                        <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
+                          <input type="checkbox" name="is_required" defaultChecked={group.is_required} />
+                          Obligatorio
+                        </label>
+
+                        <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
+                          <input type="checkbox" name="is_active" defaultChecked={group.is_active} />
+                          Mostrar en Pass
+                        </label>
                       </div>
-                    )}
-                  </div>
+
+                      <label className="block space-y-2">
+                        <span className="ui-label">Ayuda opcional</span>
+                        <input
+                          name="description"
+                          className="ui-input"
+                          defaultValue={group.description ?? ""}
+                          placeholder="Ej. El cliente puede escoger hasta 3 salsas."
+                        />
+                      </label>
+
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <button type="submit" className="ui-btn ui-btn--brand">
+                          Guardar grupo
+                        </button>
+                      </div>
+                    </form>
+
+                    <form action={disableOptionGroup} className="mt-3 flex justify-end">
+                      <input type="hidden" name="catalog_item_id" value={row.id} />
+                      <input type="hidden" name="option_group_id" value={group.id} />
+                      <button type="submit" className="ui-btn ui-btn--ghost">
+                        Ocultar grupo
+                      </button>
+                    </form>
+                  </details>
                 </div>
               );
             })}
@@ -2719,7 +2488,7 @@ export default async function MenuItemDetailPage({
 
       <div className="flex flex-wrap items-center gap-2">
         <form action={disableMenuItem}><input type="hidden" name="id" value={row.id} /><button type="submit" className="ui-btn ui-btn--ghost">Deshabilitar</button></form>
-        <form action={deleteMenuItem}><input type="hidden" name="id" value={row.id} /><button type="submit" className="ui-btn ui-btn--danger">Eliminar item</button></form>
+        <form action={deleteMenuItem}><input type="hidden" name="id" value={row.id} /><button type="submit" className="ui-btn ui-btn--danger">Eliminar producto</button></form>
       </div>
     </div>
   );
