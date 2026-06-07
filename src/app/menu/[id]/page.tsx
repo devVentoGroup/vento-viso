@@ -2505,18 +2505,18 @@ export default async function MenuItemDetailPage({
                     </div>
                   </div>
 
-                  <details className="mt-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                  <details className="mt-4 rounded-2xl border border-[var(--ui-border)] bg-white px-4 py-3">
                     <summary className="cursor-pointer text-sm font-black text-[var(--ui-text)]">
-                      Ajustar pregunta y reglas del bloque
+                      Editar pregunta y reglas
                     </summary>
 
-                    <form action={updateOptionGroup} className="mt-4 space-y-4">
+                    <form action={updateOptionGroup} className="mt-4 space-y-3">
                       <input type="hidden" name="catalog_item_id" value={row.id} />
                       <input type="hidden" name="option_group_id" value={group.id} />
                       <input type="hidden" name="code" value={group.code} />
                       <input type="hidden" name="sort_order" value={String(group.sort_order ?? 0)} />
 
-                      <div className="grid gap-4 lg:grid-cols-[1fr_180px_120px_120px]">
+                      <div className="grid gap-3 lg:grid-cols-[1fr_170px_110px_110px]">
                         <label className="space-y-2">
                           <span className="ui-label">Pregunta que verá el cliente</span>
                           <input name="name" className="ui-input" defaultValue={group.name} required />
@@ -2563,9 +2563,17 @@ export default async function MenuItemDetailPage({
                         </button>
                       </div>
                     </form>
+
+                    <form action={disableOptionGroup} className="mt-3 flex justify-end">
+                      <input type="hidden" name="catalog_item_id" value={row.id} />
+                      <input type="hidden" name="option_group_id" value={group.id} />
+                      <button type="submit" className="ui-btn ui-btn--ghost">
+                        Ocultar bloque
+                      </button>
+                    </form>
                   </details>
 
-                  <form action={createOption} className="mt-5 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                  <form action={createOption} className="mt-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
                     <input type="hidden" name="catalog_item_id" value={row.id} />
                     <input type="hidden" name="option_group_id" value={group.id} />
                     <input type="hidden" name="effect_type" value={optionEffectType} />
@@ -2863,70 +2871,6 @@ export default async function MenuItemDetailPage({
                     </div>
                   )}
 
-                  <details className="mt-5 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                    <summary className="cursor-pointer text-sm font-black text-[var(--ui-text)]">
-                      Editar nombre y reglas del grupo
-                    </summary>
-
-                    <form action={updateOptionGroup} className="mt-4 space-y-4">
-                      <input type="hidden" name="catalog_item_id" value={row.id} />
-                      <input type="hidden" name="option_group_id" value={group.id} />
-                      <input type="hidden" name="selection_type" value={parseSelectionType(group.selection_type)} />
-                      <input type="hidden" name="code" value={group.code} />
-                      <input type="hidden" name="sort_order" value={String(group.sort_order ?? 0)} />
-                      <input type="hidden" name="min_select" value={group.is_required ? "1" : "0"} />
-
-                      <div className="grid gap-4 lg:grid-cols-[1fr_140px_auto_auto] lg:items-end">
-                        <label className="space-y-2">
-                          <span className="ui-label">Nombre del grupo</span>
-                          <input name="name" className="ui-input" defaultValue={group.name} required />
-                        </label>
-
-                        {isMultiple ? (
-                          <label className="space-y-2">
-                            <span className="ui-label">Máximo</span>
-                            <input name="max_select" type="number" min="1" className="ui-input" defaultValue={group.max_select ?? 1} />
-                          </label>
-                        ) : (
-                          <input type="hidden" name="max_select" value="1" />
-                        )}
-
-                        <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
-                          <input type="checkbox" name="is_required" defaultChecked={group.is_required} />
-                          Obligatorio
-                        </label>
-
-                        <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-[var(--ui-text)]">
-                          <input type="checkbox" name="is_active" defaultChecked={group.is_active} />
-                          Mostrar en Pass
-                        </label>
-                      </div>
-
-                      <label className="block space-y-2">
-                        <span className="ui-label">Ayuda opcional</span>
-                        <input
-                          name="description"
-                          className="ui-input"
-                          defaultValue={group.description ?? ""}
-                          placeholder="Ej. El cliente puede escoger hasta 3 salsas."
-                        />
-                      </label>
-
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <button type="submit" className="ui-btn ui-btn--brand">
-                          Guardar grupo
-                        </button>
-                      </div>
-                    </form>
-
-                    <form action={disableOptionGroup} className="mt-3 flex justify-end">
-                      <input type="hidden" name="catalog_item_id" value={row.id} />
-                      <input type="hidden" name="option_group_id" value={group.id} />
-                      <button type="submit" className="ui-btn ui-btn--ghost">
-                        Ocultar grupo
-                      </button>
-                    </form>
-                  </details>
                 </div>
               );
             })}
