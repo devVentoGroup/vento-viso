@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -577,7 +577,7 @@ async function deleteShiftAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (!shiftId) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Turno invalido.")}`);
+    redirect(`${returnTo}&error=${encodeURIComponent("Turno inválido.")}`);
   }
 
   const { error } = await supabase.from("employee_shifts").delete().eq("id", shiftId);

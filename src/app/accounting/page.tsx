@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
@@ -170,7 +170,7 @@ export default async function AccountingPage({ searchParams }: { searchParams: S
     <div className="space-y-8">
       <PageHeader
         title="Contabilidad"
-        subtitle="Resumen financiero operativo desde inventario, recepciones y configuracion tributaria."
+        subtitle="Resumen financiero operativo desde inventario, recepciones y configuración tributaria."
         actions={
           <Link href="/" className="ui-btn ui-btn--ghost ui-btn--sm">
             Panel
@@ -243,7 +243,7 @@ export default async function AccountingPage({ searchParams }: { searchParams: S
               <h2 className="ui-h2">Inventario por sede</h2>
               <p className="ui-body-muted mt-1">Valor calculado con costo promedio por sede y fallback al costo del producto.</p>
             </div>
-            <span className="ui-chip ui-chip--brand">{number(summary.stock_rows)} lineas</span>
+            <span className="ui-chip ui-chip--brand">{number(summary.stock_rows)} líneas</span>
           </div>
           <div className="mt-5 overflow-x-auto">
             <table className="ui-table">
@@ -280,7 +280,7 @@ export default async function AccountingPage({ searchParams }: { searchParams: S
           <h2 className="ui-h2">Calidad contable</h2>
           <div className="mt-4 space-y-3">
             <div className="flex items-center justify-between gap-3 border-b border-[var(--ui-border)] pb-3">
-              <span className="ui-body-muted">Lineas con costo faltante</span>
+              <span className="ui-body-muted">Líneas con costo faltante</span>
               <span className="font-semibold">{number(summary.products_missing_cost)}</span>
             </div>
             <div className="flex items-center justify-between gap-3 border-b border-[var(--ui-border)] pb-3">
@@ -288,7 +288,7 @@ export default async function AccountingPage({ searchParams }: { searchParams: S
               <span className="font-semibold">{number(summary.negative_stock_rows)}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="ui-body-muted">Lineas recibidas en el mes</span>
+              <span className="ui-body-muted">Líneas recibidas en el mes</span>
               <span className="font-semibold">{number(summary.month_receipt_lines)}</span>
             </div>
           </div>

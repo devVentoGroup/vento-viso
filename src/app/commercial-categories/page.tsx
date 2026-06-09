@@ -1,4 +1,4 @@
-import { revalidatePath } from "next/cache";
+﻿import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -205,7 +205,7 @@ async function saveCategory(formData: FormData) {
 
   revalidatePath("/commercial-categories");
   revalidatePath("/menu");
-  redirect("/commercial-categories?ok=" + encodeURIComponent("Categoria guardada."));
+  redirect("/commercial-categories?ok=" + encodeURIComponent("Categoría guardada."));
 }
 
 async function saveCategoriesBulk(formData: FormData) {
@@ -224,7 +224,7 @@ async function saveCategoriesBulk(formData: FormData) {
   if (!siteId || categoriesToCreate.length === 0) {
     redirect(
       "/commercial-categories?error=" +
-      encodeURIComponent("Selecciona una sede y pega al menos una categoria valida."),
+      encodeURIComponent("Selecciona una sede y pega al menos una categoría valida."),
     );
   }
 
@@ -254,7 +254,7 @@ async function saveCategoriesBulk(formData: FormData) {
   if (newCategories.length === 0) {
     redirect(
       "/commercial-categories?ok=" +
-      encodeURIComponent("No se crearon categorias nuevas. Todas ya existian o estaban repetidas."),
+      encodeURIComponent("No se crearon categorías nuevas. Todas ya existian o estaban repetidas."),
     );
   }
 
@@ -299,7 +299,7 @@ async function saveCategoriesBulk(formData: FormData) {
   redirect(
     "/commercial-categories?ok=" +
     encodeURIComponent(
-      `Categorias creadas: ${newCategories.length}. Omitidas existentes o repetidas: ${skippedCount}.`,
+      `Categorías creadas: ${newCategories.length}. Omitidas existentes o repetidas: ${skippedCount}.`,
     ),
   );
 }
@@ -309,7 +309,7 @@ async function deleteCategory(formData: FormData) {
   const supabase = createAdminClient();
   const id = asText(formData.get("id"));
   if (!id) {
-    redirect("/commercial-categories?error=" + encodeURIComponent("Categoria invalida."));
+    redirect("/commercial-categories?error=" + encodeURIComponent("Categoría invalida."));
   }
 
   const [
@@ -337,7 +337,7 @@ async function deleteCategory(formData: FormData) {
       encodeURIComponent(
         canonicalItemsError?.message ||
         pricedItemsError?.message ||
-        "No se pudo validar si la categoria tiene items asignados.",
+        "No se pudo validar si la categoría tiene items asignados.",
       ),
     );
   }
@@ -346,7 +346,7 @@ async function deleteCategory(formData: FormData) {
     redirect(
       "/commercial-categories?error=" +
       encodeURIComponent(
-        "No puedes eliminar una categoria con items comerciales reales asignados. Mueve o desactiva esos productos primero.",
+        "No puedes eliminar una categoría con items comerciales reales asignados. Mueve o desactiva esos productos primero.",
       ),
     );
   }
@@ -375,7 +375,7 @@ async function deleteCategory(formData: FormData) {
 
   revalidatePath("/commercial-categories");
   revalidatePath("/menu");
-  redirect("/commercial-categories?ok=" + encodeURIComponent("Categoria eliminada."));
+  redirect("/commercial-categories?ok=" + encodeURIComponent("Categoría eliminada."));
 }
 
 export default async function CommercialCategoriesPage({
@@ -496,7 +496,7 @@ export default async function CommercialCategoriesPage({
     <div className="space-y-6">
       <PageHeader
         title="Categorías comerciales"
-        subtitle="Crea categorias por sede para ordenar el menu de compras en Vento Pass. No son categorias operacionales ni canjes de fidelización."
+        subtitle="Crea categorías por sede para ordenar el menu de compras en Vento Pass. No son categorías operacionales ni canjes de fidelización."
         actions={
           <Link href="/menu" className="ui-btn ui-btn--ghost">
             Volver al menú
@@ -508,7 +508,7 @@ export default async function CommercialCategoriesPage({
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
       <div className="ui-panel space-y-4">
-        <h2 className="ui-h3">Crear categoria</h2>
+        <h2 className="ui-h3">Crear categoría</h2>
         <form action={saveCategory} className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
           <label className="space-y-2">
             <span className="ui-label">Sede</span>
@@ -536,7 +536,7 @@ export default async function CommercialCategoriesPage({
 
       <div className="ui-panel space-y-4">
         <div>
-          <h2 className="ui-h3">Crear varias categorias</h2>
+          <h2 className="ui-h3">Crear varias categorías</h2>
           <p className="ui-caption">
             Pega una categoria por linea. VISO creara las nuevas y omitira las que ya existan en la sede seleccionada.
           </p>
@@ -556,11 +556,11 @@ export default async function CommercialCategoriesPage({
           </label>
 
           <label className="space-y-2">
-            <span className="ui-label">Categorias</span>
+            <span className="ui-label">Categorías</span>
             <textarea
               name="bulk_names"
               className="ui-input min-h-52"
-              placeholder="Una categoria por linea"
+              placeholder="Una categoría por linea"
               required
             />
           </label>
@@ -586,17 +586,17 @@ export default async function CommercialCategoriesPage({
                 <h2 className="text-lg font-semibold text-[var(--ui-text)]">
                   {siteLabel(site)}
                   <span className="ml-2 text-sm font-normal text-[var(--ui-muted)]">
-                    ({siteCategories.length} {siteCategories.length === 1 ? "categoria" : "categorias"})
+                    ({siteCategories.length} {siteCategories.length === 1 ? "categoría" : "categorías"})
                   </span>
                 </h2>
 
                 {siteCategories.length === 0 ? (
-                  <div className="ui-empty">Esta sede no tiene categorias comerciales.</div>
+                  <div className="ui-empty">Esta sede no tiene categorías comerciales.</div>
                 ) : (
                   <Table>
                     <TableHead>
                       <TableRow>
-                        <TableHeaderCell>Categoria</TableHeaderCell>
+                        <TableHeaderCell>Categoría</TableHeaderCell>
                         <TableHeaderCell>Estado</TableHeaderCell>
                         <TableHeaderCell></TableHeaderCell>
                       </TableRow>
@@ -609,7 +609,7 @@ export default async function CommercialCategoriesPage({
                               <input type="hidden" name="id" value={category.id} />
                               <input type="hidden" name="site_id" value={category.site_id} />
                               <input name="name" className="ui-input h-10" defaultValue={category.name} required />
-                              <input name="description" className="ui-input h-10" defaultValue={category.description ?? ""} placeholder="Descripcion opcional" />
+                              <input name="description" className="ui-input h-10" defaultValue={category.description ?? ""} placeholder="Descripción opcional" />
                             </form>
                           </TableCell>
                           <TableCell>

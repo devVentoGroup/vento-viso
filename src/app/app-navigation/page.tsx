@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -534,7 +534,7 @@ function AvailableScreensSection({
       : [
           {
             groupKey: "configuration",
-            groupLabel: "Configuracion",
+            groupLabel: "Configuración",
             groupOrder: 60,
           },
         ];

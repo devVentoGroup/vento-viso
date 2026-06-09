@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState } from "react";
 
@@ -134,7 +134,7 @@ export function ProductForm({ mode, sites, initial, action }: ProductFormProps) 
             />
           </label>
           <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Descripcion</span>
+            <span className="ui-label">Descripción</span>
             <textarea
               name="description"
               className="ui-input min-h-28 py-3"
@@ -156,7 +156,7 @@ export function ProductForm({ mode, sites, initial, action }: ProductFormProps) 
             />
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Categoria</span>
+            <span className="ui-label">Categoría</span>
             <input
               name="category"
               className="ui-input"
@@ -249,7 +249,7 @@ export function ProductForm({ mode, sites, initial, action }: ProductFormProps) 
             </div>
             <div className="ui-caption">{getPreviewCategory(category)}</div>
             <p className="ui-body-muted text-sm">
-              {description.trim() || "Descripcion del producto para los usuarios de Vento Pass."}
+              {description.trim() || "Descripción del producto para los usuarios de Vento Pass."}
             </p>
           </div>
         </div>

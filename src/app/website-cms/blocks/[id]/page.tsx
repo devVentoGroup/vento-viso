@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -59,7 +59,7 @@ async function updateBlock(formData: FormData) {
   const id = asText(formData.get("id"));
 
   if (!id) {
-    redirect("/website-cms?error=" + encodeURIComponent("Bloque invalido."));
+    redirect("/website-cms?error=" + encodeURIComponent("Bloque inválido."));
   }
 
   await requireAppAccess({
@@ -165,7 +165,7 @@ export default async function WebsiteBlockEditPage({
           <div className="ui-h3">Contenido</div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-2 sm:col-span-2">
-              <span className="ui-label">Titulo</span>
+              <span className="ui-label">Título</span>
               <input name="title" className="ui-input" defaultValue={row.title ?? ""} />
             </label>
             <label className="space-y-2 sm:col-span-2">

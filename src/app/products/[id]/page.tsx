@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -108,7 +108,7 @@ async function disableProduct(formData: FormData) {
   const supabase = await createClient();
   const id = asText(formData.get("id"));
   if (!id) {
-    redirect("/products?error=" + encodeURIComponent("Producto invalido."));
+    redirect("/products?error=" + encodeURIComponent("Producto inválido."));
   }
 
   const { error } = await supabase.from("loyalty_rewards").update({ is_active: false }).eq("id", id);
@@ -126,7 +126,7 @@ async function deleteProduct(formData: FormData) {
   const supabase = await createClient();
   const id = asText(formData.get("id"));
   if (!id) {
-    redirect("/products?error=" + encodeURIComponent("Producto invalido."));
+    redirect("/products?error=" + encodeURIComponent("Producto inválido."));
   }
 
   const { error } = await supabase.from("loyalty_rewards").delete().eq("id", id);

@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -99,7 +99,7 @@ export default async function WebsiteCmsVenuesPage({ searchParams }: { searchPar
     <div className="space-y-6">
       <PageHeader
         title="Restaurantes en el sitio web"
-        subtitle="Aqui puedes agregar, editar e importar los restaurantes que aparecen en ventogroup.co/restaurantes"
+        subtitle="Aquí puedes agregar, editar e importar los restaurantes que aparecen en ventogroup.co/restaurantes"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <form action={importBusinesses}><button type="submit" className="ui-btn ui-btn--brand">Importar negocios existentes</button></form>
@@ -115,7 +115,7 @@ export default async function WebsiteCmsVenuesPage({ searchParams }: { searchPar
       {unsyncedCount > 0 && !okMsg && !errorMsg ? (
         <div className="ui-alert ui-alert--warning">
           <strong>{unsyncedCount} negocio(s)</strong> en VISO Negocios no estan en el sitio web aun.
-          Haz clic en <strong>Importar negocios existentes</strong> para traerlos con nombre, ubicacion y logo.
+          Haz clic en <strong>Importar negocios existentes</strong> para traerlos con nombre, ubicación y logo.
           Despues completa la foto y el horario de cada uno.
         </div>
       ) : null}
@@ -129,15 +129,15 @@ export default async function WebsiteCmsVenuesPage({ searchParams }: { searchPar
       <div className="ui-panel">
         {restaurants.length === 0 ? (
           <div className="ui-empty space-y-2">
-            <p>No hay restaurantes en el sitio web todavia.</p>
-            <p className="text-sm opacity-70">Usa <strong>Importar desde Negocios</strong> para crearlos automaticamente, o crea uno manualmente.</p>
+            <p>No hay restaurantes en el sitio web todavía.</p>
+            <p className="text-sm opacity-70">Usa <strong>Importar desde Negocios</strong> para crearlos automáticamente, o crea uno manualmente.</p>
           </div>
         ) : (
           <Table>
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Restaurante</TableHeaderCell>
-                <TableHeaderCell>Ubicacion</TableHeaderCell>
+                <TableHeaderCell>Ubicación</TableHeaderCell>
                 <TableHeaderCell>Perfil completo?</TableHeaderCell>
                 <TableHeaderCell>Pagina propia</TableHeaderCell>
                 <TableHeaderCell>Estado</TableHeaderCell>
@@ -148,7 +148,7 @@ export default async function WebsiteCmsVenuesPage({ searchParams }: { searchPar
               {restaurants.map((row) => {
                 const detailCount = detailCountBySlug.get(row.slug) ?? 0;
                 const comp = completeness(row);
-                const missing = [!row.image_url && "foto", !row.excerpt && "descripcion"].filter(Boolean).join(" / ");
+                const missing = [!row.image_url && "foto", !row.excerpt && "descripción"].filter(Boolean).join(" / ");
                 return (
                   <TableRow key={row.id}>
                     <TableCell>

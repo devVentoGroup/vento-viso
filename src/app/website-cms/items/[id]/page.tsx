@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -38,14 +38,14 @@ function toDatetimeLocal(v: string | null): string {
 async function updateWebsiteItem(formData: FormData) {
   "use server";
   const id = asText(formData.get("id"));
-  if (!id) redirect("/website-cms?error=" + encodeURIComponent("Item invalido."));
+  if (!id) redirect("/website-cms?error=" + encodeURIComponent("Item inválido."));
   await requireAppAccess({ appId: "viso", returnTo: `/website-cms/items/${id}` });
   const supabase = createAdminClient();
   const category = asText(formData.get("category"));
   const slug = asText(formData.get("slug"));
   const title = asText(formData.get("title"));
-  if (!category || !slug || !title) redirect(`/website-cms/items/${id}?error=${encodeURIComponent("Categoria, slug y titulo son obligatorios.")}`);
-  if (!WEBSITE_ITEM_CATEGORIES.includes(category as (typeof WEBSITE_ITEM_CATEGORIES)[number])) redirect(`/website-cms/items/${id}?error=${encodeURIComponent("Categoria invalida.")}`);
+  if (!category || !slug || !title) redirect(`/website-cms/items/${id}?error=${encodeURIComponent("Categoría, slug y título son obligatorios.")}`);
+  if (!WEBSITE_ITEM_CATEGORIES.includes(category as (typeof WEBSITE_ITEM_CATEGORIES)[number])) redirect(`/website-cms/items/${id}?error=${encodeURIComponent("Categoría invalida.")}`);
   const payload = { category, slug, title, excerpt: asNullableText(formData.get("excerpt")), body: asNullableText(formData.get("body")), location: asNullableText(formData.get("location")), schedule_text: asNullableText(formData.get("schedule_text")), start_at: asNullableDate(formData.get("start_at")), end_at: asNullableDate(formData.get("end_at")), image_url: asNullableText(formData.get("image_url")), video_url: asNullableText(formData.get("video_url")), action_label: asNullableText(formData.get("action_label")), action_url: asNullableText(formData.get("action_url")), sort_order: asNumber(formData.get("sort_order"), 0), is_published: asBool(formData.get("is_published")) };
   const { error } = await supabase.from("website_items").update(payload).eq("id", id);
   if (error) redirect(`/website-cms/items/${id}?error=${encodeURIComponent(error.message)}`);
@@ -57,7 +57,7 @@ async function updateWebsiteItem(formData: FormData) {
 async function deleteWebsiteItem(formData: FormData) {
   "use server";
   const id = asText(formData.get("id"));
-  if (!id) redirect("/website-cms?error=" + encodeURIComponent("Item invalido."));
+  if (!id) redirect("/website-cms?error=" + encodeURIComponent("Item inválido."));
   await requireAppAccess({ appId: "viso", returnTo: `/website-cms/items/${id}` });
   const supabase = createAdminClient();
   const { error } = await supabase.from("website_items").delete().eq("id", id);
@@ -81,10 +81,10 @@ export default async function WebsiteItemEditPage({ params, searchParams }: { pa
   type Check = { label: string; done: boolean };
   const checks: Check[] = [];
   if (row.category === "restaurant" || row.category === "job") {
-    checks.push({ label: "Titulo", done: Boolean(row.title) });
+    checks.push({ label: "Título", done: Boolean(row.title) });
     checks.push({ label: row.category === "restaurant" ? "Foto" : "Imagen", done: Boolean(row.image_url) });
-    checks.push({ label: "Descripcion corta", done: Boolean(row.excerpt) });
-    checks.push({ label: row.category === "restaurant" ? "Ubicacion" : "Sede", done: Boolean(row.location) });
+    checks.push({ label: "Descripción corta", done: Boolean(row.excerpt) });
+    checks.push({ label: row.category === "restaurant" ? "Ubicación" : "Sede", done: Boolean(row.location) });
     checks.push({ label: row.category === "restaurant" ? "Horario" : "Tipo de contrato", done: Boolean(row.schedule_text) });
     checks.push({ label: "Link del boton", done: Boolean(row.action_url && row.action_url !== "#") });
   }
@@ -163,7 +163,7 @@ export default async function WebsiteItemEditPage({ params, searchParams }: { pa
             </label>
             <label className="space-y-1">
               <span className="ui-label">URL interna</span>
-              <span className="ui-caption block">Solo letras, numeros y guiones. Se genera automaticamente al crear.</span>
+              <span className="ui-caption block">Solo letras, números y guiones. Se genera automáticamente al crear.</span>
               <input name="slug" className="ui-input" defaultValue={row.slug} required />
             </label>
             <label className="space-y-1">
@@ -186,14 +186,14 @@ export default async function WebsiteItemEditPage({ params, searchParams }: { pa
               placeholder={row.category === "job" ? "Ej: Buscamos un bartender creativo con 2+ anos de experiencia..." : "Ej: Cocina japonesa de autor en el corazon de la Zona G."} />
           </label>
           <label className="space-y-1 block">
-            <span className="ui-label">Descripcion extendida (opcional)</span>
+            <span className="ui-label">Descripción extendida (opcional)</span>
             <span className="ui-caption block">Texto largo para la pagina de detalle.</span>
             <textarea name="body" className="ui-input min-h-32 py-3" defaultValue={row.body ?? ""} />
           </label>
         </div>
 
         <div className="ui-panel space-y-4">
-          <div><div className="ui-h3">Contexto</div><div className="ui-caption">Donde y cuando — aparece debajo del titulo en la tarjeta.</div></div>
+          <div><div className="ui-h3">Contexto</div><div className="ui-caption">Donde y cuando — aparece debajo del título en la tarjeta.</div></div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-1">
               <span className="ui-label">{meta.locationLabel}</span>
@@ -215,7 +215,7 @@ export default async function WebsiteItemEditPage({ params, searchParams }: { pa
         </div>
 
         <div className="ui-panel space-y-4">
-          <div><div className="ui-h3">Boton de accion</div><div className="ui-caption">El boton en la tarjeta. Si lo dejas vacio se usa "Ver mas".</div></div>
+          <div><div className="ui-h3">Botón de acción</div><div className="ui-caption">El botón en la tarjeta. Si lo dejas vacío se usa &quot;Ver más&quot;.</div></div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-1">
               <span className="ui-label">Texto del boton</span>

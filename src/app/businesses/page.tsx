@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
@@ -64,7 +64,7 @@ export default async function BusinessesPage({
     <div className="space-y-6">
       <PageHeader
         title="Negocios"
-        subtitle="Sedes y configuracion de Vento Pass."
+        subtitle="Sedes y configuración de Vento Pass."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Link href="/sites" className="ui-btn ui-btn--ghost">

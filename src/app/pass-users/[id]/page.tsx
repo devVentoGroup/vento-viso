@@ -52,7 +52,7 @@ async function updateUser(formData: FormData) {
   const id = asText(formData.get("id"));
 
   if (!id) {
-    redirect("/pass-users?error=" + encodeURIComponent("Usuario invalido."));
+    redirect("/pass-users?error=" + encodeURIComponent("Usuario inválido."));
   }
 
   await requireAppAccess({
@@ -91,7 +91,7 @@ async function deleteUser(formData: FormData) {
   const id = asText(formData.get("id"));
 
   if (!id) {
-    redirect("/pass-users?error=" + encodeURIComponent("Usuario invalido."));
+    redirect("/pass-users?error=" + encodeURIComponent("Usuario inválido."));
   }
 
   await requireAppAccess({

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState } from "react";
 
@@ -423,7 +423,7 @@ export function BusinessForm({ mode, initial, action }: BusinessFormProps) {
       </div>
 
       <div className="ui-panel space-y-4">
-        <div className="ui-h3">Ubicacion avanzada (opcional)</div>
+        <div className="ui-h3">Ubicación avanzada (opcional)</div>
         <p className="ui-caption">Solo usa estos campos si quieres forzar una direccion o coordenadas distintas a las de la sede.</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2 sm:col-span-2">

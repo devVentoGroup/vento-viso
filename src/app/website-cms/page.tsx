@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
@@ -166,7 +166,7 @@ export default async function WebsiteCmsPage({
       {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
-      {/* ── Accesos rápidos por sección ───────────────────────────── */}
+      {/* â”€â”€ Accesos rápidos por sección â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <section className="space-y-3">
         <div>
           <div className="ui-h3">¿Qué quieres actualizar?</div>
@@ -178,7 +178,7 @@ export default async function WebsiteCmsPage({
           {/* Restaurantes */}
           <div className="ui-panel space-y-3 flex flex-col">
             <div>
-              <div className="font-semibold text-sm">🍽 Restaurantes</div>
+              <div className="font-semibold text-sm">ðŸ½ Restaurantes</div>
               <div className="ui-caption mt-1">Fotos, nombre, ubicación y horario de cada restaurante del grupo.</div>
             </div>
             <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted,#888)]">
@@ -201,7 +201,7 @@ export default async function WebsiteCmsPage({
           {/* Empleos */}
           <div className="ui-panel space-y-3 flex flex-col">
             <div>
-              <div className="font-semibold text-sm">💼 Empleos</div>
+              <div className="font-semibold text-sm">ðŸ’¼ Empleos</div>
               <div className="ui-caption mt-1">Vacantes activas que aparecen en ventogroup.co/empleos.</div>
             </div>
             <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted,#888)]">
@@ -224,7 +224,7 @@ export default async function WebsiteCmsPage({
           {/* Eventos */}
           <div className="ui-panel space-y-3 flex flex-col">
             <div>
-              <div className="font-semibold text-sm">🎉 Eventos</div>
+              <div className="font-semibold text-sm">ðŸŽ‰ Eventos</div>
               <div className="ui-caption mt-1">Agenda de eventos y activaciones en ventogroup.co/eventos.</div>
             </div>
             <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted,#888)]">
@@ -247,7 +247,7 @@ export default async function WebsiteCmsPage({
           {/* Servicios */}
           <div className="ui-panel space-y-3 flex flex-col">
             <div>
-              <div className="font-semibold text-sm">🛠 Servicios</div>
+              <div className="font-semibold text-sm">ðŸ›  Servicios</div>
               <div className="ui-caption mt-1">Servicios del grupo en ventogroup.co/servicios.</div>
             </div>
             <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted,#888)]">
@@ -269,7 +269,7 @@ export default async function WebsiteCmsPage({
         </div>
       </section>
 
-      {/* ── Tarjetas de contenido ──────────────────────────────────── */}
+      {/* â”€â”€ Tarjetas de contenido â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <section className="space-y-3">
         <div>
           <div className="ui-h3">Tarjetas de contenido</div>
@@ -302,8 +302,8 @@ export default async function WebsiteCmsPage({
               <TableHead>
                 <TableRow>
                   <TableHeaderCell>Tipo</TableHeaderCell>
-                  <TableHeaderCell>Nombre / Titulo</TableHeaderCell>
-                  <TableHeaderCell>Ubicacion</TableHeaderCell>
+                  <TableHeaderCell>Nombre / Título</TableHeaderCell>
+                  <TableHeaderCell>Ubicación</TableHeaderCell>
                   <TableHeaderCell>Orden</TableHeaderCell>
                   <TableHeaderCell>Estado</TableHeaderCell>
                   <TableHeaderCell></TableHeaderCell>
@@ -348,7 +348,7 @@ export default async function WebsiteCmsPage({
         </div>
       </section>
 
-      {/* ── Secciones y textos del sitio ──────────────────────────── */}
+      {/* â”€â”€ Secciones y textos del sitio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <section className="space-y-3">
         <div>
           <div className="ui-h3">Secciones y textos del sitio</div>
@@ -382,7 +382,7 @@ export default async function WebsiteCmsPage({
                 <TableRow>
                   <TableHeaderCell>Pagina</TableHeaderCell>
                   <TableHeaderCell>Que controla</TableHeaderCell>
-                  <TableHeaderCell>Titulo actual</TableHeaderCell>
+                  <TableHeaderCell>Título actual</TableHeaderCell>
                   <TableHeaderCell>Estado</TableHeaderCell>
                   <TableHeaderCell></TableHeaderCell>
                 </TableRow>
@@ -401,7 +401,7 @@ export default async function WebsiteCmsPage({
                         <div className="ui-caption">{row.media_type === "image" ? "Imagen" : "Video"}</div>
                       )}
                     </TableCell>
-                    <TableCell>{row.title ?? <span className="opacity-40">Sin titulo</span>}</TableCell>
+                    <TableCell>{row.title ?? <span className="opacity-40">Sin título</span>}</TableCell>
                     <TableCell>
                       <span className={`ui-chip ${row.is_published ? "ui-chip--success" : ""}`}>
                         {row.is_published ? "Visible" : "Oculto"}

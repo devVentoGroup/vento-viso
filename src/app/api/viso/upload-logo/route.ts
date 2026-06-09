@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 const BUCKET = process.env.NEXT_PUBLIC_VISO_LOGO_BUCKET || "pass-satellite-logos";
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   try {
     formData = await req.formData();
   } catch {
-    return NextResponse.json({ error: "Formato de solicitud invalido" }, { status: 400 });
+    return NextResponse.json({ error: "Formato de solicitud inválido" }, { status: 400 });
   }
 
   const file = formData.get("file") as File | null;

@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+﻿import { redirect } from "next/navigation";
 
 import { VacancyForm } from "@/components/viso/vacancy-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
@@ -39,7 +39,7 @@ async function createVacancy(formData: FormData) {
   const status = asText(formData.get("status")) || "draft";
 
   if (!title || !slug || !description) {
-    redirect("/vacancies/new?error=" + encodeURIComponent("Titulo, slug y descripcion son obligatorios."));
+    redirect("/vacancies/new?error=" + encodeURIComponent("Título, slug y descripción son obligatorios."));
   }
 
   const payload = {

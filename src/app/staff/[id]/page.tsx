@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -342,7 +342,7 @@ async function saveEmployeeInventoryLocationAssignment(formData: FormData) {
     .eq("id", locationId)
     .maybeSingle();
   if (locationCheckError || !locationCheck) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("LOC invalido.")}`);
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("LOC inválido.")}`);
   }
   if (String(locationCheck.site_id ?? "") !== siteId) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent("El LOC no pertenece a la sede seleccionada.")}`);
@@ -375,7 +375,7 @@ async function setEmployeeKioskPin(formData: FormData) {
   const pin = asText(formData.get("pin"));
 
   if (!employeeId) {
-    redirect("/staff?error=" + encodeURIComponent("Trabajador invalido."));
+    redirect("/staff?error=" + encodeURIComponent("Trabajador inválido."));
   }
 
   if (!/^[0-9]{4,8}$/.test(pin)) {
@@ -446,7 +446,7 @@ async function updateEmployee(formData: FormData) {
 async function deleteEmployee(formData: FormData) {
   "use server";
   const id = asText(formData.get("id"));
-  if (!id) redirect("/staff?error=" + encodeURIComponent("Empleado invalido."));
+  if (!id) redirect("/staff?error=" + encodeURIComponent("Empleado inválido."));
 
   await requireAppAccess({
     appId: "viso",
@@ -825,7 +825,7 @@ async function uploadStaffPhoto(formData: FormData) {
   const mime = normalizePhotoMime(asText(formData.get("file_mime")));
 
   if (!employeeId) {
-    redirect("/staff?error=" + encodeURIComponent("Trabajador invalido."));
+    redirect("/staff?error=" + encodeURIComponent("Trabajador inválido."));
   }
 
   await requireAppAccess({
@@ -972,7 +972,7 @@ async function removeEmployeePermission(formData: FormData) {
   const permissionRowId = asText(formData.get("permission_row_id"));
 
   if (!employeeId || !permissionRowId) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Permiso invalido.")}`);
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Permiso inválido.")}`);
   }
 
   await requireAppAccess({
@@ -1088,7 +1088,7 @@ async function deleteEmployeeShift(formData: FormData) {
   const shiftId = asText(formData.get("shift_id"));
 
   if (!employeeId || !shiftId) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Turno invalido.")}`);
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Turno inválido.")}`);
   }
 
   await requireAppAccess({
@@ -1794,7 +1794,7 @@ export default async function StaffDetailPage({
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Fecha</TableHeaderCell>
-                <TableHeaderCell>Accion</TableHeaderCell>
+                <TableHeaderCell>Acción</TableHeaderCell>
                 <TableHeaderCell>Sede</TableHeaderCell>
                 <TableHeaderCell>Origen</TableHeaderCell>
                 <TableHeaderCell>Precision</TableHeaderCell>

@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { WebsiteMediaUploadField } from "@/components/viso/website-media-upload-field";
@@ -37,7 +37,7 @@ async function createWebsiteItem(formData: FormData) {
     redirect("/website-cms/items/new?error=" + encodeURIComponent("El tipo y el nombre son obligatorios."));
   }
   if (!WEBSITE_ITEM_CATEGORIES.includes(category as (typeof WEBSITE_ITEM_CATEGORIES)[number])) {
-    redirect("/website-cms/items/new?error=" + encodeURIComponent("Tipo de contenido invalido."));
+    redirect("/website-cms/items/new?error=" + encodeURIComponent("Tipo de contenido inválido."));
   }
 
   // Auto-generar slug desde el titulo
@@ -122,7 +122,7 @@ export default async function WebsiteItemNewPage({
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
 
-      {/* ── Selector de tipo (recarga la pagina para mostrar los campos correctos) ── */}
+      {/* â”€â”€ Selector de tipo (recarga la pagina para mostrar los campos correctos) â”€â”€ */}
       <div className="ui-panel space-y-3">
         <div className="ui-h3">Que quieres agregar?</div>
         <div className="flex flex-wrap gap-2">
@@ -149,7 +149,7 @@ export default async function WebsiteItemNewPage({
         {/* Campo oculto para el tipo ya seleccionado */}
         <input type="hidden" name="category" value={selectedType} />
 
-        {/* ── Datos basicos ────────────────────────────────────────── */}
+        {/* â”€â”€ Datos basicos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="ui-panel space-y-4">
           <div>
             <div className="ui-h3">
@@ -167,7 +167,7 @@ export default async function WebsiteItemNewPage({
           <label className="space-y-1 block">
             <span className="ui-label">
               {selectedType === "restaurant" ? "Nombre del restaurante" :
-               selectedType === "job" ? "Titulo de la vacante" :
+               selectedType === "job" ? "Título de la vacante" :
                selectedType === "event" ? "Nombre del evento" :
                selectedType === "service" ? "Nombre del servicio" :
                "Nombre"}
@@ -189,12 +189,12 @@ export default async function WebsiteItemNewPage({
 
           <label className="space-y-1 block">
             <span className="ui-label">
-              {selectedType === "job" ? "Descripcion del cargo" : "Descripcion corta"}
+              {selectedType === "job" ? "Descripción del cargo" : "Descripción corta"}
             </span>
             <span className="ui-caption block">
               {selectedType === "job"
                 ? "Resume las responsabilidades principales. Aparece en la tarjeta de la vacante."
-                : "1-2 lineas que aparecen en la tarjeta. Puedes completarla despues."}
+                : "1-2 líneas que aparecen en la tarjeta. Puedes completarla después."}
             </span>
             <textarea
               name="excerpt"
@@ -203,7 +203,7 @@ export default async function WebsiteItemNewPage({
                 selectedType === "restaurant" ? "Ej: Cocina italiana de autor en el corazon de Cucuta." :
                 selectedType === "job" ? "Ej: Buscamos un jefe de cocina apasionado con experiencia en brigadas..." :
                 selectedType === "event" ? "Ej: Una noche de cata guiada con los mejores vinos de la region." :
-                "Descripcion breve"
+                "Descripción breve"
               }
             />
           </label>
@@ -223,14 +223,14 @@ export default async function WebsiteItemNewPage({
           )}
         </div>
 
-        {/* ── Ubicacion y horario ───────────────────────────────────── */}
+        {/* â”€â”€ Ubicacion y horario â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="ui-panel space-y-4">
           <div className="ui-h3">
-            {isJob ? "Sede y tipo de contrato" : isEvent ? "Lugar y fecha" : "Ubicacion y horario"}
+            {isJob ? "Sede y tipo de contrato" : isEvent ? "Lugar y fecha" : "Ubicación y horario"}
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-1">
-              <span className="ui-label">{isJob ? "Sede o modalidad" : isEvent ? "Lugar del evento" : "Ubicacion"}</span>
+              <span className="ui-label">{isJob ? "Sede o modalidad" : isEvent ? "Lugar del evento" : "Ubicación"}</span>
               <input
                 name="location"
                 className="ui-input"
@@ -248,11 +248,11 @@ export default async function WebsiteItemNewPage({
           </div>
         </div>
 
-        {/* ── Boton de accion ───────────────────────────────────────── */}
+        {/* â”€â”€ Boton de accion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="ui-panel space-y-4">
           <div>
-            <div className="ui-h3">Boton de accion</div>
-            <div className="ui-caption">El boton que aparece en la tarjeta. Puedes completarlo despues.</div>
+            <div className="ui-h3">Boton de acción</div>
+            <div className="ui-caption">El boton que aparece en la tarjeta. Puedes completarlo después.</div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-1">
@@ -274,11 +274,11 @@ export default async function WebsiteItemNewPage({
           </div>
         </div>
 
-        {/* ── Foto y estado ─────────────────────────────────────────── */}
+        {/* â”€â”€ Foto y estado â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="ui-panel space-y-4">
           <div>
             <div className="ui-h3">Foto y estado</div>
-            <div className="ui-caption">Puedes subir la foto ahora o despues desde el editor completo.</div>
+            <div className="ui-caption">Puedes subir la foto ahora o después desde el editor completo.</div>
           </div>
           <WebsiteMediaUploadField
             label="Foto principal"

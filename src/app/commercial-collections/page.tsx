@@ -1,4 +1,4 @@
-import { revalidatePath } from "next/cache";
+﻿import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -261,7 +261,7 @@ async function saveCollectionCategories(formData: FormData) {
     if (hasInvalidCategory) {
       redirect(
         "/commercial-collections?error=" +
-        encodeURIComponent("Una o mas categorias no pertenecen a la sede de la coleccion."),
+        encodeURIComponent("Una o mas categorías no pertenecen a la sede de la coleccion."),
       );
     }
   }

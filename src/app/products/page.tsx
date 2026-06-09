@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
@@ -87,7 +87,7 @@ export default async function ProductsPage({
     <div className="space-y-6">
       <PageHeader
         title="Productos de fidelización"
-        subtitle="Items de canje por puntos que veran los clientes en Vento Pass. No hacen parte del catalogo comercial de compras."
+        subtitle="Items de canje por puntos que verán los clientes en Vento Pass. No hacen parte del catálogo comercial de compras."
         actions={
           <Link href="/products/new" className="ui-btn ui-btn--brand">
             Crear producto de fidelización
@@ -121,7 +121,7 @@ export default async function ProductsPage({
                   <TableHead>
                     <TableRow>
                       <TableHeaderCell>Producto</TableHeaderCell>
-                      <TableHeaderCell>Categoria</TableHeaderCell>
+                      <TableHeaderCell>Categoría</TableHeaderCell>
                       <TableHeaderCell>Puntos</TableHeaderCell>
                       <TableHeaderCell>Estado</TableHeaderCell>
                       <TableHeaderCell></TableHeaderCell>

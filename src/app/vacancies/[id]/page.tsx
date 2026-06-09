@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+﻿import { redirect } from "next/navigation";
 
 import { VacancyForm } from "@/components/viso/vacancy-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
@@ -109,7 +109,7 @@ export default async function EditVacancyPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Editar vacante" subtitle="Ajusta lo que vera el candidato en Vento Talento." />
+      <PageHeader title="Editar vacante" subtitle="Ajusta lo que verá el candidato en Vento Talento." />
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       <VacancyForm
         mode="edit"

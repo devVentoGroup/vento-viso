@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -170,7 +170,7 @@ async function deleteBusiness(formData: FormData) {
   const id = asText(formData.get("id"));
 
   if (!id) {
-    redirect("/businesses?error=" + encodeURIComponent("Negocio invalido."));
+    redirect("/businesses?error=" + encodeURIComponent("Negocio inválido."));
   }
 
   const { error } = await supabase
@@ -304,7 +304,7 @@ export default async function BusinessDetailPage({
       />
 
       <div className="ui-panel-soft flex flex-wrap items-center justify-between gap-3">
-        <div className="ui-caption">Accion irreversible: elimina la configuracion de este negocio en Vento Pass.</div>
+        <div className="ui-caption">Acción irreversible: elimina la configuración de este negocio en Vento Pass.</div>
         <form action={deleteBusiness}>
           <input type="hidden" name="id" value={business.id} />
           <button type="submit" className="ui-btn ui-btn--danger">

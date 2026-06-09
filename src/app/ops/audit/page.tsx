@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
@@ -353,7 +353,7 @@ export default async function OpsAuditPage() {
         <div className="ui-panel space-y-4">
           <div>
             <div className="ui-h3">Areas sin LOC</div>
-            <p className="ui-body-muted">Areas operativas activas que todavia no tienen una ubicacion de inventario asociada.</p>
+            <p className="ui-body-muted">Areas operativas activas que todavía no tienen una ubicación de inventario asociada.</p>
           </div>
           {areasWithoutLoc.length === 0 ? (
             <div className="ui-empty">Todas las areas activas tienen al menos un LOC.</div>
@@ -385,7 +385,7 @@ export default async function OpsAuditPage() {
         <div className="ui-panel space-y-4">
           <div>
             <div className="ui-h3">Tipos de area</div>
-            <p className="ui-body-muted">Uso real por tipo para detectar categorias operativas duplicadas o viejas.</p>
+            <p className="ui-body-muted">Uso real por tipo para detectar categorías operativas duplicadas o viejas.</p>
           </div>
           <Table>
             <TableHead>
@@ -393,7 +393,7 @@ export default async function OpsAuditPage() {
                 <TableHeaderCell>Tipo</TableHeaderCell>
                 <TableHeaderCell>Nombre</TableHeaderCell>
                 <TableHeaderCell>Areas</TableHeaderCell>
-                <TableHeaderCell>Remision</TableHeaderCell>
+                <TableHeaderCell>Remisión</TableHeaderCell>
                 <TableHeaderCell>Estado</TableHeaderCell>
               </TableRow>
             </TableHead>
@@ -420,7 +420,7 @@ export default async function OpsAuditPage() {
         <section className="ui-panel space-y-4">
           <div>
             <div className="ui-h3">Areas con nombres duplicados</div>
-            <p className="ui-body-muted">No se borran automaticamente; esta lista sirve para decidir unificacion.</p>
+            <p className="ui-body-muted">No se borran automáticamente; esta lista sirve para decidir unificacion.</p>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {duplicateAreaGroups.slice(0, 20).map((rows) => {

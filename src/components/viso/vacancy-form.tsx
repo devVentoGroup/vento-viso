@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState } from "react";
 
@@ -66,7 +66,7 @@ export function VacancyForm({ mode, sites, initial, action }: VacancyFormProps) 
         <div className="ui-h3">Datos de la vacante</div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2">
-            <span className="ui-label">Titulo</span>
+            <span className="ui-label">Título</span>
             <input
               name="title"
               className="ui-input"
@@ -94,7 +94,7 @@ export function VacancyForm({ mode, sites, initial, action }: VacancyFormProps) 
             />
           </label>
           <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Descripcion</span>
+            <span className="ui-label">Descripción</span>
             <textarea
               name="description"
               className="ui-input min-h-36 py-3"
@@ -151,7 +151,7 @@ export function VacancyForm({ mode, sites, initial, action }: VacancyFormProps) 
             />
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Salario minimo</span>
+            <span className="ui-label">Salario mínimo</span>
             <input
               name="salary_min"
               type="number"
@@ -193,11 +193,11 @@ export function VacancyForm({ mode, sites, initial, action }: VacancyFormProps) 
             <span className="ui-chip">{status === "published" ? "Publicada" : status === "closed" ? "Cerrada" : "Borrador"}</span>
           </div>
           <div>
-            <div className="text-xl font-semibold text-[var(--ui-text)]">{title || "Titulo de la vacante"}</div>
+            <div className="text-xl font-semibold text-[var(--ui-text)]">{title || "Título de la vacante"}</div>
             <div className="ui-caption mt-1">{[employmentType, scheduleType, selectedSiteLabel].filter(Boolean).join(" · ") || "Condiciones por definir"}</div>
           </div>
           <p className="ui-body-muted text-sm leading-relaxed">
-            {description.trim() || "La descripcion de la vacante aparecera aqui para validar como se vera en la app de candidatos."}
+            {description.trim() || "La descripción de la vacante aparecerá aquí para validar como se vera en la app de candidatos."}
           </p>
         </div>
       </div>

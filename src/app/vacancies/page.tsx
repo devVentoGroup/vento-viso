@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
@@ -68,7 +68,7 @@ export default async function VacanciesPage({
     <div className="space-y-6">
       <PageHeader
         title="Vacantes"
-        subtitle="Define las posiciones que vera el candidato en Vento Talento."
+        subtitle="Define las posiciones que verá el candidato en Vento Talento."
         actions={
           <Link href="/vacancies/new" className="ui-btn ui-btn--brand">
             Crear vacante
@@ -81,7 +81,7 @@ export default async function VacanciesPage({
 
       {rows.length === 0 ? (
         <div className="ui-panel">
-          <div className="ui-empty">No hay vacantes creadas todavia.</div>
+          <div className="ui-empty">No hay vacantes creadas todavía.</div>
         </div>
       ) : (
         <div className="ui-panel">

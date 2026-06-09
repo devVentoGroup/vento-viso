@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+﻿import { redirect } from "next/navigation";
 import Link from "next/link";
 
 import { MenuItemForm } from "@/components/viso/menu-item-form";
@@ -218,7 +218,7 @@ async function validateCommercialMenuReferences(
 
   if (commercialCategoryError) {
     return {
-      error: `No se pudo validar la categoria comercial: ${commercialCategoryError.message}`,
+      error: `No se pudo validar la categoría comercial: ${commercialCategoryError.message}`,
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
@@ -230,7 +230,7 @@ async function validateCommercialMenuReferences(
 
   if (!commercialCategory) {
     return {
-      error: "La categoria comercial seleccionada no existe, esta inactiva o no pertenece a esta sede.",
+      error: "La categoría comercial seleccionada no existe, esta inactiva o no pertenece a esta sede.",
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
@@ -316,7 +316,7 @@ async function validateCommercialMenuReferences(
 
   if (!categoryLabel) {
     return {
-      error: "La categoria comercial seleccionada no tiene nombre ni codigo.",
+      error: "La categoría comercial seleccionada no tiene nombre ni codigo.",
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
@@ -679,7 +679,7 @@ export default async function NewMenuItemPage({
     <div className="space-y-6">
       <PageHeader
         title="Crear item comercial"
-        subtitle="Catalogo de compras por satélite. Las categorias comerciales se crean por sede."
+        subtitle="Catálogo de compras por satélite. Las categorías comerciales se crean por sede."
         actions={
           <Link href="/menu" className="ui-btn ui-btn--ghost">
             Volver

@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -52,7 +52,7 @@ async function updateRestaurantDetail(formData: FormData) {
   const restaurantId = asText(formData.get("restaurant_id"));
   const slug = asText(formData.get("slug"));
   const pageSlug = asText(formData.get("page_slug")) || getPrimaryRestaurantPageSlug(slug);
-  if (!restaurantId || !slug) redirect("/website-cms/venues?error=" + encodeURIComponent("Restaurante invalido."));
+  if (!restaurantId || !slug) redirect("/website-cms/venues?error=" + encodeURIComponent("Restaurante inválido."));
   await requireAppAccess({ appId: "viso", returnTo: `/website-cms/venues/${slug}` });
   const supabase = createAdminClient();
   const restaurantPayload = {
@@ -158,22 +158,23 @@ export default async function WebsiteCmsVenueDetailPage({
       {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
-      {/* ── Previsualización de la tarjeta ─────────────────────────────── */}
+      {/* Previsualización de la tarjeta */}
       <div className="ui-panel space-y-3">
         <div>
-          <div className="ui-h3">Como se ve la tarjeta ahora</div>
-          <div className="ui-caption">Asi aparece este restaurante en la lista de ventogroup.co/restaurantes</div>
+          <div className="ui-h3">Cómo se ve la tarjeta ahora</div>
+          <div className="ui-caption">Así aparece este restaurante en la lista de ventogroup.co/restaurantes</div>
         </div>
         <div className="max-w-xs rounded-xl overflow-hidden border border-[var(--ui-border,#e5e7eb)] bg-white shadow-sm">
           <div className="aspect-[4/3] bg-[#f3f0ed] flex items-center justify-center overflow-hidden">
             {cardImageUrl
+              // eslint-disable-next-line @next/next/no-img-element
               ? <img src={cardImageUrl} alt={restaurant.title} className="w-full h-full object-cover" />
-              : <span className="text-3xl opacity-30">🍽</span>}
+              : <span className="text-3xl opacity-30">Foto</span>}
           </div>
           <div className="p-4 space-y-1">
             <div className="font-semibold text-sm leading-tight">{restaurant.title}</div>
-            {restaurant.location && <div className="text-xs text-[#888]">📍 {restaurant.location}</div>}
-            {restaurant.schedule_text && <div className="text-xs text-[#888]">🕐 {restaurant.schedule_text}</div>}
+            {restaurant.location && <div className="text-xs text-[#888]">Ubicación: {restaurant.location}</div>}
+            {restaurant.schedule_text && <div className="text-xs text-[#888]">Horario: {restaurant.schedule_text}</div>}
             {restaurant.excerpt && <div className="text-xs text-[#555] mt-2 line-clamp-2">{restaurant.excerpt}</div>}
             <div className="pt-2">
               <span className="inline-block text-xs bg-[#18120f] text-white rounded px-3 py-1">
@@ -184,7 +185,7 @@ export default async function WebsiteCmsVenueDetailPage({
         </div>
         {!cardImageUrl && (
           <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            ⚠ Sin foto — sube una foto en la seccion de abajo para que aparezca en la tarjeta.
+            âš  Sin foto — sube una foto en la seccion de abajo para que aparezca en la tarjeta.
           </div>
         )}
       </div>
@@ -194,13 +195,13 @@ export default async function WebsiteCmsVenueDetailPage({
         <input type="hidden" name="slug" value={restaurant.slug} />
         <input type="hidden" name="page_slug" value={pageSlug} />
 
-        {/* ── 1. Tarjeta en la lista ─────────────────────────────────────── */}
+        {/* 1. Tarjeta en la lista */}
         <div className="ui-panel space-y-5">
           <div>
             <div className="ui-h3">1. Tarjeta en la lista de restaurantes</div>
             <div className="ui-caption">
               Esto es lo que ve el visitante cuando entra a{" "}
-              <strong>ventogroup.co/restaurantes</strong>. Es la "portada" del restaurante.
+              <strong>ventogroup.co/restaurantes</strong>. Es la &quot;portada&quot; del restaurante.
             </div>
           </div>
 
@@ -210,8 +211,8 @@ export default async function WebsiteCmsVenueDetailPage({
           </label>
 
           <label className="space-y-1 block">
-            <span className="ui-label">Descripcion corta</span>
-            <span className="ui-caption block">Aparece debajo del nombre en la tarjeta. 1-2 lineas maximo.</span>
+            <span className="ui-label">Descripción corta</span>
+            <span className="ui-caption block">Aparece debajo del nombre en la tarjeta. 1-2 líneas maximo.</span>
             <textarea
               name="excerpt"
               className="ui-input min-h-20 py-3"
@@ -222,7 +223,7 @@ export default async function WebsiteCmsVenueDetailPage({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-1">
-              <span className="ui-label">Ubicacion</span>
+              <span className="ui-label">Ubicación</span>
               <span className="ui-caption block">Ciudad y barrio. Ej: Bogota - Zona G</span>
               <input name="location" className="ui-input" defaultValue={restaurant.location ?? ""} placeholder="Cucuta - Centro" />
             </label>
@@ -274,7 +275,7 @@ export default async function WebsiteCmsVenueDetailPage({
           </div>
         </div>
 
-        {/* ── 2. Pagina de detalle del restaurante ───────────────────────── */}
+        {/* â”€â”€ 2. Pagina de detalle del restaurante â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="ui-panel space-y-5">
           <div>
             <div className="ui-h3">2. Pagina de detalle del restaurante</div>
@@ -304,22 +305,22 @@ export default async function WebsiteCmsVenueDetailPage({
           </div>
 
           <label className="space-y-1 block">
-            <span className="ui-label">Titulo en la pagina de detalle</span>
+            <span className="ui-label">Título en la pagina de detalle</span>
             <span className="ui-caption block">Normalmente el mismo nombre del restaurante. Se muestra grande en la pagina.</span>
             <input name="hero_title" className="ui-input" defaultValue={heroBlock?.title ?? restaurant.title} />
           </label>
 
           <label className="space-y-1 block">
             <span className="ui-label">Etiqueta pequeña (opcional)</span>
-            <span className="ui-caption block">Texto muy breve sobre el titulo. Ej: "Vento Group · Cucuta"</span>
+            <span className="ui-caption block">Texto muy breve sobre el título. Ej: &quot;Vento Group · Cucuta&quot;</span>
             <input name="hero_subtitle" className="ui-input" defaultValue={heroBlock?.subtitle ?? ""} placeholder="Vento Group · Cucuta" />
           </label>
 
           <label className="space-y-1 block">
-            <span className="ui-label">Historia y descripcion del restaurante</span>
+            <span className="ui-label">Historia y descripción del restaurante</span>
             <span className="ui-caption block">
               Texto largo para la pagina de detalle. Puedes contar la historia del restaurante, su cocina, ambiente, etc.
-              Para agregar una lista de caracteristicas, pon cada una en una linea que empiece con "- ".
+              Para agregar una lista de características, pon cada una en una línea que empiece con &quot;- &quot;.
             </span>
             <textarea
               name="hero_body"
@@ -353,7 +354,7 @@ export default async function WebsiteCmsVenueDetailPage({
           </div>
         </div>
 
-        {/* ── 3. Galeria de fotos ─────────────────────────────────────────── */}
+        {/* â”€â”€ 3. Galeria de fotos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="ui-panel space-y-5">
           <div>
             <div className="ui-h3">3. Galeria de fotos</div>
@@ -385,7 +386,7 @@ export default async function WebsiteCmsVenueDetailPage({
                     </select>
                   </div>
                   <label className="space-y-1 block">
-                    <span className="ui-label">Descripcion de la foto (opcional)</span>
+                    <span className="ui-label">Descripción de la foto (opcional)</span>
                     <input name={`gallery_${slot}_title`} className="ui-input" defaultValue={block?.title ?? ""} placeholder={`Foto ${slot} de ${restaurant.title}`} />
                   </label>
                   <div className="flex items-center gap-2">
@@ -398,7 +399,7 @@ export default async function WebsiteCmsVenueDetailPage({
           </div>
         </div>
 
-        {/* ── 4. Orden en la lista ─────────────────────────────────────────── */}
+        {/* â”€â”€ 4. Orden en la lista â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="ui-panel">
           <div className="grid gap-4 sm:grid-cols-2 items-end">
             <label className="space-y-1">

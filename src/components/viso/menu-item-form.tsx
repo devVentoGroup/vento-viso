@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 
@@ -93,7 +93,7 @@ function getPreviewTitle(name: string) {
 
 function getPreviewCategory(category: string) {
   const trimmed = category.trim();
-  return trimmed || "Categoria general";
+  return trimmed || "Categoría general";
 }
 
 function asCop(value: string) {
@@ -366,7 +366,7 @@ export function MenuItemForm({
       <div className="ui-panel space-y-6">
         <div>
           <div className="ui-h3">1. Sede de venta</div>
-          <p className="ui-caption">Primero elige la sede; las categorias y productos se filtran con esa seleccion.</p>
+          <p className="ui-caption">Primero elige la sede; las categorías y productos se filtran con esa seleccion.</p>
         </div>
         <label className="space-y-2">
           <span className="ui-label">Negocio / sede</span>
@@ -427,7 +427,7 @@ export function MenuItemForm({
             ) : null}
           </label>
           <label className="space-y-2">
-            <span className="ui-label">Categoria comercial</span>
+            <span className="ui-label">Categoría comercial</span>
             <select
               name="commercial_category_id"
               className="ui-input"
@@ -532,7 +532,7 @@ export function MenuItemForm({
             </label>
           </div>
           <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Descripcion</span>
+            <span className="ui-label">Descripción</span>
             <textarea
               name="description"
               className="ui-input min-h-28 py-3"
@@ -805,7 +805,7 @@ export function MenuItemForm({
             </div>
 
             <p className="ui-body-muted text-sm leading-5">
-              {description.trim() || "Descripcion del producto comercial que vera el usuario al comprar."}
+              {description.trim() || "Descripción del producto comercial que vera el usuario al comprar."}
             </p>
 
             <div className="rounded-full bg-[var(--ui-brand)] px-4 py-3 text-center text-sm font-black text-white">

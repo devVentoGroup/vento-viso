@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -160,16 +160,6 @@ type ProductUomProfileRow = {
   is_active: boolean | null;
 };
 
-type InventoryLocationRow = {
-  id: string;
-  site_id: string;
-  code: string;
-  zone: string;
-  description: string | null;
-  location_type: string | null;
-  is_active: boolean | null;
-};
-
 type InventoryLocationPositionRow = {
   id: string;
   site_id: string;
@@ -279,21 +269,6 @@ function parseRecipeEffectQuantityMode(value: FormDataEntryValue | string | null
   return mode === "fixed_quantity" ? "fixed_quantity" : "full_recipe_component";
 }
 
-function getEffectTypeLabel(value: string | null | undefined) {
-  switch (value) {
-    case "additive":
-      return "Extra";
-    case "replacement":
-      return "Reemplazo";
-    case "removal":
-      return "Retiro";
-    case "preference":
-    default:
-      return "Preferencia";
-  }
-}
-
-
 type SimpleGroupKind = "choice" | "extras" | "removals" | "preferences" | "recommendations";
 
 function readGroupMetadata(value: Record<string, unknown> | null | undefined) {
@@ -314,7 +289,13 @@ function getSimpleGroupKind(group: CatalogItemOptionGroupRow): SimpleGroupKind {
     return "removals";
   }
 
-  if (preset === "recommendations" || name.includes("recomend") || name.includes("tambien")) {
+  if (
+    preset === "recommendations" ||
+    name.includes("recomend") ||
+    name.includes("tambien") ||
+    name.includes("también") ||
+    name.includes("sugerir")
+  ) {
     return "recommendations";
   }
 
@@ -334,11 +315,28 @@ function getSimpleGroupLabel(kind: SimpleGroupKind) {
     case "preferences":
       return "Preferencias";
     case "recommendations":
-      return "Recomendados";
+      return "Sugerencia de venta";
     case "choice":
     default:
       return "Debe escoger";
   }
+}
+
+function getSimpleGroupDisplayName(group: CatalogItemOptionGroupRow) {
+  const kind = getSimpleGroupKind(group);
+  const name = String(group.name ?? "").trim();
+  const normalized = name.toLowerCase();
+
+  if (
+    kind === "recommendations" &&
+    (normalized.includes("producto") ||
+      normalized.includes("recomend") ||
+      normalized.includes("sugerir"))
+  ) {
+    return "También puedes agregar";
+  }
+
+  return name || getSimpleGroupLabel(kind);
 }
 
 function getSimpleGroupHelp(kind: SimpleGroupKind) {
@@ -350,7 +348,7 @@ function getSimpleGroupHelp(kind: SimpleGroupKind) {
     case "preferences":
       return "Para instrucciones que no cambian inventario: poco dulce, bien caliente o partir en dos.";
     case "recommendations":
-      return "Para sugerir acompañamientos, bebidas o postres.";
+      return "Para bebidas, postres o acompañamientos que el cliente puede sumar.";
     case "choice":
     default:
       return "Para tamaño, tipo de leche, bebida o acompañamiento obligatorio.";
@@ -383,22 +381,6 @@ function getSelectionRuleLabel(group: CatalogItemOptionGroupRow) {
   }
 
   return isMultiple ? `Puede escoger hasta ${group.max_select}` : "Puede escoger 1";
-}
-
-function getModalBlockActionLabel(kind: SimpleGroupKind) {
-  switch (kind) {
-    case "extras":
-      return "Agregar extra";
-    case "removals":
-      return "Agregar ingrediente removible";
-    case "preferences":
-      return "Agregar preferencia";
-    case "recommendations":
-      return "Agregar producto sugerido";
-    case "choice":
-    default:
-      return "Agregar opción";
-  }
 }
 
 function getLinkedCatalogItemId(option: CatalogItemOptionRow) {
@@ -490,7 +472,7 @@ function getSimpleGroupCreationDefaults(kind: SimpleGroupKind) {
     case "recommendations":
       return {
         name: "También puedes agregar",
-        description: "Productos o complementos recomendados.",
+        description: "Bebidas, postres o acompañamientos que el cliente puede sumar.",
         selectionType: "multiple",
         isRequired: false,
         minSelect: 0,
@@ -744,7 +726,7 @@ async function validateCommercialMenuReferences(
 
   if (commercialCategoryError) {
     return {
-      error: `No se pudo validar la categoria comercial: ${commercialCategoryError.message}`,
+      error: `No se pudo validar la categoría comercial: ${commercialCategoryError.message}`,
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
@@ -753,7 +735,7 @@ async function validateCommercialMenuReferences(
 
   if (!commercialCategory) {
     return {
-      error: "La categoria comercial seleccionada no existe, esta inactiva o no pertenece a esta sede.",
+      error: "La categoría comercial seleccionada no existe, esta inactiva o no pertenece a esta sede.",
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
@@ -800,7 +782,7 @@ async function validateCommercialMenuReferences(
 
   if (!categoryLabel) {
     return {
-      error: "La categoria comercial seleccionada no tiene nombre ni codigo.",
+      error: "La categoría comercial seleccionada no tiene nombre ni codigo.",
       categoryLabel: "",
       basePriceAmount: null,
       recipeCostAmount: null,
@@ -995,6 +977,51 @@ async function createOptionGroup(formData: FormData) {
     redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Falta el nombre del grupo.")}`);
   }
 
+  const { data: existingGroup, error: existingGroupError } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .select("id,is_active")
+    .eq("catalog_item_id", itemId)
+    .eq("code", code)
+    .maybeSingle();
+
+  if (existingGroupError) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(existingGroupError.message)}`);
+  }
+
+  if (existingGroup?.id) {
+    if (existingGroup.is_active === false) {
+      const { error: reactivateError } = await supabase
+        .schema("pass")
+        .from("catalog_item_option_groups")
+        .update({
+          name,
+          description,
+          selection_type: selectionType,
+          is_required: isRequired,
+          min_select: defaults.minSelect,
+          max_select: maxSelect,
+          sort_order: sortOrder,
+          is_active: true,
+          metadata: {
+            preset: groupKind,
+            configured_from: "simple_product_page",
+          },
+        })
+        .eq("id", existingGroup.id)
+        .eq("catalog_item_id", itemId);
+
+      if (reactivateError) {
+        redirect(`/menu/${itemId}?error=${encodeURIComponent(reactivateError.message)}`);
+      }
+
+      revalidatePath(`/menu/${itemId}`);
+      redirect(`/menu/${itemId}?ok=${encodeURIComponent("Personalizacion reactivada.")}`);
+    }
+
+    redirect(`/menu/${itemId}?ok=${encodeURIComponent("Esa personalizacion ya existe.")}`);
+  }
+
   const { error } = await supabase
     .schema("pass")
     .from("catalog_item_option_groups")
@@ -1016,6 +1043,10 @@ async function createOptionGroup(formData: FormData) {
     });
 
   if (error) {
+    if (error.code === "23505") {
+      redirect(`/menu/${itemId}?ok=${encodeURIComponent("Esa personalizacion ya existe.")}`);
+    }
+
     redirect(`/menu/${itemId}?error=${encodeURIComponent(error.message)}`);
   }
 
@@ -1075,7 +1106,7 @@ async function disableOptionGroup(formData: FormData) {
   const groupId = asText(formData.get("option_group_id"));
 
   if (!itemId || !groupId) {
-    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Grupo de opciones invalido.")}`);
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Grupo de opciones inválido.")}`);
   }
 
   const { error } = await supabase
@@ -1384,36 +1415,6 @@ async function createConsumptionRule(formData: FormData) {
   redirect(`/menu/${itemId}?ok=${encodeURIComponent("Regla de consumo creada.")}`);
 }
 
-async function updateConsumptionRule(formData: FormData) {
-  "use server";
-  const supabase = await createClient();
-
-  const ruleId = asText(formData.get("consumption_rule_id"));
-  const { itemId, optionId, productId, quantityPerOption, payload, error } = parseConsumptionRulePayload(formData);
-
-  if (!itemId || !optionId || !ruleId || !productId || !payload.name || !payload.code || quantityPerOption <= 0) {
-    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para actualizar la regla de consumo.")}`);
-  }
-
-  if (error) {
-    redirect(`/menu/${itemId}?error=${encodeURIComponent(error)}`);
-  }
-
-  const { error: updateError } = await supabase
-    .schema("pass")
-    .from("catalog_item_option_consumption_rules")
-    .update(payload)
-    .eq("id", ruleId)
-    .eq("option_id", optionId);
-
-  if (updateError) {
-    redirect(`/menu/${itemId}?error=${encodeURIComponent(updateError.message)}`);
-  }
-
-  revalidatePath(`/menu/${itemId}`);
-  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Regla de consumo actualizada.")}`);
-}
-
 async function disableConsumptionRule(formData: FormData) {
   "use server";
   const supabase = await createClient();
@@ -1508,42 +1509,6 @@ async function createRecipeEffect(formData: FormData) {
   redirect(`/menu/${itemId}?ok=${encodeURIComponent("Efecto de receta creado.")}`);
 }
 
-async function updateRecipeEffect(formData: FormData) {
-  "use server";
-  const supabase = await createClient();
-
-  const effectId = asText(formData.get("recipe_effect_id"));
-  const { itemId, optionId, payload, error } = parseRecipeEffectPayload(formData);
-
-  if (!itemId || !optionId || !effectId || !payload.target_ingredient_product_id) {
-    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para actualizar el efecto de receta.")}`);
-  }
-
-  if (error) {
-    redirect(`/menu/${itemId}?error=${encodeURIComponent(error)}`);
-  }
-
-  const { error: updateError } = await supabase
-    .schema("pass")
-    .from("catalog_item_option_recipe_effects")
-    .update(payload)
-    .eq("id", effectId)
-    .eq("option_id", optionId);
-
-  if (updateError) {
-    redirect(`/menu/${itemId}?error=${encodeURIComponent(updateError.message)}`);
-  }
-
-  await supabase
-    .schema("pass")
-    .from("catalog_item_options")
-    .update({ effect_type: payload.effect_type })
-    .eq("id", optionId);
-
-  revalidatePath(`/menu/${itemId}`);
-  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Efecto de receta actualizado.")}`);
-}
-
 async function disableRecipeEffect(formData: FormData) {
   "use server";
   const supabase = await createClient();
@@ -1553,7 +1518,7 @@ async function disableRecipeEffect(formData: FormData) {
   const effectId = asText(formData.get("recipe_effect_id"));
 
   if (!itemId || !optionId || !effectId) {
-    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Efecto de receta invalido.")}`);
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Efecto de receta inválido.")}`);
   }
 
   const { error } = await supabase
@@ -1582,7 +1547,7 @@ async function createRemovalOptionFromRecipe(formData: FormData) {
   const stockUnitCode = asOptionalText(formData.get("stock_unit_code"));
 
   if (!itemId || !ingredientProductId || !ingredientName) {
-    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Ingrediente invalido para crear opcion de retiro.")}`);
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Ingrediente inválido para crear opcion de retiro.")}`);
   }
 
   const groupCode = "quitar-ingredientes";
@@ -1905,7 +1870,6 @@ export default async function MenuItemDetailPage({
     { data: consumptionProductsRaw },
     { data: inventoryUnitsRaw },
     { data: productUomProfilesRaw },
-    { data: inventoryLocationsRaw },
     { data: inventoryPositionsRaw },
   ] = await Promise.all([
     optionIds.length > 0
@@ -1950,12 +1914,6 @@ export default async function MenuItemDetailPage({
       .eq("is_active", true)
       .order("label", { ascending: true }),
     supabase
-      .from("inventory_locations")
-      .select("id,site_id,code,zone,description,location_type,is_active")
-      .eq("site_id", row.site_id)
-      .eq("is_active", true)
-      .order("code", { ascending: true }),
-    supabase
       .from("inventory_location_positions")
       .select("id,site_id,location_id,code,name,kind,is_active")
       .eq("site_id", row.site_id)
@@ -1985,7 +1943,6 @@ export default async function MenuItemDetailPage({
 
   const consumptionProductById = new Map(consumptionProducts.map((product) => [product.id, product]));
   const inventoryUnits = (inventoryUnitsRaw ?? []) as InventoryUnitRow[];
-  const inventoryLocations = (inventoryLocationsRaw ?? []) as InventoryLocationRow[];
   const inventoryPositions = (inventoryPositionsRaw ?? []) as InventoryLocationPositionRow[];
   const uomProfiles = (productUomProfilesRaw ?? []) as ProductUomProfileRow[];
 
@@ -2097,13 +2054,6 @@ export default async function MenuItemDetailPage({
     maxSelect?: string;
   }[] = [
     {
-      kind: "recommendations",
-      label: "Producto",
-      defaultName: "Productos recomendados",
-      description: "Productos existentes que el cliente puede agregar a este item.",
-      maxSelect: "10",
-    },
-    {
       kind: "choice",
       label: "Tamaño o cantidad",
       defaultName: "Elige una opción",
@@ -2128,6 +2078,13 @@ export default async function MenuItemDetailPage({
       label: "Preferencias",
       defaultName: "Preferencias",
       description: "Indicaciones de preparación sin descuento de inventario.",
+      maxSelect: "10",
+    },
+    {
+      kind: "recommendations",
+      label: "Sugerir producto",
+      defaultName: "También puedes agregar",
+      description: "Bebidas, postres o acompañamientos que el cliente puede sumar.",
       maxSelect: "10",
     },
   ];
@@ -2232,7 +2189,7 @@ export default async function MenuItemDetailPage({
           <summary className="cursor-pointer list-none">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-base font-black text-[var(--ui-text)]">+ Agregar personalización</div>
-              <span className="ui-chip">Producto · Tamaño · Ingredientes · Extras · Preferencias</span>
+              <span className="ui-chip">Tamaño · Ingredientes · Extras · Preferencias · Sugerir producto</span>
             </div>
           </summary>
 
@@ -2271,6 +2228,7 @@ export default async function MenuItemDetailPage({
               const optionEffectType = getSimpleDefaultEffect(groupKind);
               const supportsDefaultOption = groupKind === "choice";
               const isMultiple = parseSelectionType(group.selection_type) === "multiple";
+              const groupDisplayName = getSimpleGroupDisplayName(group);
 
               return (
                 <div key={group.id} className="overflow-hidden rounded-[30px] border border-[var(--ui-border)] bg-white shadow-[var(--ui-shadow-1)]">
@@ -2281,7 +2239,7 @@ export default async function MenuItemDetailPage({
                           {groupIndex + 1}
                         </span>
                         <div className="min-w-0">
-                          <div className="truncate text-lg font-black text-[var(--ui-text)]">{group.name}</div>
+                          <div className="truncate text-lg font-black text-[var(--ui-text)]">{groupDisplayName}</div>
                           <div className="ui-caption mt-1" title={getSimpleGroupHelp(groupKind)}>{getSimpleGroupLabel(groupKind)}</div>
                         </div>
                       </div>
@@ -2316,7 +2274,7 @@ export default async function MenuItemDetailPage({
                         <div className="grid gap-3 lg:grid-cols-[1fr_180px_120px_120px]">
                           <label className="space-y-2">
                             <span className="ui-label">Nombre de la personalización</span>
-                            <input name="name" className="ui-input" defaultValue={group.name} required />
+                            <input name="name" className="ui-input" defaultValue={groupDisplayName} required />
                           </label>
 
                           <label className="space-y-2">
@@ -2652,9 +2610,9 @@ export default async function MenuItemDetailPage({
                         {groupKind === "recommendations" ? (
                           <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
                             <label className="space-y-2">
-                              <span className="ui-label">Producto de Pass</span>
+                              <span className="ui-label">Producto sugerido</span>
                               <select name="linked_catalog_item_id" className="ui-input" required>
-                                <option value="">Selecciona un producto</option>
+                                <option value="">Selecciona producto sugerido</option>
                                 {commercialCatalogItems.map((catalogItem) => (
                                   <option key={catalogItem.id} value={catalogItem.id}>
                                     {catalogItem.name || "Producto sin nombre"} · {formatCopAdmin(catalogItem.price_amount)}
@@ -2665,10 +2623,10 @@ export default async function MenuItemDetailPage({
 
                             <label className="space-y-2">
                               <span className="ui-label">Texto opcional</span>
-                              <input name="description" className="ui-input" placeholder="Ej. Combina bien con este producto." />
+                              <input name="description" className="ui-input" placeholder="Ej. Queda bien con este producto." />
                             </label>
 
-                            <button type="submit" className="ui-btn ui-btn--brand">Agregar producto</button>
+                            <button type="submit" className="ui-btn ui-btn--brand">Agregar sugerencia</button>
                           </div>
                         ) : (
                           <div className="grid gap-3 lg:grid-cols-[1fr_160px_1fr_auto] lg:items-end">

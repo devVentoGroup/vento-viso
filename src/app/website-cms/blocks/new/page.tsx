@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { WebsiteMediaUploadField } from "@/components/viso/website-media-upload-field";
@@ -78,7 +78,7 @@ export default async function WebsiteBlockNewPage({
 
       {/* Referencia rápida de block keys */}
       <details className="ui-panel">
-        <summary className="cursor-pointer font-medium text-sm py-1">📋 Block keys disponibles (referencia rápida)</summary>
+        <summary className="cursor-pointer font-medium text-sm py-1"> Block keys disponibles (referencia rápida)</summary>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 text-xs text-[var(--ui-text-muted)]">
           <div>
             <div className="font-semibold text-[var(--ui-text)] mb-1">Home (page_slug: home)</div>
@@ -132,7 +132,7 @@ export default async function WebsiteBlockNewPage({
           <div className="ui-h3">Contenido</div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-2 sm:col-span-2">
-              <span className="ui-label">Titulo</span>
+              <span className="ui-label">Título</span>
               <input name="title" className="ui-input" />
             </label>
             <label className="space-y-2 sm:col-span-2">

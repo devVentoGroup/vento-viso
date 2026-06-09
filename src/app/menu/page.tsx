@@ -1,4 +1,4 @@
-import { revalidatePath } from "next/cache";
+﻿import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -109,7 +109,7 @@ async function moveMenuItem(formData: FormData) {
   const direction = String(formData.get("direction") ?? "").trim();
 
   if (!itemId || !["up", "down"].includes(direction)) {
-    redirect("/menu?error=" + encodeURIComponent("Movimiento invalido."));
+    redirect("/menu?error=" + encodeURIComponent("Movimiento inválido."));
   }
 
   const { data: current, error: currentError } = await supabase
@@ -127,7 +127,7 @@ async function moveMenuItem(formData: FormData) {
   }
 
   if (!current.commercial_category_id) {
-    redirect("/menu?error=" + encodeURIComponent("El item no tiene categoria comercial."));
+    redirect("/menu?error=" + encodeURIComponent("El item no tiene categoría comercial."));
   }
 
   let groupQuery = supabase
@@ -333,7 +333,7 @@ export default async function MenuPage({
 
     if (!collectionGroup.categories.has(categoryId)) {
       collectionGroup.categories.set(categoryId, {
-        label: category?.name ?? category?.code ?? row.category_label ?? "Sin categoria",
+        label: category?.name ?? category?.code ?? row.category_label ?? "Sin categoría",
         sortOrder:
           categoryOrderByCollection.get(`${collectionId}:${categoryId}`) ??
           sortNumber(category?.sort_order),
@@ -381,7 +381,7 @@ export default async function MenuPage({
     <div className="space-y-6">
       <PageHeader
         title="Menú comercial"
-        subtitle="Catalogo digital de compra por satélite. Usa categorias comerciales propias y no las categorias operacionales ni los canjes de fidelización."
+        subtitle="Catálogo digital de compra por satélite. Usa categorías comerciales propias y no las categorías operacionales ni los canjes de fidelización."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link href="/commercial-collections" className="ui-btn ui-btn--ghost">

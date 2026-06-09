@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+﻿import { redirect } from "next/navigation";
 
 import { BusinessForm } from "@/components/viso/business-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
@@ -140,7 +140,7 @@ export default async function NewBusinessPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Crear negocio" subtitle="Alta completa de sede y configuracion Vento Pass." />
+      <PageHeader title="Crear negocio" subtitle="Alta completa de sede y configuración Vento Pass." />
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
 

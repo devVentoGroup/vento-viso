@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMemo } from "react";
 
@@ -135,7 +135,7 @@ export function PassStylePreview({
                 </span>
               ))
             ) : (
-              <span className="ui-caption">Tags de categoria</span>
+              <span className="ui-caption">Tags de categoría</span>
             )}
           </div>
 

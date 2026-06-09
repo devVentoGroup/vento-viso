@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
 
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   try {
     formData = await req.formData();
   } catch {
-    return NextResponse.json({ error: "Formato de solicitud invalido" }, { status: 400 });
+    return NextResponse.json({ error: "Formato de solicitud inválido" }, { status: 400 });
   }
 
   const file = formData.get("file") as File | null;

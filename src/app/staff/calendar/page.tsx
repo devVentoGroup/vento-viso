@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -203,14 +203,14 @@ function eventTypeLabel(value: CalendarEventType): string {
 }
 
 function eventTypeEmoji(value: CalendarEventType): string {
-  if (value === "holiday") return "🎉";
-  if (value === "mother_day") return "💐";
-  if (value === "commercial") return "💖";
-  if (value === "operations") return "☕";
-  if (value === "other") return "📌";
-  if (value === "contract_start") return "🟢";
-  if (value === "contract_end") return "🧾";
-  return "🛠️";
+  if (value === "holiday") return "ðŸŽ‰";
+  if (value === "mother_day") return "ðŸ’";
+  if (value === "commercial") return "ðŸ’–";
+  if (value === "operations") return "â˜•";
+  if (value === "other") return "ðŸ“Œ";
+  if (value === "contract_start") return "ðŸŸ¢";
+  if (value === "contract_end") return "ðŸ§¾";
+  return "ðŸ› ️";
 }
 
 function eventTypePillClass(value: CalendarEventType): string {
@@ -365,7 +365,7 @@ async function saveManualEvent(formData: FormData) {
   const priority = normalizePriority(asText(formData.get("priority")));
 
   if (!eventDate || !/^\d{4}-\d{2}-\d{2}$/.test(eventDate) || !title) {
-    redirect("/staff/calendar?error=" + encodeURIComponent("Completa fecha y titulo del evento manual."));
+    redirect("/staff/calendar?error=" + encodeURIComponent("Completa fecha y título del evento manual."));
   }
 
   const { error } = await supabase.from("staff_manual_calendar_events").insert({
@@ -643,7 +643,7 @@ export default async function StaffMasterCalendarPage({
         <div className="relative grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/70 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
-              <span>🗓️</span>
+              <span>ðŸ—“️</span>
               <span>Calendario vivo de operación</span>
             </div>
             <h2 className="mt-4 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">
@@ -654,22 +654,22 @@ export default async function StaffMasterCalendarPage({
             </p>
             <div className="mt-5 grid gap-3 sm:grid-cols-4">
               <div className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-sm">
-                <div className="text-2xl">✨</div>
+                <div className="text-2xl">âœ¨</div>
                 <div className="mt-2 text-2xl font-black text-slate-950">{totalEvents}</div>
                 <div className="text-xs font-semibold text-slate-500">eventos del mes</div>
               </div>
               <div className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-sm">
-                <div className="text-2xl">🎉</div>
+                <div className="text-2xl">ðŸŽ‰</div>
                 <div className="mt-2 text-2xl font-black text-slate-950">{holidayCount}</div>
                 <div className="text-xs font-semibold text-slate-500">festivos/comerciales</div>
               </div>
               <div className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-sm">
-                <div className="text-2xl">🧾</div>
+                <div className="text-2xl">ðŸ§¾</div>
                 <div className="mt-2 text-2xl font-black text-slate-950">{contractCount}</div>
                 <div className="text-xs font-semibold text-slate-500">contratos</div>
               </div>
               <div className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-sm">
-                <div className="text-2xl">🛠️</div>
+                <div className="text-2xl">ðŸ› ️</div>
                 <div className="mt-2 text-2xl font-black text-slate-950">{maintenanceCount}</div>
                 <div className="text-xs font-semibold text-slate-500">mantenimientos</div>
               </div>
@@ -682,7 +682,7 @@ export default async function StaffMasterCalendarPage({
                 <div className="text-sm font-black uppercase tracking-wide text-slate-500">Próximas señales</div>
                 <div className="mt-1 text-xs text-slate-500">{highPriorityCount} evento(s) de prioridad alta</div>
               </div>
-              <div className="text-4xl">🌈</div>
+              <div className="text-4xl">ðŸŒˆ</div>
             </div>
             <div className="mt-4 space-y-2">
               {nextHighlights.length > 0 ? (
@@ -720,7 +720,7 @@ export default async function StaffMasterCalendarPage({
             <input name="event_date" type="date" className="ui-input" required />
           </label>
           <label className="space-y-1">
-            <span className="ui-label">Titulo</span>
+            <span className="ui-label">Título</span>
             <input name="title" className="ui-input" placeholder="Dia de la Madre - Cucuta" required />
           </label>
           <label className="space-y-1">
