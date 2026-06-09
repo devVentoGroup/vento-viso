@@ -2044,26 +2044,54 @@ export default async function MenuItemDetailPage({
     }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
 
-  const passModalEnabled = Boolean(presentation?.opens_detail_modal) || optionGroups.length > 0;
-  const activeOptionCount = ((optionOptionsRaw ?? []) as CatalogItemOptionRow[]).filter((option) => option.is_active).length;
-  const defaultSelectedOptions = optionGroups.flatMap((group) =>
-    (optionsByGroup.get(group.id) ?? []).filter((option) => option.is_default && option.is_active),
-  );
-  const previewTotalAmount = Number(row.price_amount ?? 0) + defaultSelectedOptions.reduce((sum, option) => {
-    const parsed = Number(option.price_delta_amount ?? 0);
-    return sum + (Number.isFinite(parsed) ? parsed : 0);
-  }, 0);
-  const readinessChecks = [
-    { label: "Publicado en Pass", ok: row.is_active },
-    { label: "Producto core asociado", ok: Boolean(row.product_id) },
-    { label: "Imagen comercial", ok: Boolean(row.image_url) },
-    { label: "Descripción clara", ok: Boolean(row.description?.trim()) },
-    { label: "Precio configurado", ok: Number(row.price_amount) > 0 },
-    { label: "Modalidades de venta", ok: (row.fulfillment_modes ?? []).length > 0 },
-    { label: "Opciones listas", ok: optionGroups.length === 0 || activeOptionCount > 0 },
-    { label: "Receta operativa", ok: recipeIngredients.length > 0 },
+  const visibleOptionGroups = optionGroups.filter((group) => group.is_active);
+  const visibleOptionGroupIds = new Set(visibleOptionGroups.map((group) => group.id));
+  const activeOptionCount = ((optionOptionsRaw ?? []) as CatalogItemOptionRow[]).filter(
+    (option) => option.is_active && visibleOptionGroupIds.has(option.option_group_id),
+  ).length;
+  const passModalEnabled = Boolean(presentation?.opens_detail_modal) || visibleOptionGroups.length > 0;
+  const personalizationTypeCards: {
+    kind: SimpleGroupKind;
+    label: string;
+    defaultName: string;
+    description: string;
+    maxSelect?: string;
+  }[] = [
+    {
+      kind: "recommendations",
+      label: "Producto",
+      defaultName: "Productos recomendados",
+      description: "Productos existentes que el cliente puede agregar a este item.",
+      maxSelect: "10",
+    },
+    {
+      kind: "choice",
+      label: "Tamaño o cantidad",
+      defaultName: "Elige una opción",
+      description: "Tamaños, cantidades, bases o acompañamientos obligatorios.",
+    },
+    {
+      kind: "removals",
+      label: "Ingredientes",
+      defaultName: "Ingredientes",
+      description: "Ingredientes que el cliente puede pedir retirar o ajustar.",
+      maxSelect: "99",
+    },
+    {
+      kind: "extras",
+      label: "Extras",
+      defaultName: "Extras",
+      description: "Adiciones con o sin precio adicional.",
+      maxSelect: "10",
+    },
+    {
+      kind: "preferences",
+      label: "Preferencias",
+      defaultName: "Preferencias",
+      description: "Indicaciones de preparación sin descuento de inventario.",
+      maxSelect: "10",
+    },
   ];
-  const readyCount = readinessChecks.filter((check) => check.ok).length;
 
   return (
     <div className="space-y-6">
@@ -2076,960 +2104,515 @@ export default async function MenuItemDetailPage({
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="space-y-6">
-          <div className="ui-panel space-y-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="ui-h3">1. Venta y publicación</div>
-                <p className="ui-caption">
-                  Primero deja claro qué compra el cliente: nombre, precio, foto, categoría y disponibilidad.
-                </p>
-              </div>
+      <nav className="flex flex-wrap gap-2 rounded-3xl border border-[var(--ui-border)] bg-white p-2 shadow-[var(--ui-shadow-1)]">
+        <a href="#producto-comercial" className="ui-btn ui-btn--ghost">Producto</a>
+        <a href="#personalizaciones" className="ui-btn ui-btn--ghost">Personalizaciones</a>
+        {recipeIngredients.length > 0 ? (
+          <a href="#receta-inventario" className="ui-btn ui-btn--ghost">Receta / Inventario</a>
+        ) : null}
+      </nav>
 
-              <div className="flex flex-wrap gap-2">
-                <span className={`ui-chip ${row.is_active ? "ui-chip--success" : ""}`}>
-                  {row.is_active ? "Publicado" : "Oculto"}
-                </span>
-                <span className="ui-chip">{parsePassCardLayout(presentation?.card_layout) === "featured" ? "Tarjeta destacada" : "Tarjeta compacta"}</span>
-              </div>
-            </div>
-
-            <MenuItemForm
-              mode="edit"
-              action={updateMenuItem}
-              sites={sites ?? []}
-              products={products}
-              categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
-              collections={(collectionsRaw ?? []) as CommercialCollectionRow[]}
-              initial={{
-                id: row.id,
-                code: row.code,
-                name: row.name,
-                description: row.description ?? "",
-                product_id: row.product_id ?? "",
-                price_amount: String(row.price_amount ?? 0),
-                compare_at_amount: row.compare_at_amount == null ? "" : String(row.compare_at_amount),
-                sort_order: String(row.sort_order ?? 0),
-                is_active: row.is_active,
-                is_featured: row.is_featured,
-                site_id: row.site_id,
-                commercial_collection_id: row.commercial_collection_id ?? "",
-                commercial_category_id: row.commercial_category_id ?? "",
-                category_label: row.category_label ?? "",
-                image_url: row.image_url ?? "",
-                badges_csv: (row.badges ?? []).join(", "),
-                fulfillment_delivery: (row.fulfillment_modes ?? []).includes("delivery"),
-                fulfillment_pickup: (row.fulfillment_modes ?? []).includes("pickup"),
-                fulfillment_on_premise: (row.fulfillment_modes ?? []).includes("on_premise"),
-                metadata_extra: Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : "",
-                pass_card_layout: parsePassCardLayout(presentation?.card_layout),
-                opens_detail_modal: Boolean(presentation?.opens_detail_modal),
-              }}
-            />
-          </div>
-        </div>
-
-        <aside className="xl:sticky xl:top-6 xl:self-start">
-          <div className="ui-panel space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="ui-h3">Resumen de preparación</div>
-                <p className="ui-caption">Una lectura rápida de si el producto está listo para vender y operar.</p>
-              </div>
-              <span className={`ui-chip ${passModalEnabled ? "ui-chip--success" : ""}`}>
-                {passModalEnabled ? "Modal activo" : "Agregado directo"}
-              </span>
-            </div>
-
-            <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <div className="text-3xl font-black text-[var(--ui-text)]">{readyCount}/{readinessChecks.length}</div>
-                  <div className="ui-caption">puntos completos</div>
-                </div>
-                <div className={`ui-chip ${readyCount >= readinessChecks.length - 1 ? "ui-chip--success" : ""}`}>
-                  {readyCount >= readinessChecks.length - 1 ? "Casi listo" : "Faltan ajustes"}
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-2">
-                {readinessChecks.map((check) => (
-                  <div key={check.label} className="flex items-center justify-between gap-3 rounded-2xl bg-white px-3 py-2">
-                    <span className="text-sm font-bold text-[var(--ui-text)]">{check.label}</span>
-                    <span className={`text-xs font-black ${check.ok ? "text-emerald-700" : "text-amber-700"}`}>
-                      {check.ok ? "Listo" : "Revisar"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                <div className="text-lg font-black text-[var(--ui-text)]">{optionGroups.length}</div>
-                <div className="ui-caption">grupos</div>
-              </div>
-              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                <div className="text-lg font-black text-[var(--ui-text)]">{activeOptionCount}</div>
-                <div className="ui-caption">opciones</div>
-              </div>
-              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                <div className="text-lg font-black text-[var(--ui-text)]">{recipeIngredients.length}</div>
-                <div className="ui-caption">receta</div>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-[var(--ui-border)] bg-white p-4">
-              <div className="text-sm font-black text-[var(--ui-text)]">Cómo fluye después</div>
-              <div className="mt-3 space-y-3">
-                <div className="rounded-2xl bg-[var(--ui-surface-2)] p-3">
-                  <div className="text-sm font-black text-[var(--ui-text)]">Pass</div>
-                  <p className="ui-caption mt-1">
-                    {passModalEnabled
-                      ? "El cliente abre modal, elige opciones y agrega una variante al carrito."
-                      : "El cliente agrega el producto directo al carrito."}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-[var(--ui-surface-2)] p-3">
-                  <div className="text-sm font-black text-[var(--ui-text)]">Pulso</div>
-                  <p className="ui-caption mt-1">
-                    {activeOptionCount > 0
-                      ? "Operación verá cantidades, notas y opciones estructuradas por item."
-                      : "Operación verá el item simple con sus notas de pedido."}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-[var(--ui-surface-2)] p-3">
-                  <div className="text-sm font-black text-[var(--ui-text)]">Inventario</div>
-                  <p className="ui-caption mt-1">
-                    {recipeIngredients.length > 0
-                      ? "Tiene receta base para conectar consumos y opciones removibles."
-                      : "Todavía no tiene receta activa para consumo automático."}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </aside>
-      </div>
-
-
-      <div className="ui-panel space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="ui-h3">2. Modal de compra en Pass</div>
-            <p className="ui-caption">
-              Configura una experiencia simple: primero mira lo que verá el cliente, después agrega bloques y deja el inventario como ajuste avanzado.
-            </p>
+      <div id="producto-comercial" className="ui-panel space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="ui-h3">1. Producto</div>
+            <p className="ui-caption">Datos comerciales que ve el cliente en Pass.</p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <span className="ui-chip ui-chip--brand">{optionGroups.length} bloque{optionGroups.length === 1 ? "" : "s"}</span>
-            <span className="ui-chip">{activeOptionCount} opción{activeOptionCount === 1 ? "" : "es"}</span>
+            <span className={`ui-chip ${row.is_active ? "ui-chip--success" : ""}`}>
+              {row.is_active ? "Publicado" : "Oculto"}
+            </span>
             <span className={`ui-chip ${passModalEnabled ? "ui-chip--success" : ""}`}>
-              {passModalEnabled ? "Modal activo" : "Compra directa"}
+              {passModalEnabled ? "Con personalizaciones" : "Compra directa"}
             </span>
           </div>
         </div>
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="overflow-hidden rounded-[34px] border border-[var(--ui-border)] bg-[#FFFDF7] shadow-[var(--ui-shadow-2)]">
-            <div className="grid lg:grid-cols-[300px_minmax(0,1fr)]">
-              <div className="relative min-h-80 bg-[var(--ui-surface-2)]">
-                {row.image_url ? (
-                  <img src={row.image_url} alt={row.name} className="h-full min-h-80 w-full object-cover" />
-                ) : (
-                  <div className="flex h-full min-h-80 items-center justify-center text-sm font-black text-[var(--ui-muted)]">
-                    Sin imagen comercial
-                  </div>
-                )}
-                <div className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-black text-[var(--ui-text)] shadow">
-                  Vista cliente
-                </div>
-                <div className="absolute bottom-4 left-4 right-4 rounded-3xl bg-white/95 p-4 shadow-[var(--ui-shadow-1)]">
-                  <div className="text-xs font-black uppercase tracking-wide text-[var(--ui-muted)]">Producto base</div>
-                  <div className="mt-1 truncate text-lg font-black text-[var(--ui-text)]">{row.name}</div>
-                  <div className="mt-1 text-sm font-black text-[var(--ui-brand)]">{formatCopAdmin(row.price_amount)}</div>
-                </div>
-              </div>
+        <MenuItemForm
+          mode="edit"
+          action={updateMenuItem}
+          sites={sites ?? []}
+          products={products}
+          categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
+          collections={(collectionsRaw ?? []) as CommercialCollectionRow[]}
+          initial={{
+            id: row.id,
+            code: row.code,
+            name: row.name,
+            description: row.description ?? "",
+            product_id: row.product_id ?? "",
+            price_amount: String(row.price_amount ?? 0),
+            compare_at_amount: row.compare_at_amount == null ? "" : String(row.compare_at_amount),
+            sort_order: String(row.sort_order ?? 0),
+            is_active: row.is_active,
+            is_featured: row.is_featured,
+            site_id: row.site_id,
+            commercial_collection_id: row.commercial_collection_id ?? "",
+            commercial_category_id: row.commercial_category_id ?? "",
+            category_label: row.category_label ?? "",
+            image_url: row.image_url ?? "",
+            badges_csv: (row.badges ?? []).join(", "),
+            fulfillment_delivery: (row.fulfillment_modes ?? []).includes("delivery"),
+            fulfillment_pickup: (row.fulfillment_modes ?? []).includes("pickup"),
+            fulfillment_on_premise: (row.fulfillment_modes ?? []).includes("on_premise"),
+            metadata_extra: Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : "",
+            pass_card_layout: parsePassCardLayout(presentation?.card_layout),
+            opens_detail_modal: Boolean(presentation?.opens_detail_modal),
+          }}
+        />
+      </div>
 
-              <div className="space-y-5 p-5 sm:p-6">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-2xl font-black leading-tight text-[var(--ui-text)]">{row.name}</div>
-                    <p className="mt-2 max-w-2xl text-sm font-semibold leading-5 text-[var(--ui-muted)]">
-                      {row.description || "Agrega una descripción para que el cliente entienda rápido qué está comprando."}
-                    </p>
-                  </div>
-                  <div className="shrink-0 rounded-2xl bg-white px-4 py-3 text-right shadow-[var(--ui-shadow-1)]">
-                    <div className="text-xl font-black text-[var(--ui-text)]">{formatCopAdmin(row.price_amount)}</div>
-                    {defaultSelectedOptions.length > 0 ? (
-                      <div className="ui-caption">con defaults: {formatCopAdmin(previewTotalAmount)}</div>
-                    ) : (
-                      <div className="ui-caption">precio base</div>
-                    )}
-                  </div>
-                </div>
-
-                {optionGroups.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-[var(--ui-border)] bg-white p-5">
-                    <div className="text-sm font-black text-[var(--ui-text)]">El modal todavía está vacío.</div>
-                    <p className="ui-caption mt-1">Agrega el primer bloque abajo. Aquí aparecerá exactamente como lo entiende el cliente.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {optionGroups.map((group, index) => {
-                      const groupOptions = (optionsByGroup.get(group.id) ?? []).filter((option) => option.is_active);
-                      const groupKind = getSimpleGroupKind(group);
-
-                      return (
-                        <div key={group.id} className="rounded-3xl border border-[var(--ui-border)] bg-white p-4 shadow-[var(--ui-shadow-1)]">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-brand)] text-xs font-black text-white">
-                                  {index + 1}
-                                </span>
-                                <div className="truncate text-sm font-black text-[var(--ui-text)]">{group.name}</div>
-                              </div>
-                              <div className="ui-caption mt-1 pl-9">{getSelectionRuleLabel(group)}</div>
-                            </div>
-                            <span className="ui-chip">{getSimpleGroupLabel(groupKind)}</span>
-                          </div>
-
-                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                            {groupOptions.slice(0, 6).map((option) => {
-                              const optionName = getOptionDisplayName(option, commercialCatalogItemsById);
-                              const optionMeta = getOptionDisplayCategory(option, commercialCatalogItemsById);
-                              const price = Number(option.price_delta_amount ?? 0);
-
-                              return (
-                                <div key={option.id} className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
-                                  <div className="min-w-0">
-                                    <div className="truncate text-sm font-bold text-[var(--ui-text)]">{optionName}</div>
-                                    {optionMeta ? <div className="ui-caption truncate">{optionMeta}</div> : null}
-                                  </div>
-                                  <div className="shrink-0 text-xs font-black text-[var(--ui-text)]">
-                                    {price > 0 ? `+ ${formatCopAdmin(price)}` : "Incluido"}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                            {groupOptions.length > 6 ? (
-                              <div className="ui-caption rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                                + {groupOptions.length - 6} opción{groupOptions.length - 6 === 1 ? "" : "es"} más
-                              </div>
-                            ) : null}
-                            {groupOptions.length === 0 ? (
-                              <div className="ui-caption rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                                Este bloque no tiene opciones visibles.
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <div className="rounded-full bg-[var(--ui-brand)] px-4 py-3 text-center text-sm font-black text-white">
-                  Agregar · {formatCopAdmin(previewTotalAmount)}
-                </div>
-              </div>
-            </div>
+      <div id="personalizaciones" className="ui-panel space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="ui-h3">2. Personalizaciones</div>
+            <p className="ui-caption">Crea preguntas y opciones. El inventario se configura solo dentro de la opción que lo necesite.</p>
           </div>
 
-          <div className="space-y-4">
-            <div className="rounded-3xl border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]">
-              <div className="text-sm font-black uppercase tracking-wide text-[var(--ui-muted)]">Mapa mental</div>
-              <div className="mt-4 space-y-3">
-                <div className="flex gap-3 rounded-2xl bg-[var(--ui-surface-2)] p-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-sm font-black text-[var(--ui-brand)]">1</div>
-                  <div>
-                    <div className="text-sm font-black text-[var(--ui-text)]">Bloque</div>
-                    <p className="ui-caption mt-1">Una pregunta o sección del modal.</p>
-                  </div>
-                </div>
-                <div className="flex gap-3 rounded-2xl bg-[var(--ui-surface-2)] p-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-sm font-black text-[var(--ui-brand)]">2</div>
-                  <div>
-                    <div className="text-sm font-black text-[var(--ui-text)]">Opciones</div>
-                    <p className="ui-caption mt-1">Lo que el cliente toca dentro del bloque.</p>
-                  </div>
-                </div>
-                <div className="flex gap-3 rounded-2xl bg-[var(--ui-surface-2)] p-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-sm font-black text-[var(--ui-brand)]">3</div>
-                  <div>
-                    <div className="text-sm font-black text-[var(--ui-text)]">Operación</div>
-                    <p className="ui-caption mt-1">Inventario y receta solo se abren cuando una opción lo necesita.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
-              <div className="text-sm font-black text-[var(--ui-text)]">Lectura rápida</div>
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <div className="rounded-2xl bg-white p-3 text-center">
-                  <div className="text-xl font-black text-[var(--ui-text)]">{optionGroups.length}</div>
-                  <div className="ui-caption">bloques</div>
-                </div>
-                <div className="rounded-2xl bg-white p-3 text-center">
-                  <div className="text-xl font-black text-[var(--ui-text)]">{activeOptionCount}</div>
-                  <div className="ui-caption">opciones</div>
-                </div>
-                <div className="rounded-2xl bg-white p-3 text-center">
-                  <div className="text-xl font-black text-[var(--ui-text)]">{recipeIngredients.length}</div>
-                  <div className="ui-caption">insumos</div>
-                </div>
-              </div>
-            </div>
+          <div className="flex flex-wrap gap-2">
+            <span className="ui-chip ui-chip--brand">{visibleOptionGroups.length} personalización{visibleOptionGroups.length === 1 ? "" : "es"}</span>
+            <span className="ui-chip">{activeOptionCount} opción{activeOptionCount === 1 ? "" : "es"}</span>
           </div>
         </div>
 
-        <details className="rounded-[32px] border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]" open={optionGroups.length === 0}>
+        <details className="rounded-[28px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4" open={visibleOptionGroups.length === 0}>
           <summary className="cursor-pointer list-none">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-lg font-black text-[var(--ui-text)]">Agregar un bloque al modal</div>
-                <p className="ui-caption mt-1">Escoge qué tipo de decisión verá el cliente. Cada tarjeta crea una sección completa.</p>
-              </div>
-              <span className="ui-btn ui-btn--ghost">Abrir constructor</span>
+              <div className="text-base font-black text-[var(--ui-text)]">+ Agregar personalización</div>
+              <span className="ui-chip">Producto · Tamaño · Ingredientes · Extras · Preferencias</span>
             </div>
           </summary>
 
-          <div className="mt-5 grid gap-4 xl:grid-cols-5 lg:grid-cols-2">
-            <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)]">
-              <input type="hidden" name="catalog_item_id" value={row.id} />
-              <input type="hidden" name="group_kind" value="choice" />
+          <div className="mt-4 grid gap-3 md:grid-cols-5">
+            {personalizationTypeCards.map((type) => (
+              <form key={type.kind} action={createOptionGroup}>
+                <input type="hidden" name="catalog_item_id" value={row.id} />
+                <input type="hidden" name="group_kind" value={type.kind} />
+                <input type="hidden" name="name" value={type.defaultName} />
+                <input type="hidden" name="description" value={type.description} />
+                {type.maxSelect ? <input type="hidden" name="max_select" value={type.maxSelect} /> : null}
 
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-lg font-black text-[var(--ui-brand)]">?</div>
-              <div className="mt-3 text-base font-black text-[var(--ui-text)]">Elección obligatoria</div>
-              <p className="ui-caption mt-1">Tamaño, bebida, base o acompañamiento que debe escoger.</p>
-
-              <label className="mt-4 block space-y-2">
-                <span className="ui-label">Pregunta</span>
-                <input name="name" className="ui-input" placeholder="Ej. Elige tu bebida" required />
-              </label>
-
-              <label className="mt-3 block space-y-2">
-                <span className="ui-label">Ayuda</span>
-                <input name="description" className="ui-input" placeholder="Ej. Escoge una bebida." />
-              </label>
-
-              <button type="submit" className="ui-btn ui-btn--brand mt-4 w-full">Crear</button>
-            </form>
-
-            <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)]">
-              <input type="hidden" name="catalog_item_id" value={row.id} />
-              <input type="hidden" name="group_kind" value="extras" />
-
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-lg font-black text-[var(--ui-brand)]">+</div>
-              <div className="mt-3 text-base font-black text-[var(--ui-text)]">Extra con precio</div>
-              <p className="ui-caption mt-1">Queso, salsas, shot adicional, topping o leche vegetal.</p>
-
-              <label className="mt-4 block space-y-2">
-                <span className="ui-label">Nombre del bloque</span>
-                <input name="name" className="ui-input" placeholder="Ej. Adiciones" required />
-              </label>
-
-              <label className="mt-3 block space-y-2">
-                <span className="ui-label">Máximo</span>
-                <input name="max_select" type="number" min="1" className="ui-input" defaultValue="10" />
-              </label>
-
-              <button type="submit" className="ui-btn ui-btn--brand mt-4 w-full">Crear</button>
-            </form>
-
-            <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)]">
-              <input type="hidden" name="catalog_item_id" value={row.id} />
-              <input type="hidden" name="group_kind" value="removals" />
-
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-lg font-black text-[var(--ui-brand)]">-</div>
-              <div className="mt-3 text-base font-black text-[var(--ui-text)]">Quitar ingrediente</div>
-              <p className="ui-caption mt-1">Para “sin cebolla”, “sin tomate” o retiros manuales.</p>
-
-              <label className="mt-4 block space-y-2">
-                <span className="ui-label">Nombre del bloque</span>
-                <input name="name" className="ui-input" placeholder="Ej. Quitar ingredientes" required />
-              </label>
-
-              <label className="mt-3 block space-y-2">
-                <span className="ui-label">Máximo</span>
-                <input name="max_select" type="number" min="1" className="ui-input" defaultValue="99" />
-              </label>
-
-              <button type="submit" className="ui-btn ui-btn--brand mt-4 w-full">Crear</button>
-            </form>
-
-            <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)]">
-              <input type="hidden" name="catalog_item_id" value={row.id} />
-              <input type="hidden" name="group_kind" value="preferences" />
-
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-lg font-black text-[var(--ui-brand)]">Aa</div>
-              <div className="mt-3 text-base font-black text-[var(--ui-text)]">Preferencia</div>
-              <p className="ui-caption mt-1">Sin azúcar, poca salsa, bien caliente o partir en dos.</p>
-
-              <label className="mt-4 block space-y-2">
-                <span className="ui-label">Nombre del bloque</span>
-                <input name="name" className="ui-input" placeholder="Ej. Preferencias" required />
-              </label>
-
-              <button type="submit" className="ui-btn ui-btn--brand mt-4 w-full">Crear</button>
-            </form>
-
-            <form action={createOptionGroup} className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)]">
-              <input type="hidden" name="catalog_item_id" value={row.id} />
-              <input type="hidden" name="group_kind" value="recommendations" />
-
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-lg font-black text-[var(--ui-brand)]">↗</div>
-              <div className="mt-3 text-base font-black text-[var(--ui-text)]">Recomendado</div>
-              <p className="ui-caption mt-1">Bebidas, postres o productos que suben el ticket.</p>
-
-              <label className="mt-4 block space-y-2">
-                <span className="ui-label">Nombre del bloque</span>
-                <input name="name" className="ui-input" placeholder="Ej. También puedes agregar" required />
-              </label>
-
-              <button type="submit" className="ui-btn ui-btn--brand mt-4 w-full">Crear</button>
-            </form>
+                <button
+                  type="submit"
+                  className="flex min-h-24 w-full flex-col justify-between rounded-2xl border border-[var(--ui-border)] bg-white p-4 text-left shadow-[var(--ui-shadow-1)] transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)]"
+                >
+                  <span className="text-base font-black text-[var(--ui-brand)]">{type.label}</span>
+                  <span className="mt-2 text-xs font-semibold leading-4 text-[var(--ui-muted)]">{type.description}</span>
+                </button>
+              </form>
+            ))}
           </div>
         </details>
 
-        <details className="rounded-[32px] border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)]" open={recipeIngredients.length > 0 && optionGroups.length === 0}>
-          <summary className="cursor-pointer list-none">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-lg font-black text-[var(--ui-text)]">Atajo desde receta</div>
-                <p className="ui-caption mt-1">Convierte ingredientes reales en opciones “Sin X” sin armar todo manualmente.</p>
-              </div>
-              <span className={`ui-chip ${recipeIngredients.length > 0 ? "ui-chip--success" : ""}`}>
-                {recipeIngredients.length > 0 ? `${recipeIngredients.length} ingrediente${recipeIngredients.length === 1 ? "" : "s"}` : "Sin receta"}
-              </span>
-            </div>
-          </summary>
-
-          {recipeIngredients.length > 0 ? (
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {recipeIngredients.map((ingredient) => {
-                const product = ingredient.product;
-                if (!product) return null;
-
-                return (
-                  <form
-                    key={ingredient.id}
-                    action={createRemovalOptionFromRecipe}
-                    className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3"
-                  >
-                    <input type="hidden" name="catalog_item_id" value={row.id} />
-                    <input type="hidden" name="ingredient_product_id" value={ingredient.ingredient_product_id} />
-                    <input type="hidden" name="ingredient_name" value={product.name ?? "Ingrediente"} />
-                    <input type="hidden" name="stock_unit_code" value={product.stock_unit_code || product.unit || ""} />
-
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-bold text-[var(--ui-text)]">
-                        Sin {product.name ?? "Ingrediente"}
-                      </div>
-                      <div className="ui-caption">
-                        Receta: {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}
-                      </div>
-                    </div>
-
-                    <button type="submit" className="ui-btn ui-btn--ghost shrink-0">
-                      Crear
-                    </button>
-                  </form>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="mt-4 rounded-3xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
-              <div className="text-sm font-bold text-[var(--ui-text)]">Este producto no tiene receta activa.</div>
-              <p className="ui-caption mt-1">
-                Cuando tenga receta, aquí aparecerán ingredientes que se pueden convertir en opciones de retiro.
-              </p>
-            </div>
-          )}
-        </details>
-
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-lg font-black text-[var(--ui-text)]">Bloques configurados</div>
-              <p className="ui-caption mt-1">Edita la experiencia principal. Abre inventario solo cuando una opción descuente o reemplace algo.</p>
-            </div>
-            <span className="ui-chip">{optionGroups.length === 0 ? "Sin bloques" : "Orden visual del modal"}</span>
+        {visibleOptionGroups.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-[var(--ui-border)] bg-white p-6 text-center">
+            <div className="text-base font-black text-[var(--ui-text)]">Este producto todavía no tiene personalizaciones.</div>
+            <p className="ui-caption mt-1">Pulsa “Agregar personalización” y elige un tipo para empezar.</p>
           </div>
+        ) : (
+          <div className="space-y-4">
+            {visibleOptionGroups.map((group, groupIndex) => {
+              const groupOptions = optionsByGroup.get(group.id) ?? [];
+              const visibleOptions = groupOptions.filter((option) => option.is_active);
+              const groupKind = getSimpleGroupKind(group);
+              const optionEffectType = getSimpleDefaultEffect(groupKind);
+              const isMultiple = parseSelectionType(group.selection_type) === "multiple";
 
-          {optionGroups.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-[var(--ui-border)] bg-white p-6 text-center">
-              <div className="text-base font-black text-[var(--ui-text)]">Este modal todavía no tiene bloques.</div>
-              <p className="ui-caption mt-1">
-                Crea una tarjeta arriba. Después agrega opciones como “Leche de almendra”, “Queso extra” o “Sin cebolla”.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {optionGroups.map((group, groupIndex) => {
-                const groupOptions = optionsByGroup.get(group.id) ?? [];
-                const visibleOptions = groupOptions.filter((option) => option.is_active);
-                const hiddenOptionCount = groupOptions.length - visibleOptions.length;
-                const groupKind = getSimpleGroupKind(group);
-                const optionEffectType = getSimpleDefaultEffect(groupKind);
-                const isMultiple = parseSelectionType(group.selection_type) === "multiple";
-
-                return (
-                  <div key={group.id} className="overflow-hidden rounded-[32px] border border-[var(--ui-border)] bg-white shadow-[var(--ui-shadow-1)]">
-                    <div className="border-b border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
-                      <div className="flex flex-wrap items-start justify-between gap-4">
+              return (
+                <div key={group.id} className="overflow-hidden rounded-[30px] border border-[var(--ui-border)] bg-white shadow-[var(--ui-shadow-1)]">
+                  <div className="border-b border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-5 py-4">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--ui-brand)] text-sm font-black text-white">
+                          {groupIndex + 1}
+                        </span>
                         <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ui-brand)] text-sm font-black text-white">
-                              {groupIndex + 1}
-                            </span>
-                            <div>
-                              <div className="text-lg font-black text-[var(--ui-text)]">{group.name}</div>
-                              <p className="ui-caption mt-1">{getSimpleGroupHelp(groupKind)}</p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <span className="ui-chip">{getSimpleGroupLabel(groupKind)}</span>
-                          <span className="ui-chip">{group.is_required ? "Obligatorio" : "Opcional"}</span>
-                          <span className="ui-chip">{isMultiple ? `Máximo ${group.max_select}` : "Una opción"}</span>
-                          <span className={`ui-chip ${group.is_active ? "ui-chip--success" : ""}`}>{group.is_active ? "Visible" : "Oculto"}</span>
+                          <div className="truncate text-lg font-black text-[var(--ui-text)]">{group.name}</div>
+                          <div className="ui-caption mt-1" title={getSimpleGroupHelp(groupKind)}>{getSimpleGroupLabel(groupKind)}</div>
                         </div>
                       </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="ui-chip">Selección: {isMultiple ? "Múltiple" : "Única"}</span>
+                        <span className="ui-chip" title={getSelectionRuleLabel(group)}>Requerido: {group.is_required ? "Sí" : "No"}</span>
+                        <form action={disableOptionGroup}>
+                          <input type="hidden" name="catalog_item_id" value={row.id} />
+                          <input type="hidden" name="option_group_id" value={group.id} />
+                          <button type="submit" className="ui-btn ui-btn--danger">
+                            Eliminar
+                          </button>
+                        </form>
+                      </div>
                     </div>
+                  </div>
 
-                    <div className="grid gap-5 p-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-                      <div className="space-y-4">
-                        <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-black text-[var(--ui-text)]">Opciones que verá el cliente</div>
-                              <p className="ui-caption mt-1">
-                                {visibleOptions.length > 0
-                                  ? `${visibleOptions.length} opción${visibleOptions.length === 1 ? "" : "es"} visible${visibleOptions.length === 1 ? "" : "s"}`
-                                  : "Este bloque todavía no tiene opciones visibles."}
-                                {hiddenOptionCount > 0 ? ` · ${hiddenOptionCount} oculta${hiddenOptionCount === 1 ? "" : "s"}` : ""}
-                              </p>
-                            </div>
-                            <span className="ui-chip">{getSelectionRuleLabel(group)}</span>
-                          </div>
+                  <div className="divide-y divide-[var(--ui-border)]">
+                    <details className="px-5 py-4">
+                      <summary className="cursor-pointer list-none text-sm font-black text-[var(--ui-brand)]">
+                        Editar nombre y reglas
+                      </summary>
 
-                          {groupOptions.length === 0 ? (
-                            <div className="mt-4 rounded-2xl border border-dashed border-[var(--ui-border)] bg-white p-4">
-                              <div className="text-sm font-black text-[var(--ui-text)]">Agrega la primera opción.</div>
-                              <p className="ui-caption mt-1">Ejemplo: leche de almendra, queso extra, sin cebolla o brownie recomendado.</p>
-                            </div>
-                          ) : (
-                            <div className="mt-4 space-y-3">
-                              {groupOptions.map((option) => {
-                                const consumptionRules = consumptionRulesByOption.get(option.id) ?? [];
-                                const recipeEffects = recipeEffectsByOption.get(option.id) ?? [];
-                                const currentEffectType = parseOptionEffectType(option.effect_type);
-                                const optionFormId = `option-form-${option.id}`;
-                                const optionName = getOptionDisplayName(option, commercialCatalogItemsById);
-                                const optionMeta = getOptionDisplayCategory(option, commercialCatalogItemsById);
-                                const hasOperationalRules = consumptionRules.length > 0 || recipeEffects.length > 0;
+                      <form action={updateOptionGroup} className="mt-4 space-y-4 rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                        <input type="hidden" name="catalog_item_id" value={row.id} />
+                        <input type="hidden" name="option_group_id" value={group.id} />
+                        <input type="hidden" name="code" value={group.code} />
+                        <input type="hidden" name="sort_order" value={String(group.sort_order ?? 0)} />
+                        <input type="hidden" name="is_active" value="true" />
 
-                                return (
-                                  <div key={option.id} className="rounded-3xl border border-[var(--ui-border)] bg-white p-4">
-                                    <div className="flex flex-wrap items-start justify-between gap-4">
-                                      <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <div className="text-base font-black text-[var(--ui-text)]">{optionName}</div>
-                                          {option.is_default ? <span className="ui-chip ui-chip--success">Default</span> : null}
-                                          {!option.is_active ? <span className="ui-chip">Oculta</span> : null}
-                                        </div>
-                                        <p className="ui-caption mt-1">
-                                          {optionMeta || getEffectTypeLabel(option.effect_type)}
-                                        </p>
-                                      </div>
+                        <div className="grid gap-3 lg:grid-cols-[1fr_180px_120px_120px]">
+                          <label className="space-y-2">
+                            <span className="ui-label">Nombre de la personalización</span>
+                            <input name="name" className="ui-input" defaultValue={group.name} required />
+                          </label>
 
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <span className="ui-chip">{getOptionSummary(option)}</span>
-                                        <span className={`ui-chip ${hasOperationalRules ? "ui-chip--success" : ""}`}>
-                                          {hasOperationalRules ? "Operación lista" : "Sin regla operativa"}
-                                        </span>
-                                      </div>
-                                    </div>
+                          <label className="space-y-2">
+                            <span className="ui-label">Selección</span>
+                            <select name="selection_type" className="ui-input" defaultValue={group.selection_type}>
+                              <option value="single">Única</option>
+                              <option value="multiple">Múltiple</option>
+                            </select>
+                          </label>
 
-                                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                                      <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
-                                        <summary className="cursor-pointer text-sm font-black text-[var(--ui-text)]">
-                                          Editar opción visible
-                                        </summary>
+                          <label className="space-y-2">
+                            <span className="ui-label">Mínimo</span>
+                            <input name="min_select" type="number" min="0" className="ui-input" defaultValue={String(group.min_select ?? 0)} />
+                          </label>
 
-                                        <form id={optionFormId} action={updateOption} className="mt-4 space-y-4">
-                                          <input type="hidden" name="catalog_item_id" value={row.id} />
-                                          <input type="hidden" name="option_group_id" value={group.id} />
-                                          <input type="hidden" name="option_id" value={option.id} />
-                                          <input type="hidden" name="effect_type" value={currentEffectType} />
-                                          <input type="hidden" name="code" value={option.code} />
-                                          <input type="hidden" name="sort_order" value={String(option.sort_order ?? 0)} />
+                          <label className="space-y-2">
+                            <span className="ui-label">Máximo</span>
+                            <input name="max_select" type="number" min="1" className="ui-input" defaultValue={String(group.max_select ?? 1)} />
+                          </label>
+                        </div>
 
-                                          <div className="grid gap-3 lg:grid-cols-[1fr_150px]">
-                                            <label className="space-y-2">
-                                              <span className="ui-label">Nombre</span>
-                                              <input name="name" className="ui-input" defaultValue={option.name} required />
-                                            </label>
+                        <label className="block space-y-2">
+                          <span className="ui-label">Texto de ayuda</span>
+                          <input name="description" className="ui-input" defaultValue={group.description ?? ""} />
+                        </label>
 
-                                            <label className="space-y-2">
-                                              <span className="ui-label">Valor adicional</span>
-                                              <input
-                                                name="price_delta_amount"
-                                                type="number"
-                                                min="0"
-                                                className="ui-input"
-                                                defaultValue={String(option.price_delta_amount ?? 0)}
-                                              />
-                                            </label>
-                                          </div>
+                        <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                          <input type="checkbox" name="is_required" defaultChecked={group.is_required} />
+                          Requerido para comprar
+                        </label>
 
-                                          <label className="block space-y-2">
-                                            <span className="ui-label">Descripción para el cliente</span>
-                                            <input name="description" className="ui-input" defaultValue={option.description ?? ""} />
+                        <div className="flex justify-end">
+                          <button type="submit" className="ui-btn ui-btn--brand">Guardar</button>
+                        </div>
+                      </form>
+                    </details>
+
+                    {visibleOptions.length === 0 ? (
+                      <div className="px-5 py-5">
+                        <div className="rounded-3xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5 text-center">
+                          <div className="text-sm font-black text-[var(--ui-text)]">Aún no tiene opciones.</div>
+                          <p className="ui-caption mt-1">Agrega la primera opción abajo.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-[var(--ui-border)]">
+                        {visibleOptions.map((option) => {
+                          const consumptionRules = consumptionRulesByOption.get(option.id) ?? [];
+                          const recipeEffects = recipeEffectsByOption.get(option.id) ?? [];
+                          const currentEffectType = parseOptionEffectType(option.effect_type);
+                          const optionName = getOptionDisplayName(option, commercialCatalogItemsById);
+                          const optionMeta = getOptionDisplayCategory(option, commercialCatalogItemsById);
+                          const optionPrice = Number(option.price_delta_amount ?? 0);
+                          const hasOperationalRules = consumptionRules.length > 0 || recipeEffects.length > 0;
+
+                          return (
+                            <div key={option.id} className="px-5 py-4">
+                              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_150px_auto] lg:items-center">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="truncate text-base font-black text-[var(--ui-text)]">{optionName}</div>
+                                    {option.is_default ? <span className="ui-chip ui-chip--success">Default</span> : null}
+                                  </div>
+                                  {optionMeta ? <div className="ui-caption mt-1 truncate">{optionMeta}</div> : null}
+                                </div>
+
+                                <div className="rounded-2xl bg-[var(--ui-surface-2)] px-3 py-2 text-sm font-black text-[var(--ui-text)]" title={getOptionSummary(option)}>
+                                  {optionPrice > 0 ? `+ ${formatCopAdmin(optionPrice)}` : "+ $0"}
+                                </div>
+
+                                <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
+                                  <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                    <summary className="cursor-pointer list-none text-sm font-black text-[var(--ui-text)]">Editar</summary>
+
+                                    <form action={updateOption} className="mt-4 w-full min-w-[280px] space-y-3">
+                                      <input type="hidden" name="catalog_item_id" value={row.id} />
+                                      <input type="hidden" name="option_group_id" value={group.id} />
+                                      <input type="hidden" name="option_id" value={option.id} />
+                                      <input type="hidden" name="effect_type" value={currentEffectType} />
+                                      <input type="hidden" name="code" value={option.code} />
+                                      <input type="hidden" name="sort_order" value={String(option.sort_order ?? 0)} />
+                                      <input type="hidden" name="is_active" value="true" />
+
+                                      <label className="space-y-2">
+                                        <span className="ui-label">Nombre</span>
+                                        <input name="name" className="ui-input" defaultValue={option.name} required />
+                                      </label>
+
+                                      <label className="space-y-2">
+                                        <span className="ui-label">Precio adicional</span>
+                                        <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue={String(option.price_delta_amount ?? 0)} />
+                                      </label>
+
+                                      <label className="space-y-2">
+                                        <span className="ui-label">Descripción</span>
+                                        <input name="description" className="ui-input" defaultValue={option.description ?? ""} />
+                                      </label>
+
+                                      <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                                        <input type="checkbox" name="is_default" defaultChecked={option.is_default} />
+                                        Por defecto
+                                      </label>
+
+                                      <button type="submit" className="ui-btn ui-btn--brand w-full">Guardar opción</button>
+                                    </form>
+                                  </details>
+
+                                  <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                    <summary className="cursor-pointer list-none text-sm font-black text-[var(--ui-text)]">
+                                      {hasOperationalRules ? "Inventario listo" : "Inventario"}
+                                    </summary>
+
+                                    <div className="mt-4 w-full min-w-[320px] space-y-4">
+                                      <form action={createConsumptionRule} className="space-y-3 rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                        <input type="hidden" name="catalog_item_id" value={row.id} />
+                                        <input type="hidden" name="option_id" value={option.id} />
+                                        <input type="hidden" name="is_active" value="true" />
+                                        <input type="hidden" name="effect_type" value={currentEffectType === "replacement" ? "replacement" : "additive"} />
+                                        <input type="hidden" name="name" value={`Consumo de ${option.name}`} />
+                                        <input type="hidden" name="code" value={`consumo-${option.code}`} />
+                                        <input type="hidden" name="sort_order" value="0" />
+                                        <input type="hidden" name="source_location_strategy" value="product_production_location" />
+                                        <input type="hidden" name="conversion_factor_to_stock" value="1" />
+
+                                        <div className="text-sm font-black text-[var(--ui-text)]">Descontar insumo</div>
+                                        <div className="grid gap-3 lg:grid-cols-[1fr_120px_140px]">
+                                          <label className="space-y-2">
+                                            <span className="ui-label">Insumo</span>
+                                            <select name="product_id" className="ui-input" required>
+                                              <option value="">Selecciona</option>
+                                              {consumptionProducts.map((product) => (
+                                                <option key={product.id} value={product.id}>{product.name ?? "Sin nombre"}</option>
+                                              ))}
+                                            </select>
                                           </label>
 
-                                          <div className="flex flex-wrap items-center justify-between gap-3">
-                                            <div className="flex flex-wrap gap-4">
-                                              <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                                <input type="checkbox" name="is_default" defaultChecked={option.is_default} />
-                                                Por defecto
-                                              </label>
-                                              <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                                <input type="checkbox" name="is_active" defaultChecked={option.is_active} />
-                                                Mostrar
-                                              </label>
-                                            </div>
+                                          <label className="space-y-2">
+                                            <span className="ui-label">Cantidad</span>
+                                            <input name="quantity_per_option" type="number" min="0.0001" step="0.0001" className="ui-input" required />
+                                          </label>
 
-                                            <button type="submit" className="ui-btn ui-btn--brand">
-                                              Guardar opción
-                                            </button>
-                                          </div>
-                                        </form>
-
-                                        <form action={disableOption} className="mt-3 flex justify-end">
-                                          <input type="hidden" name="catalog_item_id" value={row.id} />
-                                          <input type="hidden" name="option_group_id" value={group.id} />
-                                          <input type="hidden" name="option_id" value={option.id} />
-                                          <button type="submit" className="ui-btn ui-btn--ghost">
-                                            Ocultar opción
-                                          </button>
-                                        </form>
-                                      </details>
-
-                                      <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
-                                        <summary className="cursor-pointer text-sm font-black text-[var(--ui-text)]">
-                                          Inventario y receta
-                                        </summary>
-
-                                        <div className="mt-4 space-y-4">
-                                          <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-                                            <div className="text-sm font-bold text-[var(--ui-text)]">Descontar insumo cuando se elija</div>
-                                            <p className="ui-caption mt-1">
-                                              Para extras o sustitutos. Ejemplo: leche de almendra descuenta leche de almendra.
-                                            </p>
-
-                                            <form action={createConsumptionRule} className="mt-4 space-y-4">
-                                              <input type="hidden" name="catalog_item_id" value={row.id} />
-                                              <input type="hidden" name="option_id" value={option.id} />
-                                              <input type="hidden" name="is_active" value="true" />
-                                              <input type="hidden" name="effect_type" value={currentEffectType === "replacement" ? "replacement" : "additive"} />
-                                              <input type="hidden" name="name" value={`Consumo de ${option.name}`} />
-                                              <input type="hidden" name="code" value={`consumo-${option.code}`} />
-                                              <input type="hidden" name="sort_order" value="0" />
-                                              <input type="hidden" name="source_location_strategy" value="product_production_location" />
-                                              <input type="hidden" name="conversion_factor_to_stock" value="1" />
-
-                                              <div className="grid gap-3 lg:grid-cols-[1fr_120px_140px]">
-                                                <label className="space-y-2">
-                                                  <span className="ui-label">Insumo</span>
-                                                  <select name="product_id" className="ui-input" required>
-                                                    <option value="">Selecciona</option>
-                                                    {consumptionProducts.map((product) => (
-                                                      <option key={product.id} value={product.id}>
-                                                        {product.name ?? "Sin nombre"}
-                                                      </option>
-                                                    ))}
-                                                  </select>
-                                                </label>
-
-                                                <label className="space-y-2">
-                                                  <span className="ui-label">Cantidad</span>
-                                                  <input name="quantity_per_option" type="number" min="0.0001" step="0.0001" className="ui-input" required />
-                                                </label>
-
-                                                <label className="space-y-2">
-                                                  <span className="ui-label">Unidad</span>
-                                                  <select name="stock_unit_code" className="ui-input" defaultValue="">
-                                                    <option value="">Auto</option>
-                                                    {inventoryUnits.map((unit) => (
-                                                      <option key={unit.code} value={unit.code}>
-                                                        {unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}
-                                                      </option>
-                                                    ))}
-                                                  </select>
-                                                </label>
-                                              </div>
-
-                                              <div className="flex justify-end">
-                                                <button type="submit" className="ui-btn ui-btn--brand">
-                                                  Guardar consumo
-                                                </button>
-                                              </div>
-                                            </form>
-
-                                            {consumptionRules.length > 0 ? (
-                                              <div className="mt-4 space-y-2">
-                                                {consumptionRules.map((rule) => {
-                                                  const product = consumptionProductById.get(rule.product_id);
-
-                                                  return (
-                                                    <div key={rule.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                                                      <div className="text-sm font-semibold text-[var(--ui-text)]">
-                                                        {product?.name ?? "Insumo"} · {formatQuantityAdmin(rule.quantity_per_option)} {rule.stock_unit_code || product?.stock_unit_code || product?.unit || "unidad"}
-                                                      </div>
-
-                                                      <form action={disableConsumptionRule}>
-                                                        <input type="hidden" name="catalog_item_id" value={row.id} />
-                                                        <input type="hidden" name="option_id" value={option.id} />
-                                                        <input type="hidden" name="consumption_rule_id" value={rule.id} />
-                                                        <button type="submit" className="ui-btn ui-btn--ghost">
-                                                          Quitar
-                                                        </button>
-                                                      </form>
-                                                    </div>
-                                                  );
-                                                })}
-                                              </div>
-                                            ) : null}
-                                          </div>
-
-                                          {recipeIngredients.length > 0 ? (
-                                            <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-                                              <div className="text-sm font-bold text-[var(--ui-text)]">Reemplazar ingrediente de receta</div>
-                                              <p className="ui-caption mt-1">
-                                                Ejemplo: leche de almendra reemplaza leche entera. Así no descuenta ambas.
-                                              </p>
-
-                                              <form action={createRecipeEffect} className="mt-4 space-y-4">
-                                                <input type="hidden" name="catalog_item_id" value={row.id} />
-                                                <input type="hidden" name="option_id" value={option.id} />
-                                                <input type="hidden" name="effect_type" value="replacement" />
-                                                <input type="hidden" name="quantity_mode" value="full_recipe_component" />
-                                                <input type="hidden" name="is_active" value="true" />
-                                                <input type="hidden" name="sort_order" value="0" />
-
-                                                <label className="space-y-2">
-                                                  <span className="ui-label">Ingrediente que deja de descontarse</span>
-                                                  <select name="target_ingredient_product_id" className="ui-input" required>
-                                                    <option value="">Selecciona ingrediente</option>
-                                                    {recipeIngredients.map((ingredient) => {
-                                                      const product = ingredient.product;
-                                                      if (!product) return null;
-
-                                                      return (
-                                                        <option key={ingredient.id} value={ingredient.ingredient_product_id}>
-                                                          {product.name ?? "Ingrediente"} · {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}
-                                                        </option>
-                                                      );
-                                                    })}
-                                                  </select>
-                                                </label>
-
-                                                <div className="flex justify-end">
-                                                  <button type="submit" className="ui-btn ui-btn--brand">
-                                                    Guardar reemplazo
-                                                  </button>
-                                                </div>
-                                              </form>
-
-                                              {recipeEffects.length > 0 ? (
-                                                <div className="mt-4 space-y-2">
-                                                  {recipeEffects.map((effect) => {
-                                                    const targetProduct = consumptionProductById.get(effect.target_ingredient_product_id);
-
-                                                    return (
-                                                      <div key={effect.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                                                        <div className="text-sm font-semibold text-[var(--ui-text)]">
-                                                          {effect.effect_type === "replacement" ? "Reemplaza" : "Quita"} {targetProduct?.name ?? "ingrediente"}
-                                                        </div>
-
-                                                        <form action={disableRecipeEffect}>
-                                                          <input type="hidden" name="catalog_item_id" value={row.id} />
-                                                          <input type="hidden" name="option_id" value={option.id} />
-                                                          <input type="hidden" name="recipe_effect_id" value={effect.id} />
-                                                          <button type="submit" className="ui-btn ui-btn--ghost">
-                                                            Quitar
-                                                          </button>
-                                                        </form>
-                                                      </div>
-                                                    );
-                                                  })}
-                                                </div>
-                                              ) : null}
-                                            </div>
-                                          ) : null}
+                                          <label className="space-y-2">
+                                            <span className="ui-label">Unidad</span>
+                                            <select name="stock_unit_code" className="ui-input" defaultValue="">
+                                              <option value="">Auto</option>
+                                              {inventoryUnits.map((unit) => (
+                                                <option key={unit.code} value={unit.code}>{unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}</option>
+                                              ))}
+                                            </select>
+                                          </label>
                                         </div>
-                                      </details>
+
+                                        <button type="submit" className="ui-btn ui-btn--brand w-full">Guardar consumo</button>
+                                      </form>
+
+                                      {consumptionRules.length > 0 ? (
+                                        <div className="space-y-2">
+                                          {consumptionRules.map((rule) => {
+                                            const product = consumptionProductById.get(rule.product_id);
+
+                                            return (
+                                              <div key={rule.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-white p-3">
+                                                <div className="text-sm font-semibold text-[var(--ui-text)]">
+                                                  {product?.name ?? "Insumo"} · {formatQuantityAdmin(rule.quantity_per_option)} {rule.stock_unit_code || product?.stock_unit_code || product?.unit || "unidad"}
+                                                </div>
+
+                                                <form action={disableConsumptionRule}>
+                                                  <input type="hidden" name="catalog_item_id" value={row.id} />
+                                                  <input type="hidden" name="option_id" value={option.id} />
+                                                  <input type="hidden" name="consumption_rule_id" value={rule.id} />
+                                                  <button type="submit" className="ui-btn ui-btn--ghost">Quitar</button>
+                                                </form>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : null}
+
+                                      {recipeIngredients.length > 0 ? (
+                                        <form action={createRecipeEffect} className="space-y-3 rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                          <input type="hidden" name="catalog_item_id" value={row.id} />
+                                          <input type="hidden" name="option_id" value={option.id} />
+                                          <input type="hidden" name="effect_type" value="replacement" />
+                                          <input type="hidden" name="quantity_mode" value="full_recipe_component" />
+                                          <input type="hidden" name="is_active" value="true" />
+                                          <input type="hidden" name="sort_order" value="0" />
+
+                                          <div className="text-sm font-black text-[var(--ui-text)]">Reemplazar ingrediente</div>
+                                          <label className="space-y-2">
+                                            <span className="ui-label">Ingrediente de receta que deja de descontarse</span>
+                                            <select name="target_ingredient_product_id" className="ui-input" required>
+                                              <option value="">Selecciona ingrediente</option>
+                                              {recipeIngredients.map((ingredient) => {
+                                                const product = ingredient.product;
+                                                if (!product) return null;
+
+                                                return (
+                                                  <option key={ingredient.id} value={ingredient.ingredient_product_id}>
+                                                    {product.name ?? "Ingrediente"} · {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}
+                                                  </option>
+                                                );
+                                              })}
+                                            </select>
+                                          </label>
+
+                                          <button type="submit" className="ui-btn ui-btn--brand w-full">Guardar reemplazo</button>
+                                        </form>
+                                      ) : null}
+
+                                      {recipeEffects.length > 0 ? (
+                                        <div className="space-y-2">
+                                          {recipeEffects.map((effect) => {
+                                            const targetProduct = consumptionProductById.get(effect.target_ingredient_product_id);
+
+                                            return (
+                                              <div key={effect.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-white p-3">
+                                                <div className="text-sm font-semibold text-[var(--ui-text)]">
+                                                  {effect.effect_type === "replacement" ? "Reemplaza" : "Quita"} {targetProduct?.name ?? "ingrediente"}
+                                                </div>
+
+                                                <form action={disableRecipeEffect}>
+                                                  <input type="hidden" name="catalog_item_id" value={row.id} />
+                                                  <input type="hidden" name="option_id" value={option.id} />
+                                                  <input type="hidden" name="recipe_effect_id" value={effect.id} />
+                                                  <button type="submit" className="ui-btn ui-btn--ghost">Quitar</button>
+                                                </form>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : null}
                                     </div>
-                                  </div>
-                                );
-                              })}
+                                  </details>
+
+                                  <form action={disableOption}>
+                                    <input type="hidden" name="catalog_item_id" value={row.id} />
+                                    <input type="hidden" name="option_group_id" value={group.id} />
+                                    <input type="hidden" name="option_id" value={option.id} />
+                                    <button type="submit" className="ui-btn ui-btn--ghost">Eliminar</button>
+                                  </form>
+                                </div>
+                              </div>
                             </div>
-                          )}
-                        </div>
+                          );
+                        })}
                       </div>
+                    )}
 
-                      <aside className="space-y-4">
-                        <details className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                          <summary className="cursor-pointer text-sm font-black text-[var(--ui-text)]">
-                            Editar pregunta y reglas
-                          </summary>
+                    <details className="px-5 py-4" open={visibleOptions.length === 0}>
+                      <summary className="cursor-pointer list-none text-sm font-black text-[var(--ui-brand)]">+ Agregar opción</summary>
 
-                          <form action={updateOptionGroup} className="mt-4 space-y-3">
-                            <input type="hidden" name="catalog_item_id" value={row.id} />
-                            <input type="hidden" name="option_group_id" value={group.id} />
-                            <input type="hidden" name="code" value={group.code} />
-                            <input type="hidden" name="sort_order" value={String(group.sort_order ?? 0)} />
+                      <form action={createOption} className="mt-4 rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                        <input type="hidden" name="catalog_item_id" value={row.id} />
+                        <input type="hidden" name="option_group_id" value={group.id} />
+                        <input type="hidden" name="effect_type" value={optionEffectType} />
+
+                        {groupKind === "recommendations" ? (
+                          <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
+                            <label className="space-y-2">
+                              <span className="ui-label">Producto de Pass</span>
+                              <select name="linked_catalog_item_id" className="ui-input" required>
+                                <option value="">Selecciona un producto</option>
+                                {commercialCatalogItems.map((catalogItem) => (
+                                  <option key={catalogItem.id} value={catalogItem.id}>
+                                    {catalogItem.name || "Producto sin nombre"} · {formatCopAdmin(catalogItem.price_amount)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
 
                             <label className="space-y-2">
-                              <span className="ui-label">Pregunta que verá el cliente</span>
-                              <input name="name" className="ui-input" defaultValue={group.name} required />
+                              <span className="ui-label">Texto opcional</span>
+                              <input name="description" className="ui-input" placeholder="Ej. Combina bien con este producto." />
                             </label>
 
-                            <div className="grid gap-3 sm:grid-cols-3">
-                              <label className="space-y-2 sm:col-span-3">
-                                <span className="ui-label">Tipo de elección</span>
-                                <select name="selection_type" className="ui-input" defaultValue={group.selection_type}>
-                                  <option value="single">Una opción</option>
-                                  <option value="multiple">Varias opciones</option>
-                                </select>
-                              </label>
-
-                              <label className="space-y-2">
-                                <span className="ui-label">Mínimo</span>
-                                <input name="min_select" type="number" min="0" className="ui-input" defaultValue={String(group.min_select ?? 0)} />
-                              </label>
-
-                              <label className="space-y-2">
-                                <span className="ui-label">Máximo</span>
-                                <input name="max_select" type="number" min="1" className="ui-input" defaultValue={String(group.max_select ?? 1)} />
-                              </label>
-
-                              <div className="rounded-2xl bg-white p-3">
-                                <div className="ui-caption">Regla actual</div>
-                                <div className="text-sm font-black text-[var(--ui-text)]">{getSelectionRuleLabel(group)}</div>
-                              </div>
-                            </div>
-
-                            <label className="block space-y-2">
-                              <span className="ui-label">Ayuda debajo de la pregunta</span>
-                              <input name="description" className="ui-input" defaultValue={group.description ?? ""} />
+                            <button type="submit" className="ui-btn ui-btn--brand">Agregar producto</button>
+                          </div>
+                        ) : (
+                          <div className="grid gap-3 lg:grid-cols-[1fr_160px_1fr_auto] lg:items-end">
+                            <label className="space-y-2">
+                              <span className="ui-label">Opción</span>
+                              <input name="name" className="ui-input" placeholder="Ej. x12, leche de almendra, queso extra" required />
                             </label>
 
-                            <div className="space-y-2">
+                            <label className="space-y-2">
+                              <span className="ui-label">Precio adicional</span>
+                              <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue="0" />
+                            </label>
+
+                            <label className="space-y-2">
+                              <span className="ui-label">Descripción</span>
+                              <input name="description" className="ui-input" placeholder="Opcional" />
+                            </label>
+
+                            <div className="flex flex-wrap items-center gap-3">
                               <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                <input type="checkbox" name="is_required" defaultChecked={group.is_required} />
-                                El cliente debe responder
+                                <input type="checkbox" name="is_default" />
+                                Default
                               </label>
-                              <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                <input type="checkbox" name="is_active" defaultChecked={group.is_active} />
-                                Mostrar bloque
-                              </label>
+                              <button type="submit" className="ui-btn ui-btn--brand">Agregar</button>
                             </div>
-
-                            <button type="submit" className="ui-btn ui-btn--brand w-full">
-                              Guardar reglas
-                            </button>
-                          </form>
-
-                          <form action={disableOptionGroup} className="mt-3">
-                            <input type="hidden" name="catalog_item_id" value={row.id} />
-                            <input type="hidden" name="option_group_id" value={group.id} />
-                            <button type="submit" className="ui-btn ui-btn--ghost w-full">
-                              Ocultar bloque
-                            </button>
-                          </form>
-                        </details>
-
-                        <details className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4" open={groupOptions.length === 0}>
-                          <summary className="cursor-pointer text-sm font-black text-[var(--ui-text)]">
-                            Agregar opción a este bloque
-                          </summary>
-
-                          <form action={createOption} className="mt-4 space-y-4">
-                            <input type="hidden" name="catalog_item_id" value={row.id} />
-                            <input type="hidden" name="option_group_id" value={group.id} />
-                            <input type="hidden" name="effect_type" value={optionEffectType} />
-
-                            {groupKind === "recommendations" ? (
-                              <div className="space-y-4">
-                                <label className="space-y-2">
-                                  <span className="ui-label">Producto que ya se vende en Pass</span>
-                                  <select name="linked_catalog_item_id" className="ui-input" required>
-                                    <option value="">Selecciona un producto comercial</option>
-                                    {commercialCatalogItems.map((catalogItem) => (
-                                      <option key={catalogItem.id} value={catalogItem.id}>
-                                        {catalogItem.name || "Producto sin nombre"} · {formatCopAdmin(catalogItem.price_amount)}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-
-                                {commercialCatalogItems.length === 0 ? (
-                                  <div className="ui-alert ui-alert--warn">
-                                    No hay otros productos comerciales activos en esta sede para sugerir.
-                                  </div>
-                                ) : null}
-
-                                <label className="block space-y-2">
-                                  <span className="ui-label">Texto opcional para el cliente</span>
-                                  <input name="description" className="ui-input" placeholder="Ej. Combina muy bien con este producto." />
-                                </label>
-                              </div>
-                            ) : (
-                              <>
-                                <label className="space-y-2">
-                                  <span className="ui-label">Nueva opción</span>
-                                  <input name="name" className="ui-input" placeholder="Ej. Leche de almendra, queso extra, sin cebolla" required />
-                                </label>
-
-                                <label className="space-y-2">
-                                  <span className="ui-label">Valor adicional</span>
-                                  <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue="0" />
-                                </label>
-
-                                <label className="block space-y-2">
-                                  <span className="ui-label">Descripción para el cliente</span>
-                                  <input name="description" className="ui-input" placeholder="Opcional. Ej. Recomendado para bebidas calientes." />
-                                </label>
-
-                                <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                  <input type="checkbox" name="is_default" />
-                                  Por defecto
-                                </label>
-                              </>
-                            )}
-
-                            <button type="submit" className="ui-btn ui-btn--brand w-full">
-                              {getModalBlockActionLabel(groupKind)}
-                            </button>
-                          </form>
-                        </details>
-                      </aside>
-                    </div>
+                          </div>
+                        )}
+                      </form>
+                    </details>
                   </div>
-                );
-              })}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {recipeIngredients.length > 0 ? (
+        <div id="receta-inventario" className="ui-panel space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="ui-h3">3. Receta / Inventario</div>
+              <p className="ui-caption">Atajos para convertir ingredientes de receta en opciones “Sin X”.</p>
             </div>
-          )}
+            <span className="ui-chip">{recipeIngredients.length} ingrediente{recipeIngredients.length === 1 ? "" : "s"}</span>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {recipeIngredients.map((ingredient) => {
+              const product = ingredient.product;
+              if (!product) return null;
+
+              return (
+                <form key={ingredient.id} action={createRemovalOptionFromRecipe} className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                  <input type="hidden" name="catalog_item_id" value={row.id} />
+                  <input type="hidden" name="ingredient_product_id" value={ingredient.ingredient_product_id} />
+                  <input type="hidden" name="ingredient_name" value={product.name ?? "Ingrediente"} />
+                  <input type="hidden" name="stock_unit_code" value={product.stock_unit_code || product.unit || ""} />
+
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-black text-[var(--ui-text)]">Sin {product.name ?? "Ingrediente"}</div>
+                    <div className="ui-caption">{formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}</div>
+                  </div>
+
+                  <button type="submit" className="ui-btn ui-btn--ghost shrink-0">Crear</button>
+                </form>
+              );
+            })}
+          </div>
         </div>
-      </div>      <div className="flex flex-wrap items-center gap-2">
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
         <form action={disableMenuItem}><input type="hidden" name="id" value={row.id} /><button type="submit" className="ui-btn ui-btn--ghost">Deshabilitar</button></form>
         <form action={deleteMenuItem}><input type="hidden" name="id" value={row.id} /><button type="submit" className="ui-btn ui-btn--danger">Eliminar producto</button></form>
       </div>
