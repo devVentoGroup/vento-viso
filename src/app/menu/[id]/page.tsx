@@ -411,6 +411,16 @@ function getLinkedCatalogItemId(option: CatalogItemOptionRow) {
     : null;
 }
 
+function getOptionIngredientProductId(option: CatalogItemOptionRow) {
+  const metadata = option.metadata && typeof option.metadata === "object" && !Array.isArray(option.metadata)
+    ? option.metadata
+    : {};
+  const ingredientProductId = metadata.ingredient_product_id;
+  return typeof ingredientProductId === "string" && ingredientProductId.trim()
+    ? ingredientProductId.trim()
+    : null;
+}
+
 function getOptionDisplayName(
   option: CatalogItemOptionRow,
   linkedCatalogItemsById: Map<string, CommercialCatalogItemOptionRow>,
@@ -1566,6 +1576,7 @@ async function createRemovalOptionFromRecipe(formData: FormData) {
   const supabase = await createClient();
 
   const itemId = asText(formData.get("catalog_item_id"));
+  const requestedGroupId = asText(formData.get("option_group_id"));
   const ingredientProductId = asText(formData.get("ingredient_product_id"));
   const ingredientName = asText(formData.get("ingredient_name"));
   const stockUnitCode = asOptionalText(formData.get("stock_unit_code"));
@@ -1575,20 +1586,41 @@ async function createRemovalOptionFromRecipe(formData: FormData) {
   }
 
   const groupCode = "quitar-ingredientes";
+  let groupId: string | undefined;
 
-  const { data: existingGroup, error: existingGroupError } = await supabase
-    .schema("pass")
-    .from("catalog_item_option_groups")
-    .select("id")
-    .eq("catalog_item_id", itemId)
-    .eq("code", groupCode)
-    .maybeSingle();
+  if (requestedGroupId) {
+    const { data: requestedGroup, error: requestedGroupError } = await supabase
+      .schema("pass")
+      .from("catalog_item_option_groups")
+      .select("id,catalog_item_id,is_active")
+      .eq("id", requestedGroupId)
+      .eq("catalog_item_id", itemId)
+      .maybeSingle();
 
-  if (existingGroupError) {
-    redirect(`/menu/${itemId}?error=${encodeURIComponent(existingGroupError.message)}`);
+    if (requestedGroupError || !requestedGroup || requestedGroup.is_active === false) {
+      redirect(`/menu/${itemId}?error=${encodeURIComponent(requestedGroupError?.message || "El grupo de ingredientes no pertenece a este producto o está inactivo.")}`);
+    }
+
+    groupId = requestedGroup.id as string;
   }
 
-  let groupId = existingGroup?.id as string | undefined;
+  if (!groupId) {
+    const { data: existingGroup, error: existingGroupError } = await supabase
+      .schema("pass")
+      .from("catalog_item_option_groups")
+      .select("id,is_active")
+      .eq("catalog_item_id", itemId)
+      .eq("code", groupCode)
+      .maybeSingle();
+
+    if (existingGroupError) {
+      redirect(`/menu/${itemId}?error=${encodeURIComponent(existingGroupError.message)}`);
+    }
+
+    if (existingGroup?.id && existingGroup.is_active !== false) {
+      groupId = existingGroup.id as string;
+    }
+  }
 
   if (!groupId) {
     const { data: createdGroup, error: groupError } = await supabase
@@ -1617,13 +1649,18 @@ async function createRemovalOptionFromRecipe(formData: FormData) {
     groupId = createdGroup.id;
   }
 
+  if (!groupId) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent("No se pudo resolver el grupo de ingredientes.")}`);
+  }
+
+  const resolvedGroupId = groupId;
   const optionCode = `sin-${slugify(ingredientName)}`;
 
   const { data: existingOption, error: existingOptionError } = await supabase
     .schema("pass")
     .from("catalog_item_options")
     .select("id")
-    .eq("option_group_id", groupId)
+    .eq("option_group_id", resolvedGroupId)
     .eq("code", optionCode)
     .maybeSingle();
 
@@ -1634,20 +1671,21 @@ async function createRemovalOptionFromRecipe(formData: FormData) {
   let optionId = existingOption?.id as string | undefined;
 
   if (!optionId) {
+    const sortOrder = await getNextOptionSortOrder(supabase, resolvedGroupId);
     const { data: createdOption, error: optionError } = await supabase
       .schema("pass")
       .from("catalog_item_options")
       .insert({
-        option_group_id: groupId,
+        option_group_id: resolvedGroupId,
         code: optionCode,
         name: `Sin ${ingredientName}`,
-        description: `No consumir ${ingredientName} en la preparacion.`,
+        description: `No descontar ${ingredientName} si el cliente pide retirarlo.`,
         price_delta_amount: 0,
         product_id: null,
         effect_type: "removal",
         is_default: false,
         is_active: true,
-        sort_order: 0,
+        sort_order: sortOrder,
         metadata: { preset: "removals", source: "recipe_removals", configured_from: "simple_product_page", ingredient_product_id: ingredientProductId },
       })
       .select("id")
@@ -2045,6 +2083,7 @@ export default async function MenuItemDetailPage({
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
 
   const visibleOptionGroups = optionGroups.filter((group) => group.is_active);
+  const hasVisibleRemovalsGroup = visibleOptionGroups.some((group) => getSimpleGroupKind(group) === "removals");
   const visibleOptionGroupIds = new Set(visibleOptionGroups.map((group) => group.id));
   const activeOptionCount = ((optionOptionsRaw ?? []) as CatalogItemOptionRow[]).filter(
     (option) => option.is_active && visibleOptionGroupIds.has(option.option_group_id),
@@ -2107,7 +2146,7 @@ export default async function MenuItemDetailPage({
       <nav className="flex flex-wrap gap-2 rounded-3xl border border-[var(--ui-border)] bg-white p-2 shadow-[var(--ui-shadow-1)]">
         <a href="#producto-comercial" className="ui-btn ui-btn--ghost">Producto</a>
         <a href="#personalizaciones" className="ui-btn ui-btn--ghost">Personalizaciones</a>
-        {recipeIngredients.length > 0 ? (
+        {recipeIngredients.length > 0 && !hasVisibleRemovalsGroup ? (
           <a href="#receta-inventario" className="ui-btn ui-btn--ghost">Receta / Inventario</a>
         ) : null}
       </nav>
@@ -2132,6 +2171,19 @@ export default async function MenuItemDetailPage({
         <MenuItemForm
           mode="edit"
           action={updateMenuItem}
+          formId={`menu-item-form-${row.id}`}
+          secondaryActions={(
+            <>
+              <form action={disableMenuItem}>
+                <input type="hidden" name="id" value={row.id} />
+                <button type="submit" className="ui-btn ui-btn--ghost">Deshabilitar</button>
+              </form>
+              <form action={deleteMenuItem}>
+                <input type="hidden" name="id" value={row.id} />
+                <button type="submit" className="ui-btn ui-btn--danger">Eliminar producto</button>
+              </form>
+            </>
+          )}
           sites={sites ?? []}
           products={products}
           categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
@@ -2217,6 +2269,7 @@ export default async function MenuItemDetailPage({
               const visibleOptions = groupOptions.filter((option) => option.is_active);
               const groupKind = getSimpleGroupKind(group);
               const optionEffectType = getSimpleDefaultEffect(groupKind);
+              const supportsDefaultOption = groupKind === "choice";
               const isMultiple = parseSelectionType(group.selection_type) === "multiple";
 
               return (
@@ -2301,7 +2354,78 @@ export default async function MenuItemDetailPage({
                       </form>
                     </details>
 
-                    {visibleOptions.length === 0 ? (
+                    {groupKind === "removals" ? (
+                      <div className="space-y-4 px-5 py-5">
+                        <div>
+                          <div className="text-sm font-black text-[var(--ui-text)]">Ingredientes de la receta</div>
+                          <p className="ui-caption mt-1">
+                            Activa los ingredientes que el cliente puede pedir “sin”. Si el cliente marca uno en Pass, cocina lo retira y ese ingrediente no se descuenta de inventario.
+                          </p>
+                        </div>
+
+                        {recipeIngredients.length === 0 ? (
+                          <div className="rounded-3xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5 text-center">
+                            <div className="text-sm font-black text-[var(--ui-text)]">Este producto base no tiene receta activa.</div>
+                            <p className="ui-caption mt-1">Primero configura la receta operacional para poder activar ingredientes removibles.</p>
+                          </div>
+                        ) : (
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                            {recipeIngredients.map((ingredient) => {
+                              const product = ingredient.product;
+                              if (!product) return null;
+
+                              const ingredientName = product.name ?? "Ingrediente";
+                              const removalOption = visibleOptions.find((option) => {
+                                const ingredientProductId = getOptionIngredientProductId(option);
+                                return (
+                                  ingredientProductId === ingredient.ingredient_product_id ||
+                                  option.code === `sin-${slugify(ingredientName)}`
+                                );
+                              });
+
+                              if (removalOption) {
+                                return (
+                                  <div key={ingredient.id} className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-white p-3">
+                                    <div className="min-w-0">
+                                      <div className="truncate text-sm font-black text-[var(--ui-text)]">Sin {ingredientName}</div>
+                                      <div className="ui-caption">No descuenta {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}</div>
+                                    </div>
+                                    <div className="flex shrink-0 items-center gap-2">
+                                      <span className="ui-chip ui-chip--success">Activo</span>
+                                      <form action={disableOption}>
+                                        <input type="hidden" name="catalog_item_id" value={row.id} />
+                                        <input type="hidden" name="option_group_id" value={group.id} />
+                                        <input type="hidden" name="option_id" value={removalOption.id} />
+                                        <button type="submit" className="ui-btn ui-btn--ghost">Quitar</button>
+                                      </form>
+                                    </div>
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <form key={ingredient.id} action={createRemovalOptionFromRecipe} className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                                  <input type="hidden" name="catalog_item_id" value={row.id} />
+                                  <input type="hidden" name="option_group_id" value={group.id} />
+                                  <input type="hidden" name="ingredient_product_id" value={ingredient.ingredient_product_id} />
+                                  <input type="hidden" name="ingredient_name" value={ingredientName} />
+                                  <input type="hidden" name="stock_unit_code" value={product.stock_unit_code || product.unit || ""} />
+
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-black text-[var(--ui-text)]">Sin {ingredientName}</div>
+                                    <div className="ui-caption">Receta: {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}</div>
+                                  </div>
+
+                                  <button type="submit" className="ui-btn ui-btn--brand shrink-0">Permitir quitar</button>
+                                </form>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
+                    {groupKind === "removals" ? null : visibleOptions.length === 0 ? (
                       <div className="px-5 py-5">
                         <div className="rounded-3xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5 text-center">
                           <div className="text-sm font-black text-[var(--ui-text)]">Aún no tiene opciones.</div>
@@ -2325,7 +2449,7 @@ export default async function MenuItemDetailPage({
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <div className="truncate text-base font-black text-[var(--ui-text)]">{optionName}</div>
-                                    {option.is_default ? <span className="ui-chip ui-chip--success">Default</span> : null}
+                                    {supportsDefaultOption && option.is_default ? <span className="ui-chip ui-chip--success">Estándar</span> : null}
                                   </div>
                                   {optionMeta ? <div className="ui-caption mt-1 truncate">{optionMeta}</div> : null}
                                 </div>
@@ -2362,10 +2486,14 @@ export default async function MenuItemDetailPage({
                                         <input name="description" className="ui-input" defaultValue={option.description ?? ""} />
                                       </label>
 
-                                      <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                        <input type="checkbox" name="is_default" defaultChecked={option.is_default} />
-                                        Por defecto
-                                      </label>
+                                      {supportsDefaultOption ? (
+                                        <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                                          <input type="checkbox" name="is_default" defaultChecked={option.is_default} />
+                                          Opción estándar
+                                        </label>
+                                      ) : (
+                                        <input type="hidden" name="is_default" value="false" />
+                                      )}
 
                                       <button type="submit" className="ui-btn ui-btn--brand w-full">Guardar opción</button>
                                     </form>
@@ -2512,6 +2640,7 @@ export default async function MenuItemDetailPage({
                       </div>
                     )}
 
+                    {groupKind === "removals" ? null : (
                     <details className="px-5 py-4" open={visibleOptions.length === 0}>
                       <summary className="cursor-pointer list-none text-sm font-black text-[var(--ui-brand)]">+ Agregar opción</summary>
 
@@ -2559,16 +2688,21 @@ export default async function MenuItemDetailPage({
                             </label>
 
                             <div className="flex flex-wrap items-center gap-3">
-                              <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                <input type="checkbox" name="is_default" />
-                                Default
-                              </label>
+                              {supportsDefaultOption ? (
+                                <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                                  <input type="checkbox" name="is_default" />
+                                  Opción estándar
+                                </label>
+                              ) : (
+                                <input type="hidden" name="is_default" value="false" />
+                              )}
                               <button type="submit" className="ui-btn ui-btn--brand">Agregar</button>
                             </div>
                           </div>
                         )}
                       </form>
                     </details>
+                    )}
                   </div>
                 </div>
               );
@@ -2577,7 +2711,7 @@ export default async function MenuItemDetailPage({
         )}
       </div>
 
-      {recipeIngredients.length > 0 ? (
+      {recipeIngredients.length > 0 && !hasVisibleRemovalsGroup ? (
         <div id="receta-inventario" className="ui-panel space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -2612,10 +2746,6 @@ export default async function MenuItemDetailPage({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <form action={disableMenuItem}><input type="hidden" name="id" value={row.id} /><button type="submit" className="ui-btn ui-btn--ghost">Deshabilitar</button></form>
-        <form action={deleteMenuItem}><input type="hidden" name="id" value={row.id} /><button type="submit" className="ui-btn ui-btn--danger">Eliminar producto</button></form>
-      </div>
     </div>
   );
 }

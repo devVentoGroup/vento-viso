@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 
 type SiteOption = {
   id: string;
@@ -79,6 +79,8 @@ type MenuItemFormProps = {
   collectionCategoryLinks?: CollectionCategoryLinkOption[];
   initial: MenuItemFormValues;
   action: (formData: FormData) => void | Promise<void>;
+  formId?: string;
+  secondaryActions?: ReactNode;
 };
 
 const PRODUCT_UPLOAD_ENDPOINT = "/api/viso/upload-product-image";
@@ -129,6 +131,8 @@ export function MenuItemForm({
   collectionCategoryLinks,
   initial,
   action,
+  formId,
+  secondaryActions,
 }: MenuItemFormProps) {
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
@@ -154,6 +158,8 @@ export function MenuItemForm({
   const [opensDetailModal, setOpensDetailModal] = useState(Boolean(initial.opens_detail_modal));
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
+  const generatedFormId = useId().replace(/:/g, "");
+  const resolvedFormId = formId || `menu-item-form-${generatedFormId}`;
 
   const siteLabel = useMemo(() => {
     const selected = sites.find((site) => site.id === siteId);
@@ -350,7 +356,8 @@ export function MenuItemForm({
   };
 
   return (
-    <form action={action} className="space-y-8">
+    <div className="space-y-8">
+      <form id={resolvedFormId} action={action} className="space-y-8">
       <input type="hidden" name="id" value={initial.id ?? ""} />
       <input type="hidden" name="code" value={initial.code} />
       <input type="hidden" name="sort_order" value={initial.sort_order} />
@@ -808,11 +815,17 @@ export function MenuItemForm({
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <button type="submit" className="ui-btn ui-btn--brand">
+      </form>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {secondaryActions}
+        </div>
+
+        <button type="submit" form={resolvedFormId} className="ui-btn ui-btn--brand">
           {mode === "create" ? "Crear item" : "Guardar cambios"}
         </button>
       </div>
-    </form>
+    </div>
   );
 }
