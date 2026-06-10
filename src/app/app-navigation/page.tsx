@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -62,7 +62,7 @@ type GroupOption = {
   groupOrder: number;
 };
 
-const MANAGED_APPS = ["viso", "nexo", "fogo", "origo", "pulso"];
+const MANAGED_APPS = ["viso", "nexo", "fogo", "origo", "pulso", "numera"];
 
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
