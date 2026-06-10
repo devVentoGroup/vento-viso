@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -61,6 +61,7 @@ const APP_ENTITY =
     | "pulso"
     | "viso"
     | "origo"
+    | "numera"
     | "anima"
     | "aura") ?? "viso";
 
