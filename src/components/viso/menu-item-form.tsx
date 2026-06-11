@@ -66,6 +66,8 @@ type MenuItemFormValues = {
   fulfillment_pickup: boolean;
   fulfillment_on_premise: boolean;
   metadata_extra: string;
+  display_group?: string;
+  variant_label?: string;
   pass_card_layout?: "compact" | "featured" | string;
   opens_detail_modal?: boolean;
 };
@@ -146,6 +148,8 @@ export function MenuItemForm({
   const [commercialCategoryId, setCommercialCategoryId] = useState(initial.commercial_category_id);
   const [categoryLabel] = useState(initial.category_label);
   const [badgesCsv, setBadgesCsv] = useState(initial.badges_csv);
+  const [displayGroup, setDisplayGroup] = useState(initial.display_group ?? "");
+  const [variantLabel, setVariantLabel] = useState(initial.variant_label ?? "");
   const [imageUrl, setImageUrl] = useState(initial.image_url);
   const [isActive, setIsActive] = useState(initial.is_active);
   const [isFeatured, setIsFeatured] = useState(initial.is_featured);
@@ -608,6 +612,34 @@ export function MenuItemForm({
               placeholder="Popular, Nuevo, Club"
             />
           </label>
+          <div className="grid gap-4 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 sm:col-span-2 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <div className="ui-label">Grupo visual de variantes</div>
+              <p className="ui-caption">
+                Agrupa SKUs físicos separados en una sola card de Pass. Ejemplo: grupo Soda Hatsu, variantes Sandía y Yerbabuena.
+              </p>
+            </div>
+            <label className="space-y-2">
+              <span className="ui-label">Nombre del grupo</span>
+              <input
+                name="display_group"
+                className="ui-input"
+                value={displayGroup}
+                onChange={(event) => setDisplayGroup(event.target.value)}
+                placeholder="Soda Hatsu"
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="ui-label">Variante</span>
+              <input
+                name="variant_label"
+                className="ui-input"
+                value={variantLabel}
+                onChange={(event) => setVariantLabel(event.target.value)}
+                placeholder="Sandía"
+              />
+            </label>
+          </div>
           <div className="space-y-2 sm:col-span-2">
             <span className="ui-label">Modalidades habilitadas</span>
             <div className="flex flex-wrap gap-3">
@@ -781,6 +813,11 @@ export function MenuItemForm({
           <div className="space-y-4 p-5">
             <div>
               <div className="text-2xl font-black leading-tight text-[var(--ui-text)]">{getPreviewTitle(name)}</div>
+              {displayGroup || variantLabel ? (
+                <div className="mt-1 text-sm font-bold text-[var(--ui-muted)]">
+                  {[displayGroup, variantLabel].filter(Boolean).join(" · ")}
+                </div>
+              ) : null}
               <div className="ui-caption mt-1">{siteLabel}</div>
               {compareAtAmount ? (
                 <div className="mt-1 text-sm font-bold text-[var(--ui-muted)] line-through">{asCop(compareAtAmount)}</div>

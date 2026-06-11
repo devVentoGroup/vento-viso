@@ -472,6 +472,8 @@ async function createMenuItem(formData: FormData) {
     commercial_category_id: commercialCategoryId,
     base_price_amount: referencesValidation.basePriceAmount,
     recipe_cost_amount: referencesValidation.recipeCostAmount,
+    display_group: asText(formData.get("display_group")) || null,
+    variant_label: asText(formData.get("variant_label")) || null,
   };
 
   const { data: createdItem, error } = await supabase
@@ -715,6 +717,8 @@ export default async function NewMenuItemPage({
           fulfillment_pickup: true,
           fulfillment_on_premise: true,
           metadata_extra: "",
+          display_group: "",
+          variant_label: "",
           pass_card_layout: "compact",
           opens_detail_modal: false,
         }}

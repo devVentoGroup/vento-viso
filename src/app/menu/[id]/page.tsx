@@ -900,6 +900,8 @@ async function updateMenuItem(formData: FormData) {
     commercial_category_id: commercialCategoryId,
     base_price_amount: referencesValidation.basePriceAmount,
     recipe_cost_amount: referencesValidation.recipeCostAmount,
+    display_group: asText(formData.get("display_group")) || null,
+    variant_label: asText(formData.get("variant_label")) || null,
   };
 
   const { error } = await supabase
@@ -2166,6 +2168,8 @@ export default async function MenuItemDetailPage({
             fulfillment_pickup: (row.fulfillment_modes ?? []).includes("pickup"),
             fulfillment_on_premise: (row.fulfillment_modes ?? []).includes("on_premise"),
             metadata_extra: Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : "",
+            display_group: typeof metadata.display_group === "string" ? metadata.display_group : "",
+            variant_label: typeof metadata.variant_label === "string" ? metadata.variant_label : "",
             pass_card_layout: parsePassCardLayout(presentation?.card_layout),
             opens_detail_modal: Boolean(presentation?.opens_detail_modal),
           }}
