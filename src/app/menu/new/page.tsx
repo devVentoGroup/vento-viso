@@ -18,6 +18,37 @@ type SellOptionRow = {
   recipe_cost_amount: number | string | null;
 };
 
+type InventoryProductRow = {
+  id: string;
+  name: string | null;
+  sku: string | null;
+  unit: string | null;
+  stock_unit_code: string | null;
+  is_active: boolean | null;
+};
+
+type CatalogOptionInput = {
+  name: string;
+  description: string | null;
+  price_delta_amount: number;
+  product_id: string;
+  quantity_per_option: number;
+  stock_unit_code: string;
+  is_default: boolean;
+  sort_order: number;
+};
+
+type CatalogOptionGroupInput = {
+  name: string;
+  description: string | null;
+  selection_type: "single" | "multiple";
+  is_required: boolean;
+  min_select: number;
+  max_select: number;
+  sort_order: number;
+  options: CatalogOptionInput[];
+};
+
 type CommercialCategoryRow = {
   id: string;
   site_id: string;
@@ -397,6 +428,302 @@ async function getNextCatalogItemSortOrder(
   return Number(data?.sort_order ?? 0) + 10;
 }
 
+
+type ParsedCatalogOptionGroups = {
+  error: string;
+  groups: CatalogOptionGroupInput[];
+};
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "on", "1", "yes", "si", "sí"].includes(normalized)) return true;
+    if (["false", "off", "0", "no"].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function readNonNegativeNumber(value: unknown, fallback = 0) {
+  const parsed = typeof value === "number" ? value : Number(readString(value));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, parsed);
+}
+
+function readPositiveNumber(value: unknown, fallback = 1) {
+  const parsed = typeof value === "number" ? value : Number(readString(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function parseCatalogOptionGroups(value: FormDataEntryValue | null): ParsedCatalogOptionGroups {
+  const raw = asText(value);
+  if (!raw) return { error: "", groups: [] };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { error: "La configuración de opciones operacionales no tiene un formato válido.", groups: [] };
+  }
+
+  if (!Array.isArray(parsed)) {
+    return { error: "La configuración de opciones operacionales debe ser una lista de grupos.", groups: [] };
+  }
+
+  const groups: CatalogOptionGroupInput[] = [];
+
+  for (const [groupIndex, rawGroup] of parsed.entries()) {
+    const group = readRecord(rawGroup);
+    if (readBoolean(group.is_active, true) === false) continue;
+
+    const groupName = readString(group.name);
+    const rawOptions = Array.isArray(group.options) ? group.options : [];
+    const activeRawOptions = rawOptions.filter((option) => readBoolean(readRecord(option).is_active, true) !== false);
+
+    if (!groupName && activeRawOptions.length === 0) continue;
+
+    if (!groupName) {
+      return { error: `El grupo de opciones ${groupIndex + 1} necesita nombre.`, groups: [] };
+    }
+
+    const selectionType = readString(group.selection_type) === "multiple" ? "multiple" : "single";
+    const isRequired = readBoolean(group.is_required, true);
+
+    let minSelect = Math.floor(readNonNegativeNumber(group.min_select, isRequired ? 1 : 0));
+    let maxSelect = Math.floor(readPositiveNumber(group.max_select, selectionType === "multiple" ? 3 : 1));
+
+    if (selectionType === "single") {
+      minSelect = isRequired ? 1 : 0;
+      maxSelect = 1;
+    } else {
+      if (isRequired && minSelect < 1) minSelect = 1;
+      if (maxSelect < 1) maxSelect = 1;
+      if (minSelect > maxSelect) {
+        return {
+          error: `El grupo "${groupName}" tiene mínimo mayor que máximo.`,
+          groups: [],
+        };
+      }
+    }
+
+    const options: CatalogOptionInput[] = [];
+
+    for (const [optionIndex, rawOption] of activeRawOptions.entries()) {
+      const option = readRecord(rawOption);
+      const optionName = readString(option.name);
+      const optionProductId = readString(option.product_id);
+      const quantityPerOption = readPositiveNumber(option.quantity_per_option, 0);
+      const stockUnitCode = readString(option.stock_unit_code);
+
+      if (!optionName) {
+        return {
+          error: `La opción ${optionIndex + 1} del grupo "${groupName}" necesita nombre visible.`,
+          groups: [],
+        };
+      }
+
+      if (!optionProductId) {
+        return {
+          error: `La opción "${optionName}" necesita un producto operacional para descontar inventario.`,
+          groups: [],
+        };
+      }
+
+      if (quantityPerOption <= 0) {
+        return {
+          error: `La opción "${optionName}" necesita una cantidad de consumo mayor a 0.`,
+          groups: [],
+        };
+      }
+
+      if (!stockUnitCode) {
+        return {
+          error: `La opción "${optionName}" necesita unidad de consumo.`,
+          groups: [],
+        };
+      }
+
+      options.push({
+        name: optionName,
+        description: readString(option.description) || null,
+        price_delta_amount: Math.round(readNonNegativeNumber(option.price_delta_amount, 0)),
+        product_id: optionProductId,
+        quantity_per_option: quantityPerOption,
+        stock_unit_code: stockUnitCode,
+        is_default: readBoolean(option.is_default, false),
+        sort_order: Math.floor(readNonNegativeNumber(option.sort_order, (optionIndex + 1) * 10)),
+      });
+    }
+
+    if (options.length === 0) {
+      return {
+        error: `El grupo "${groupName}" necesita al menos una opción activa.`,
+        groups: [],
+      };
+    }
+
+    groups.push({
+      name: groupName,
+      description: readString(group.description) || null,
+      selection_type: selectionType,
+      is_required: isRequired,
+      min_select: minSelect,
+      max_select: maxSelect,
+      sort_order: Math.floor(readNonNegativeNumber(group.sort_order, (groupIndex + 1) * 10)),
+      options,
+    });
+  }
+
+  return { error: "", groups };
+}
+
+async function validateOperationalOptionProducts(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  groups: CatalogOptionGroupInput[],
+) {
+  const productIds = Array.from(
+    new Set(
+      groups
+        .flatMap((group) => group.options.map((option) => option.product_id))
+        .map((productId) => productId.trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (productIds.length === 0) return "";
+
+  const { data, error } = await supabase
+    .from("products")
+    .select("id,name,is_active")
+    .in("id", productIds);
+
+  if (error) {
+    return `No se pudieron validar los productos operacionales de las opciones: ${error.message}`;
+  }
+
+  const rows = ((data ?? []) as { id: string; name: string | null; is_active: boolean | null }[]);
+  const foundById = new Map(rows.map((product) => [product.id, product]));
+
+  const missing = productIds.filter((productId) => !foundById.has(productId));
+  if (missing.length > 0) {
+    return "Hay opciones vinculadas a productos operacionales que no existen.";
+  }
+
+  const inactive = rows.find((product) => product.is_active === false);
+  if (inactive) {
+    return `El producto operacional "${inactive.name || inactive.id}" está inactivo.`;
+  }
+
+  return "";
+}
+
+async function saveCatalogItemOptionGroups(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  catalogItemId: string,
+  groups: CatalogOptionGroupInput[],
+) {
+  for (const group of groups) {
+    const groupCode = slugify(group.name) || `grupo-${group.sort_order}`;
+
+    const { data: createdGroup, error: groupError } = await supabase
+      .schema("pass")
+      .from("catalog_item_option_groups")
+      .insert({
+        catalog_item_id: catalogItemId,
+        code: groupCode,
+        name: group.name,
+        description: group.description,
+        selection_type: group.selection_type,
+        is_required: group.is_required,
+        min_select: group.min_select,
+        max_select: group.max_select,
+        sort_order: group.sort_order,
+        is_active: true,
+      })
+      .select("id")
+      .single();
+
+    if (groupError) {
+      throw new Error(`No se pudo guardar el grupo "${group.name}": ${groupError.message}`);
+    }
+
+    if (!createdGroup?.id) {
+      throw new Error(`El grupo "${group.name}" se guardó sin identificador.`);
+    }
+
+    for (const option of group.options) {
+      const optionCode = slugify(option.name) || `opcion-${option.sort_order}`;
+
+      const { data: createdOption, error: optionError } = await supabase
+        .schema("pass")
+        .from("catalog_item_options")
+        .insert({
+          option_group_id: createdGroup.id,
+          code: optionCode,
+          name: option.name,
+          description: option.description,
+          price_delta_amount: option.price_delta_amount,
+          product_id: option.product_id,
+          effect_type: "inventory_consumption",
+          is_default: option.is_default,
+          is_active: true,
+          sort_order: option.sort_order,
+          metadata: {
+            source_app: "viso",
+            source_module: "menu_comercial",
+          },
+        })
+        .select("id")
+        .single();
+
+      if (optionError) {
+        throw new Error(`No se pudo guardar la opción "${option.name}": ${optionError.message}`);
+      }
+
+      if (!createdOption?.id) {
+        throw new Error(`La opción "${option.name}" se guardó sin identificador.`);
+      }
+
+      const { error: ruleError } = await supabase
+        .schema("pass")
+        .from("catalog_item_option_consumption_rules")
+        .insert({
+          option_id: createdOption.id,
+          code: `${optionCode}-consume`,
+          name: `Consumir ${option.name}`,
+          product_id: option.product_id,
+          effect_type: "inventory_consumption",
+          quantity_per_option: option.quantity_per_option,
+          stock_unit_code: option.stock_unit_code,
+          input_quantity_per_option: option.quantity_per_option,
+          input_unit_code: option.stock_unit_code,
+          conversion_factor_to_stock_unit: 1,
+          source_location_strategy: "product_production_location",
+          source_location_id: null,
+          source_location_position_id: null,
+          is_active: true,
+          sort_order: option.sort_order,
+        });
+
+      if (ruleError) {
+        throw new Error(`No se pudo guardar el consumo de "${option.name}": ${ruleError.message}`);
+      }
+    }
+  }
+}
+
+
 async function createMenuItem(formData: FormData) {
   "use server";
   const supabase = await createClient();
@@ -424,7 +751,12 @@ async function createMenuItem(formData: FormData) {
     : null;
 
   const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
-  const opensDetailModal = asBool(formData.get("opens_detail_modal"));
+  const parsedOptionGroups = parseCatalogOptionGroups(formData.get("catalog_option_groups"));
+  if (parsedOptionGroups.error) {
+    redirect("/menu/new?error=" + encodeURIComponent(parsedOptionGroups.error));
+  }
+  const hasOperationalOptions = parsedOptionGroups.groups.length > 0;
+  const opensDetailModal = hasOperationalOptions || asBool(formData.get("opens_detail_modal"));
 
   const referencesValidation = await validateCommercialMenuReferences(
     supabase,
@@ -436,6 +768,14 @@ async function createMenuItem(formData: FormData) {
 
   if (referencesValidation.error) {
     redirect("/menu/new?error=" + encodeURIComponent(referencesValidation.error));
+  }
+
+  const optionProductValidationError = await validateOperationalOptionProducts(
+    supabase,
+    parsedOptionGroups.groups,
+  );
+  if (optionProductValidationError) {
+    redirect("/menu/new?error=" + encodeURIComponent(optionProductValidationError));
   }
 
   let code = "";
@@ -474,6 +814,7 @@ async function createMenuItem(formData: FormData) {
     recipe_cost_amount: referencesValidation.recipeCostAmount,
     display_group: asText(formData.get("display_group")) || null,
     variant_label: asText(formData.get("variant_label")) || null,
+    has_operational_options: hasOperationalOptions,
   };
 
   const { data: createdItem, error } = await supabase
@@ -507,6 +848,16 @@ async function createMenuItem(formData: FormData) {
 
   if (!createdItem?.id) {
     redirect("/menu/new?error=" + encodeURIComponent("Item creado sin identificador."));
+  }
+
+  if (hasOperationalOptions) {
+    try {
+      await saveCatalogItemOptionGroups(supabase, createdItem.id, parsedOptionGroups.groups);
+    } catch (error) {
+      await supabase.schema("pass").from("catalog_items").delete().eq("id", createdItem.id);
+      const message = error instanceof Error ? error.message : "No se pudieron guardar opciones operacionales.";
+      redirect("/menu/new?error=" + encodeURIComponent(message));
+    }
   }
 
   const { error: presentationError } = await supabase
@@ -564,6 +915,7 @@ export default async function NewMenuItemPage({
 
   const [
     { data: sellOptionsRaw },
+    { data: inventoryProductsRaw },
     { data: categoriesRaw },
     { data: collectionsRaw },
     { data: collectionCategoryLinksRaw },
@@ -573,6 +925,12 @@ export default async function NewMenuItemPage({
       .from("sell_products_by_site")
       .select("site_id,product_id,name,sku,base_price,recipe_cost_amount")
       .order("name", { ascending: true }),
+    supabase
+      .from("products")
+      .select("id,name,sku,unit,stock_unit_code,is_active")
+      .eq("is_active", true)
+      .order("name", { ascending: true })
+      .limit(2000),
     supabase
       .schema("pass")
       .from("commercial_categories")
@@ -661,6 +1019,22 @@ export default async function NewMenuItemPage({
     }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
 
+
+  const inventoryProducts = ((inventoryProductsRaw ?? []) as InventoryProductRow[])
+    .map((product) => ({
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      unit: product.unit,
+      stock_unit_code: product.stock_unit_code,
+      is_active: product.is_active,
+      site_ids: [],
+      site_prices: {},
+      site_recipe_costs: {},
+      default_price: null,
+    }))
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
+
   const categorySiteIds = new Set(
     ((categoriesRaw ?? []) as CommercialCategoryRow[])
       .map((category) => String(category.site_id ?? "").trim())
@@ -694,6 +1068,7 @@ export default async function NewMenuItemPage({
         action={createMenuItem}
         sites={commercialSites}
         products={products}
+        inventoryProducts={inventoryProducts}
         categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
         collections={(collectionsRaw ?? []) as CommercialCollectionRow[]}
         collectionCategoryLinks={(collectionCategoryLinksRaw ?? []) as CollectionCategoryLinkRow[]}
@@ -721,6 +1096,7 @@ export default async function NewMenuItemPage({
           variant_label: "",
           pass_card_layout: "compact",
           opens_detail_modal: false,
+          option_groups: [],
         }}
       />
     </div>
