@@ -1,4 +1,5 @@
 ﻿import Link from "next/link";
+import Script from "next/script";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -65,6 +66,14 @@ type EmployeeTotals = {
   weekMinutes: number;
   fortnightMinutes: number;
   monthMinutes: number;
+};
+
+type ScheduleTableColumn = {
+  key: string;
+  label: string;
+  subLabel?: string;
+  width: number;
+  minWidth: number;
 };
 
 type StaffingRequirementRow = {
@@ -1955,6 +1964,21 @@ export default async function StaffSchedulePage({
     })).filter((group) => group.employees.length > 0);
   })();
 
+  const scheduleTableColumns: ScheduleTableColumn[] = [
+    { key: "area", label: "Área", width: 92, minWidth: 72 },
+    { key: "worker", label: "Trabajador", width: 260, minWidth: 160 },
+    { key: "role", label: "Rol", width: 160, minWidth: 110 },
+    ...weekDays.map((day, index) => ({
+      key: `day-${index}`,
+      label: day.label,
+      subLabel: day.shortLabel,
+      width: 158,
+      minWidth: 112,
+    })),
+    { key: "total", label: "Total semana", width: 128, minWidth: 104 },
+  ];
+  const scheduleTableInitialWidth = scheduleTableColumns.reduce((total, column) => total + column.width, 0);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -2113,7 +2137,7 @@ export default async function StaffSchedulePage({
             </Link>
           </div>
         {viewMode === "table" ? (
-          <div className="space-y-3">
+          <div className="space-y-3" data-schedule-table-shell>
             {selectedShift ? (
               <div className="ui-panel">
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
@@ -2340,29 +2364,220 @@ export default async function StaffSchedulePage({
               </form>
             </div>
 
+            <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-[var(--ui-muted)]">
+                  Ajusta la tabla: arrastra bordes de columnas, arrastra filas desde la línea inferior del trabajador, usa clic derecho en encabezados para ocultar columnas y cambia la densidad visual.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1 text-xs">
+                    <button
+                      type="button"
+                      data-schedule-density="compact"
+                      className="rounded-lg px-2.5 py-1 font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface)]"
+                    >
+                      Compacta
+                    </button>
+                    <button
+                      type="button"
+                      data-schedule-density="normal"
+                      className="rounded-lg px-2.5 py-1 font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface)]"
+                    >
+                      Normal
+                    </button>
+                    <button
+                      type="button"
+                      data-schedule-density="comfortable"
+                      className="rounded-lg px-2.5 py-1 font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface)]"
+                    >
+                      Cómoda
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    data-schedule-reset-layout
+                    className="ui-btn ui-btn--ghost ui-btn--sm"
+                  >
+                    Restablecer tabla
+                  </button>
+                  <details className="relative" data-schedule-column-menu>
+                    <summary className="ui-btn ui-btn--ghost ui-btn--sm cursor-pointer list-none">
+                      Columnas
+                    </summary>
+                    <div className="absolute right-0 z-30 mt-2 w-72 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 text-sm shadow-xl">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+                          Mostrar / ocultar
+                        </span>
+                        <span className="text-[11px] text-[var(--ui-muted)]">1 mínimo visible</span>
+                      </div>
+                      <div className="grid gap-1.5">
+                        {scheduleTableColumns.map((column) => (
+                          <label
+                            key={column.key}
+                            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-[var(--ui-text)] transition hover:bg-[var(--ui-surface-2)]"
+                          >
+                            <input
+                              type="checkbox"
+                              data-schedule-column-toggle={column.key}
+                              defaultChecked
+                              className="rounded border-[var(--ui-border)]"
+                            />
+                            <span className="min-w-0 flex-1 truncate">
+                              {column.subLabel ? `${column.label} · ${column.subLabel}` : column.label}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] leading-snug text-[var(--ui-muted)]">
+                        También puedes ocultar una columna con clic derecho sobre su encabezado.
+                      </p>
+                    </div>
+                  </details>
+                </div>
+              </div>
+            </div>
+
             <div className="ui-panel p-0 overflow-hidden">
+              <style>{`
+                [data-schedule-table] {
+                  --schedule-cell-y: 0.625rem;
+                  --schedule-shift-y: 0.375rem;
+                  table-layout: fixed;
+                }
+                [data-schedule-table][data-density="compact"] {
+                  --schedule-cell-y: 0.375rem;
+                  --schedule-shift-y: 0.25rem;
+                }
+                [data-schedule-table][data-density="comfortable"] {
+                  --schedule-cell-y: 0.875rem;
+                  --schedule-shift-y: 0.5rem;
+                }
+                [data-schedule-table] [data-schedule-cell] {
+                  padding-top: var(--schedule-cell-y);
+                  padding-bottom: var(--schedule-cell-y);
+                  overflow-wrap: anywhere;
+                  word-break: break-word;
+                  white-space: normal;
+                }
+                [data-schedule-table] [data-schedule-shift-card] {
+                  padding-top: var(--schedule-shift-y);
+                  padding-bottom: var(--schedule-shift-y);
+                  overflow-wrap: anywhere;
+                  word-break: break-word;
+                  white-space: normal;
+                }
+                [data-schedule-table] [data-schedule-resize-handle] {
+                  position: absolute;
+                  top: 0;
+                  right: -4px;
+                  z-index: 10;
+                  height: 100%;
+                  width: 8px;
+                  cursor: col-resize;
+                  border: 0;
+                  background: transparent;
+                  padding: 0;
+                }
+                [data-schedule-table] [data-schedule-resize-handle]::after {
+                  content: "";
+                  position: absolute;
+                  top: 20%;
+                  bottom: 20%;
+                  left: 3px;
+                  width: 2px;
+                  border-radius: 999px;
+                  background: transparent;
+                  transition: background 120ms ease;
+                }
+                [data-schedule-table] th:hover [data-schedule-resize-handle]::after,
+                [data-schedule-table] [data-schedule-resize-handle]:focus-visible::after {
+                  background: var(--ui-brand);
+                }
+                [data-schedule-table] [data-schedule-row-resizer] {
+                  position: absolute;
+                  right: 0;
+                  bottom: -3px;
+                  left: 0;
+                  z-index: 9;
+                  height: 7px;
+                  cursor: row-resize;
+                  border: 0;
+                  background: transparent;
+                  padding: 0;
+                }
+                [data-schedule-table] [data-schedule-row-resizer]::after {
+                  content: "";
+                  position: absolute;
+                  right: 10px;
+                  bottom: 2px;
+                  left: 10px;
+                  height: 2px;
+                  border-radius: 999px;
+                  background: transparent;
+                  transition: background 120ms ease;
+                }
+                [data-schedule-table] tr:hover [data-schedule-row-resizer]::after,
+                [data-schedule-table] [data-schedule-row-resizer]:focus-visible::after {
+                  background: var(--ui-brand);
+                }
+                [data-schedule-column-menu] > summary::-webkit-details-marker {
+                  display: none;
+                }
+              `}</style>
               <div className="overflow-auto ui-scrollbar-subtle">
-                <table className="min-w-[1320px] w-full border-collapse text-sm">
+                <table
+                  className="w-full border-collapse text-sm"
+                  data-schedule-table
+                  data-storage-key={`viso:schedule-table:v2:${selectedSiteId || "global"}`}
+                  style={{ minWidth: scheduleTableInitialWidth }}
+                >
+                  <colgroup>
+                    {scheduleTableColumns.map((column) => (
+                      <col
+                        key={column.key}
+                        data-schedule-column={column.key}
+                        data-default-width={column.width}
+                        data-min-width={column.minWidth}
+                        style={{ width: column.width }}
+                      />
+                    ))}
+                  </colgroup>
                   <thead className="bg-[var(--ui-surface-2)] text-xs uppercase tracking-wide text-[var(--ui-muted)]">
                     <tr>
-                      <th className="border-b border-r border-[var(--ui-border)] px-3 py-3 text-left">Área</th>
-                      <th className="border-b border-r border-[var(--ui-border)] px-3 py-3 text-left">Trabajador</th>
-                      <th className="border-b border-r border-[var(--ui-border)] px-3 py-3 text-left">Rol</th>
-                      {weekDays.map((day) => (
-                        <th key={day.iso} className="border-b border-r border-[var(--ui-border)] px-3 py-3 text-left">
-                          <div>{day.label}</div>
-                          <div className="mt-0.5 text-[11px] normal-case tracking-normal">{day.shortLabel}</div>
+                      {scheduleTableColumns.map((column) => (
+                        <th
+                          key={column.key}
+                          data-schedule-column={column.key}
+                          data-schedule-cell
+                          className="relative border-b border-r border-[var(--ui-border)] px-3 text-left last:border-r-0"
+                          title="Arrastra el borde derecho para cambiar ancho. Clic derecho para ocultar columna."
+                        >
+                          <div className="min-w-0 pr-3">
+                            <div className="truncate">{column.label}</div>
+                            {column.subLabel ? (
+                              <div className="mt-0.5 text-[11px] normal-case tracking-normal">
+                                {column.subLabel}
+                              </div>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            data-schedule-resize-handle={column.key}
+                            aria-label={`Cambiar ancho de columna ${column.label}`}
+                          />
                         </th>
                       ))}
-                      <th className="border-b border-[var(--ui-border)] px-3 py-3 text-left">Total semana</th>
                     </tr>
                   </thead>
                   <tbody>
                     {employeesGroupedByArea.flatMap((group) => [
                       <tr key={`area-${group.label}`} className={group.visual.rowClass}>
                         <td
-                          colSpan={weekDays.length + 4}
-                          className="border-b border-t border-[var(--ui-border)] px-3 py-2.5 text-sm font-bold uppercase tracking-wide text-[var(--ui-text)]"
+                          colSpan={scheduleTableColumns.length}
+                          data-schedule-area-row
+                          data-schedule-cell
+                          className="border-b border-t border-[var(--ui-border)] px-3 text-sm font-bold uppercase tracking-wide text-[var(--ui-text)]"
                         >
                           {group.label}
                         </td>
@@ -2372,22 +2587,48 @@ export default async function StaffSchedulePage({
                         const weekMinutes = totalsByEmployee[employee.id]?.weekMinutes ?? 0;
                         const areaVisual = getAreaVisualFromRole(employee.role);
                         return (
-                          <tr key={employee.id} className={`align-top ${areaVisual.rowClass}`}>
-                            <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5">
-                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${areaVisual.chipClass}`}>
+                          <tr
+                            key={employee.id}
+                            data-schedule-row={employee.id}
+                            className={`align-top ${areaVisual.rowClass}`}
+                          >
+                            <td
+                              data-schedule-column="area"
+                              data-schedule-cell
+                              className="border-b border-r border-[var(--ui-border)] px-3"
+                            >
+                              <span className={`inline-flex max-w-full rounded-full border px-2 py-0.5 text-[11px] font-semibold ${areaVisual.chipClass}`}>
                                 {areaVisual.label}
                               </span>
                             </td>
-                            <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5 font-semibold text-[var(--ui-text)]">
-                              {employeeName}
+                            <td
+                              data-schedule-column="worker"
+                              data-schedule-cell
+                              className="relative border-b border-r border-[var(--ui-border)] px-3 font-semibold text-[var(--ui-text)]"
+                            >
+                              <div className="min-w-0 leading-snug">{employeeName}</div>
+                              <button
+                                type="button"
+                                data-schedule-row-resizer={employee.id}
+                                aria-label={`Cambiar alto de fila de ${employeeName}`}
+                              />
                             </td>
-                            <td className="border-b border-r border-[var(--ui-border)] px-3 py-2.5 text-[var(--ui-muted)]">
+                            <td
+                              data-schedule-column="role"
+                              data-schedule-cell
+                              className="border-b border-r border-[var(--ui-border)] px-3 text-[var(--ui-muted)]"
+                            >
                               {employee.role ?? "Sin rol"}
                             </td>
-                            {weekDays.map((day) => {
+                            {weekDays.map((day, dayIndex) => {
                               const dayRows = shiftsByEmployeeDay.get(`${employee.id}__${day.iso}`) ?? [];
                               return (
-                                <td key={`${employee.id}-${day.iso}`} className="border-b border-r border-[var(--ui-border)] px-2.5 py-2 align-top">
+                                <td
+                                  key={`${employee.id}-${day.iso}`}
+                                  data-schedule-column={`day-${dayIndex}`}
+                                  data-schedule-cell
+                                  className="border-b border-r border-[var(--ui-border)] px-2.5 align-top"
+                                >
                                   {dayRows.length === 0 ? (
                                     <span className="text-xs text-[var(--ui-muted)]">—</span>
                                   ) : (
@@ -2396,15 +2637,16 @@ export default async function StaffSchedulePage({
                                         <Link
                                           key={shift.id}
                                           href={appendReturnParams(returnTo, { edit_shift: shift.id })}
-                                          className={`block w-full rounded-lg border px-2 py-1.5 no-underline ${areaVisual.shiftClass} ${
+                                          data-schedule-shift-card
+                                          className={`block w-full rounded-lg border px-2 no-underline ${areaVisual.shiftClass} ${
                                             shift.published_at ? "ring-1 ring-emerald-300/70" : "ring-1 ring-amber-300/70"
                                           } ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
                                           title={shift.notes ?? ""}
                                         >
-                                          <div className="text-xs font-semibold text-[var(--ui-text)]">
+                                          <div className="text-xs font-semibold leading-snug text-[var(--ui-text)]">
                                             {formatShiftRange(shift.start_time, shift.end_time, shift.show_end_as_close, shift.shift_kind)}
                                           </div>
-                                          <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-[var(--ui-muted)]">
+                                          <div className="mt-0.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] leading-tight text-[var(--ui-muted)]">
                                             {shift.shift_kind === "descanso" ? (
                                               <span>Día libre</span>
                                             ) : (
@@ -2421,8 +2663,12 @@ export default async function StaffSchedulePage({
                                 </td>
                               );
                             })}
-                            <td className="border-b border-[var(--ui-border)] px-3 py-2.5">
-                              <span className="inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-xs font-semibold text-[var(--ui-text)]">
+                            <td
+                              data-schedule-column="total"
+                              data-schedule-cell
+                              className="border-b border-[var(--ui-border)] px-3"
+                            >
+                              <span className="inline-flex max-w-full rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-xs font-semibold text-[var(--ui-text)]">
                                 {formatHoursCompact(weekMinutes)}
                               </span>
                             </td>
@@ -2433,6 +2679,262 @@ export default async function StaffSchedulePage({
                   </tbody>
                 </table>
               </div>
+              <Script id="viso-schedule-table-tools" strategy="afterInteractive">
+                {`
+                  (function () {
+                    function readState(storageKey) {
+                      try {
+                        return JSON.parse(window.localStorage.getItem(storageKey) || "{}") || {};
+                      } catch (error) {
+                        return {};
+                      }
+                    }
+
+                    function writeState(storageKey, state) {
+                      try {
+                        window.localStorage.setItem(storageKey, JSON.stringify(state));
+                      } catch (error) {
+                        // Ignore storage errors. The table remains usable in the current session.
+                      }
+                    }
+
+                    function asNumber(value, fallback) {
+                      var parsed = parseFloat(String(value || ""));
+                      return Number.isFinite(parsed) ? parsed : fallback;
+                    }
+
+                    function initScheduleTable(table) {
+                      if (!table || table.getAttribute("data-schedule-ready") === "1") return;
+                      table.setAttribute("data-schedule-ready", "1");
+
+                      var shell = table.closest("[data-schedule-table-shell]") || table.parentElement || document;
+                      var storageKey = table.getAttribute("data-storage-key") || "viso:schedule-table:v2:global";
+                      var state = readState(storageKey);
+
+                      function getColumns() {
+                        return Array.from(table.querySelectorAll("col[data-schedule-column]"));
+                      }
+
+                      function getColumnKeys() {
+                        return getColumns()
+                          .map(function (column) { return column.getAttribute("data-schedule-column"); })
+                          .filter(Boolean);
+                      }
+
+                      function getHiddenColumns() {
+                        return new Set(Array.isArray(state.hiddenColumns) ? state.hiddenColumns : []);
+                      }
+
+                      function save() {
+                        writeState(storageKey, state);
+                      }
+
+                      function applyLayout() {
+                        var hiddenColumns = getHiddenColumns();
+                        var columnWidths = state.columnWidths && typeof state.columnWidths === "object"
+                          ? state.columnWidths
+                          : {};
+                        var visibleCount = 0;
+                        var totalWidth = 0;
+
+                        getColumns().forEach(function (column) {
+                          var key = column.getAttribute("data-schedule-column");
+                          if (!key) return;
+                          var fallbackWidth = asNumber(column.getAttribute("data-default-width"), 140);
+                          var width = Math.max(
+                            asNumber(column.getAttribute("data-min-width"), 80),
+                            asNumber(columnWidths[key], fallbackWidth)
+                          );
+                          var isHidden = hiddenColumns.has(key);
+                          column.style.width = isHidden ? "0px" : width + "px";
+                          column.style.display = isHidden ? "none" : "";
+                          if (!isHidden) {
+                            visibleCount += 1;
+                            totalWidth += width;
+                          }
+                        });
+
+                        getColumnKeys().forEach(function (key) {
+                          var isHidden = hiddenColumns.has(key);
+                          table.querySelectorAll('[data-schedule-column="' + key + '"]').forEach(function (element) {
+                            element.style.display = isHidden ? "none" : "";
+                          });
+                        });
+
+                        table.querySelectorAll("[data-schedule-area-row]").forEach(function (cell) {
+                          cell.colSpan = Math.max(1, visibleCount);
+                        });
+
+                        shell.querySelectorAll("[data-schedule-column-toggle]").forEach(function (input) {
+                          var key = input.getAttribute("data-schedule-column-toggle");
+                          if (!key) return;
+                          input.checked = !hiddenColumns.has(key);
+                          input.disabled = !hiddenColumns.has(key) && visibleCount <= 1;
+                        });
+
+                        table.style.minWidth = Math.max(totalWidth, 360) + "px";
+
+                        var density = state.density === "compact" || state.density === "comfortable"
+                          ? state.density
+                          : "normal";
+                        table.setAttribute("data-density", density);
+                        shell.querySelectorAll("[data-schedule-density]").forEach(function (button) {
+                          var isActive = button.getAttribute("data-schedule-density") === density;
+                          button.setAttribute("aria-pressed", isActive ? "true" : "false");
+                          button.classList.toggle("bg-[var(--ui-surface)]", isActive);
+                          button.classList.toggle("text-[var(--ui-text)]", isActive);
+                          button.classList.toggle("shadow-sm", isActive);
+                        });
+
+                        var rowHeights = state.rowHeights && typeof state.rowHeights === "object" ? state.rowHeights : {};
+                        table.querySelectorAll("tr[data-schedule-row]").forEach(function (row) {
+                          var rowKey = row.getAttribute("data-schedule-row");
+                          var height = asNumber(rowHeights[rowKey], 0);
+                          row.style.height = height > 0 ? height + "px" : "";
+                        });
+                      }
+
+                      function setColumnHidden(key, hidden) {
+                        if (!key) return;
+                        var keys = getColumnKeys();
+                        var hiddenColumns = getHiddenColumns();
+                        if (hidden) {
+                          if (keys.length - hiddenColumns.size <= 1) return;
+                          hiddenColumns.add(key);
+                        } else {
+                          hiddenColumns.delete(key);
+                        }
+                        state.hiddenColumns = Array.from(hiddenColumns);
+                        save();
+                        applyLayout();
+                      }
+
+                      shell.querySelectorAll("[data-schedule-column-toggle]").forEach(function (input) {
+                        input.addEventListener("change", function () {
+                          var key = input.getAttribute("data-schedule-column-toggle");
+                          setColumnHidden(key, !input.checked);
+                        });
+                      });
+
+                      shell.querySelectorAll("[data-schedule-density]").forEach(function (button) {
+                        button.addEventListener("click", function () {
+                          state.density = button.getAttribute("data-schedule-density") || "normal";
+                          save();
+                          applyLayout();
+                        });
+                      });
+
+                      shell.querySelectorAll("[data-schedule-reset-layout]").forEach(function (button) {
+                        button.addEventListener("click", function () {
+                          state = { density: "normal" };
+                          save();
+                          applyLayout();
+                        });
+                      });
+
+                      shell.addEventListener("contextmenu", function (event) {
+                        var target = event.target;
+                        if (!target || typeof target.closest !== "function") return;
+                        var header = target.closest("th[data-schedule-column]");
+                        if (!header || !table.contains(header)) return;
+                        var key = header.getAttribute("data-schedule-column");
+                        if (!key) return;
+                        event.preventDefault();
+                        setColumnHidden(key, true);
+                      });
+
+                      shell.addEventListener("pointerdown", function (event) {
+                        var target = event.target;
+                        if (!target || typeof target.closest !== "function") return;
+                        var handle = target.closest("[data-schedule-resize-handle]");
+                        if (!handle || !shell.contains(handle)) return;
+
+                        var columnKey = handle.getAttribute("data-schedule-resize-handle");
+                        var column = table.querySelector('col[data-schedule-column="' + columnKey + '"]');
+                        if (!column) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+
+                        var startX = event.clientX;
+                        var minWidth = asNumber(column.getAttribute("data-min-width"), 80);
+                        var fallbackWidth = asNumber(column.getAttribute("data-default-width"), 140);
+                        var startWidth = asNumber(
+                          state.columnWidths && state.columnWidths[columnKey],
+                          asNumber(column.style.width, fallbackWidth)
+                        );
+                        document.body.style.cursor = "col-resize";
+                        document.body.style.userSelect = "none";
+
+                        function onMove(moveEvent) {
+                          var nextWidth = Math.max(minWidth, Math.round(startWidth + moveEvent.clientX - startX));
+                          state.columnWidths = state.columnWidths && typeof state.columnWidths === "object" ? state.columnWidths : {};
+                          state.columnWidths[columnKey] = nextWidth;
+                          save();
+                          applyLayout();
+                        }
+
+                        function onUp() {
+                          document.removeEventListener("pointermove", onMove);
+                          document.removeEventListener("pointerup", onUp);
+                          document.body.style.cursor = "";
+                          document.body.style.userSelect = "";
+                        }
+
+                        document.addEventListener("pointermove", onMove);
+                        document.addEventListener("pointerup", onUp, { once: true });
+                      });
+
+                      shell.addEventListener("pointerdown", function (event) {
+                        var target = event.target;
+                        if (!target || typeof target.closest !== "function") return;
+                        var handle = target.closest("[data-schedule-row-resizer]");
+                        if (!handle || !shell.contains(handle)) return;
+
+                        var rowKey = handle.getAttribute("data-schedule-row-resizer");
+                        var row = table.querySelector('tr[data-schedule-row="' + rowKey + '"]');
+                        if (!row) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+
+                        var startY = event.clientY;
+                        var startHeight = row.getBoundingClientRect().height;
+                        document.body.style.cursor = "row-resize";
+                        document.body.style.userSelect = "none";
+
+                        function onRowMove(moveEvent) {
+                          var nextHeight = Math.max(46, Math.round(startHeight + moveEvent.clientY - startY));
+                          state.rowHeights = state.rowHeights && typeof state.rowHeights === "object" ? state.rowHeights : {};
+                          state.rowHeights[rowKey] = nextHeight;
+                          save();
+                          applyLayout();
+                        }
+
+                        function onRowUp() {
+                          document.removeEventListener("pointermove", onRowMove);
+                          document.removeEventListener("pointerup", onRowUp);
+                          document.body.style.cursor = "";
+                          document.body.style.userSelect = "";
+                        }
+
+                        document.addEventListener("pointermove", onRowMove);
+                        document.addEventListener("pointerup", onRowUp, { once: true });
+                      });
+
+                      applyLayout();
+                    }
+
+                    function initAllScheduleTables() {
+                      document.querySelectorAll("[data-schedule-table]").forEach(initScheduleTable);
+                    }
+
+                    if (document.readyState === "loading") {
+                      document.addEventListener("DOMContentLoaded", initAllScheduleTables, { once: true });
+                    } else {
+                      initAllScheduleTables();
+                    }
+                  })();
+                `}
+              </Script>
             </div>
             <p className="text-xs text-[var(--ui-muted)]">
               Vista tabla para planear rápido equipos grandes. Usa la vista <strong>Planner</strong> para edición detallada por bloque.
