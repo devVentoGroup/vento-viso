@@ -2632,13 +2632,13 @@ export default async function StaffSchedulePage({
                                   {dayRows.length === 0 ? (
                                     <span className="text-xs text-[var(--ui-muted)]">—</span>
                                   ) : (
-                                    <div className="space-y-1.5">
+                                    <div className="flex flex-wrap items-stretch gap-1.5">
                                       {dayRows.map((shift) => (
                                         <Link
                                           key={shift.id}
                                           href={appendReturnParams(returnTo, { edit_shift: shift.id })}
                                           data-schedule-shift-card
-                                          className={`block w-full rounded-lg border px-2 no-underline ${areaVisual.shiftClass} ${
+                                          className={`flex min-w-[78px] flex-1 basis-[78px] flex-col rounded-lg border px-2 no-underline ${areaVisual.shiftClass} ${
                                             shift.published_at ? "ring-1 ring-emerald-300/70" : "ring-1 ring-amber-300/70"
                                           } ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
                                           title={shift.notes ?? ""}
