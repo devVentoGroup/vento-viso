@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 
 type SiteOption = {
   id: string;
@@ -124,6 +124,44 @@ function formatCopInput(value: string) {
   }).format(parsed)}`;
 }
 
+function normalizeSearchValue(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function getProductDisplayName(product: ProductOption) {
+  return product.name?.trim() || product.sku?.trim() || "Producto sin nombre";
+}
+
+function getProductSearchText(product: ProductOption) {
+  return normalizeSearchValue(
+    [
+      product.name,
+      product.sku,
+      product.id,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+}
+
+function getProductPriceForSite(product: ProductOption, siteId: string) {
+  const sitePrice = siteId ? product.site_prices?.[siteId] : null;
+  if (typeof sitePrice === "number" && Number.isFinite(sitePrice) && sitePrice > 0) {
+    return sitePrice;
+  }
+
+  const fallbackPrice = product.default_price;
+  if (typeof fallbackPrice === "number" && Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
+    return fallbackPrice;
+  }
+
+  return null;
+}
+
 export function MenuItemForm({
   mode,
   sites,
@@ -139,6 +177,8 @@ export function MenuItemForm({
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
   const [productId, setProductId] = useState(initial.product_id);
+  const [productQuery, setProductQuery] = useState("");
+  const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [priceAmount, setPriceAmount] = useState(initial.price_amount);
   const [compareAtAmount, setCompareAtAmount] = useState(initial.compare_at_amount);
   const [siteId, setSiteId] = useState(initial.site_id || sites[0]?.id || "");
@@ -164,6 +204,8 @@ export function MenuItemForm({
   const [uploadMessage, setUploadMessage] = useState("");
   const generatedFormId = useId().replace(/:/g, "");
   const resolvedFormId = formId || `menu-item-form-${generatedFormId}`;
+  const productPickerRef = useRef<HTMLDivElement | null>(null);
+  const productPickerListId = `${resolvedFormId}-product-results`;
 
   const siteLabel = useMemo(() => {
     const selected = sites.find((site) => site.id === siteId);
@@ -183,6 +225,17 @@ export function MenuItemForm({
   const selectedProduct = useMemo(() => {
     return visibleProducts.find((product) => product.id === productId) ?? null;
   }, [visibleProducts, productId]);
+
+  const matchingProducts = useMemo(() => {
+    const query = normalizeSearchValue(productQuery);
+    if (!query) return visibleProducts;
+
+    return visibleProducts.filter((product) => getProductSearchText(product).includes(query));
+  }, [productQuery, visibleProducts]);
+
+  const productResultsLimit = productQuery.trim() ? 30 : 12;
+  const productResults = matchingProducts.slice(0, productResultsLimit);
+  const hasMoreProductResults = matchingProducts.length > productResults.length;
 
   const visibleCollections = useMemo(() => {
     return collections.filter((collection) => {
@@ -273,8 +326,29 @@ export function MenuItemForm({
   useEffect(() => {
     if (!productId) return;
     const stillValid = visibleProducts.some((product) => product.id === productId);
-    if (!stillValid) setProductId("");
+    if (!stillValid) {
+      setProductId("");
+      setProductQuery("");
+    }
   }, [productId, visibleProducts]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!productPickerRef.current) return;
+      const target = event.target as Node | null;
+      if (target && !productPickerRef.current.contains(target)) {
+        setIsProductPickerOpen(false);
+      }
+    }
+
+    if (isProductPickerOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isProductPickerOpen]);
 
   const suggestedPrice = useMemo(() => {
     if (!selectedProduct) return null;
@@ -469,24 +543,134 @@ export function MenuItemForm({
               </p>
             ) : null}
           </label>
-          <label className="space-y-2">
+          <div className="space-y-2" ref={productPickerRef}>
             <span className="ui-label">Producto operacional base</span>
-            <select
-              name="product_id"
-              className="ui-input"
-              value={productId}
-              onChange={(event) => setProductId(event.target.value)}
-              required
-            >
-              <option value="">Selecciona producto operacional habilitado</option>
-              {visibleProducts.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {(product.name ?? "Sin nombre") +
-                    (product.sku ? ` (${product.sku})` : "") +
-                    (product.is_active === false ? " [inactivo]" : "")}
-                </option>
-              ))}
-            </select>
+            <input type="hidden" name="product_id" value={productId} />
+
+            <div className="relative">
+              <input
+                type="search"
+                className="ui-input pr-24"
+                value={productQuery}
+                onChange={(event) => {
+                  setProductQuery(event.target.value);
+                  setIsProductPickerOpen(true);
+                }}
+                onFocus={() => setIsProductPickerOpen(true)}
+                placeholder={
+                  selectedProduct
+                    ? `${getProductDisplayName(selectedProduct)}${selectedProduct.sku ? ` (${selectedProduct.sku})` : ""}`
+                    : "Buscar por nombre, SKU o código"
+                }
+                role="combobox"
+                aria-expanded={isProductPickerOpen}
+                aria-controls={productPickerListId}
+                aria-autocomplete="list"
+              />
+
+              {productQuery ? (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-bold text-[var(--ui-brand)] transition hover:bg-[var(--ui-surface-2)]"
+                  onClick={() => {
+                    setProductQuery("");
+                    setIsProductPickerOpen(true);
+                  }}
+                >
+                  Limpiar
+                </button>
+              ) : null}
+
+              {isProductPickerOpen ? (
+                <div
+                  id={productPickerListId}
+                  role="listbox"
+                  className="absolute z-30 mt-2 max-h-80 w-full overflow-auto rounded-2xl border border-[var(--ui-border)] bg-white shadow-[var(--ui-shadow-2)]"
+                >
+                  {productResults.length > 0 ? (
+                    productResults.map((product) => {
+                      const isSelected = product.id === productId;
+                      const optionPrice = getProductPriceForSite(product, siteId);
+
+                      return (
+                        <button
+                          key={product.id}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          className={`block w-full border-b border-[var(--ui-border)] px-3 py-3 text-left last:border-b-0 transition hover:bg-[var(--ui-surface-2)] ${
+                            isSelected ? "bg-[var(--ui-surface-2)]" : "bg-white"
+                          }`}
+                          onClick={() => {
+                            setProductId(product.id);
+                            setProductQuery("");
+                            setIsProductPickerOpen(false);
+                          }}
+                        >
+                          <span className="block truncate text-sm font-black text-[var(--ui-text)]">
+                            {getProductDisplayName(product)}
+                          </span>
+                          <span className="mt-0.5 block truncate text-xs font-semibold text-[var(--ui-muted)]">
+                            {[
+                              product.sku ? `SKU ${product.sku}` : null,
+                              optionPrice != null ? `Precio base ${asCop(String(optionPrice))}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ") || "Producto habilitado para esta sede"}
+                          </span>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="px-3 py-4 text-sm font-semibold text-[var(--ui-muted)]">
+                      No hay productos que coincidan con la búsqueda.
+                    </div>
+                  )}
+
+                  {hasMoreProductResults ? (
+                    <div className="border-t border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--ui-muted)]">
+                      Mostrando {productResults.length} de {matchingProducts.length}. Escribe más para afinar.
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            {selectedProduct ? (
+              <div className="flex items-start justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-black text-[var(--ui-text)]">
+                    {getProductDisplayName(selectedProduct)}
+                  </div>
+                  <div className="ui-caption mt-1">
+                    {[
+                      selectedProduct.sku ? `SKU ${selectedProduct.sku}` : null,
+                      suggestedPrice != null ? `Precio sugerido ${asCop(String(suggestedPrice))}` : null,
+                      suggestedRecipeCost != null ? `Costo receta ${asCop(String(suggestedRecipeCost))}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "Producto operacional seleccionado"}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--ghost ui-btn--sm shrink-0"
+                  onClick={() => {
+                    setProductId("");
+                    setProductQuery("");
+                    setIsProductPickerOpen(true);
+                  }}
+                >
+                  Cambiar
+                </button>
+              </div>
+            ) : (
+              <p className="ui-caption">
+                Selecciona el producto operacional que soporta inventario, precio base y receta para este item comercial.
+              </p>
+            )}
+
             {siteId && visibleProducts.length === 0 ? (
               <p className="ui-caption">
                 No hay productos operacionales habilitados para crear ítems comerciales en esta sede.
@@ -497,7 +681,7 @@ export function MenuItemForm({
                 El precio sugerido viene de la configuración base de esta sede, pero puedes definir un precio comercial propio.
               </p>
             ) : null}
-          </label>
+          </div>
         </div>
       </div>
 
