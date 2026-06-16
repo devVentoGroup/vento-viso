@@ -1,0 +1,727 @@
+import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
+
+import { requireAppAccess } from "@/lib/auth/guard";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+export const dynamic = "force-dynamic";
+
+type SimpleGroupKind = "choice" | "extras" | "replacements" | "removals" | "preferences" | "recommendations";
+
+type JsonRecord = Record<string, unknown>;
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readNumber(value: unknown, fallback = 0) {
+  const parsed = typeof value === "number" ? value : Number(readString(value));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readBool(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "on", "1", "yes", "si", "sí"].includes(normalized)) return true;
+    if (["false", "off", "0", "no"].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function readOptionalText(value: unknown) {
+  const text = readString(value);
+  return text || null;
+}
+
+function slugify(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function asCatalogCode(value: unknown, fallback: string) {
+  return slugify(readString(value) || fallback);
+}
+
+function readGroupMetadata(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
+}
+
+function parseSimpleGroupKind(value: unknown): SimpleGroupKind {
+  const kind = readString(value);
+  if (kind === "extras" || kind === "replacements" || kind === "removals" || kind === "preferences" || kind === "recommendations") {
+    return kind;
+  }
+  return "choice";
+}
+
+function getSimpleGroupKind(group: { code: string | null; name: string | null; metadata: JsonRecord | null }): SimpleGroupKind {
+  const metadata = readGroupMetadata(group.metadata);
+  const preset = typeof metadata.preset === "string" ? metadata.preset : "";
+  const code = String(group.code ?? "").toLowerCase();
+  const name = String(group.name ?? "").toLowerCase();
+
+  if (preset === "extras" || code.includes("extra") || name.includes("extra") || name.includes("adicion")) return "extras";
+  if (preset === "replacements" || code.includes("cambio") || code.includes("reemplazo") || name.includes("cambio") || name.includes("reemplazo") || name.includes("sustit")) return "replacements";
+  if (preset === "removals" || code.includes("quitar") || name.includes("quitar") || name.includes("sin ")) return "removals";
+  if (preset === "recommendations" || name.includes("recomend") || name.includes("tambien") || name.includes("también") || name.includes("sugerir")) return "recommendations";
+  if (preset === "preferences" || name.includes("preferencia") || name.includes("instruccion")) return "preferences";
+  return "choice";
+}
+
+function getSimpleGroupCreationDefaults(kind: SimpleGroupKind) {
+  switch (kind) {
+    case "extras":
+      return { name: "Adiciones", description: "El cliente puede agregar extras o adicionales.", selectionType: "multiple", isRequired: false, minSelect: 0, maxSelect: 10, sortBase: 200 };
+    case "replacements":
+      return { name: "Cambios", description: "El cliente puede reemplazar un ingrediente de la receta por otro insumo.", selectionType: "multiple", isRequired: false, minSelect: 0, maxSelect: 10, sortBase: 300 };
+    case "removals":
+      return { name: "Quitar ingredientes", description: "Ingredientes que el cliente puede pedir retirar de este producto.", selectionType: "multiple", isRequired: false, minSelect: 0, maxSelect: 99, sortBase: 900 };
+    case "preferences":
+      return { name: "Preferencias", description: "El cliente puede dejar instrucciones de preparación.", selectionType: "multiple", isRequired: false, minSelect: 0, maxSelect: 10, sortBase: 700 };
+    case "recommendations":
+      return { name: "También puedes agregar", description: "Bebidas, postres o acompañamientos que el cliente puede sumar.", selectionType: "multiple", isRequired: false, minSelect: 0, maxSelect: 10, sortBase: 800 };
+    case "choice":
+    default:
+      return { name: "Elige una opción", description: "El cliente debe escoger una opción.", selectionType: "single", isRequired: true, minSelect: 1, maxSelect: 1, sortBase: 100 };
+  }
+}
+
+function normalizeSelectBounds(selectionType: string, isRequired: boolean, minValue: unknown, maxValue: unknown) {
+  const rawMin = Math.round(Math.max(0, readNumber(minValue, 0)));
+  const rawMax = Math.round(Math.max(0, readNumber(maxValue, 1)));
+  const minSelect = Math.max(isRequired ? 1 : 0, rawMin);
+
+  if (selectionType === "single") {
+    return { minSelect: Math.min(minSelect, 1), maxSelect: 1 };
+  }
+
+  return { minSelect, maxSelect: Math.max(1, rawMax, minSelect) };
+}
+
+function parseOptionEffectType(value: unknown) {
+  const effectType = readString(value);
+  if (effectType === "additive" || effectType === "replacement" || effectType === "removal") return effectType;
+  return "preference";
+}
+
+function getSimpleDefaultEffect(kind: SimpleGroupKind) {
+  switch (kind) {
+    case "extras":
+    case "recommendations":
+      return "additive";
+    case "replacements":
+      return "replacement";
+    case "removals":
+      return "removal";
+    case "preferences":
+    case "choice":
+    default:
+      return "preference";
+  }
+}
+
+async function getNextOptionGroupSortOrder(supabase: ReturnType<typeof createAdminClient>, itemId: string, fallbackBase: number) {
+  const { data } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .select("sort_order")
+    .eq("catalog_item_id", itemId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const current = Number(data?.sort_order ?? fallbackBase - 10);
+  return Number.isFinite(current) ? current + 10 : fallbackBase;
+}
+
+async function getNextOptionSortOrder(supabase: ReturnType<typeof createAdminClient>, groupId: string) {
+  const { data } = await supabase
+    .schema("pass")
+    .from("catalog_item_options")
+    .select("sort_order")
+    .eq("option_group_id", groupId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const current = Number(data?.sort_order ?? -10);
+  return Number.isFinite(current) ? current + 10 : 0;
+}
+
+async function fetchSnapshot(supabase: ReturnType<typeof createAdminClient>, itemId: string) {
+  const { data: item } = await supabase
+    .schema("pass")
+    .from("catalog_items")
+    .select("id,site_id,product_id")
+    .eq("id", itemId)
+    .maybeSingle();
+
+  if (!item) throw new Error("Producto no encontrado.");
+
+  const { data: optionGroupsRaw } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .select("id,catalog_item_id,code,name,description,selection_type,is_required,min_select,max_select,sort_order,is_active,metadata")
+    .eq("catalog_item_id", itemId)
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+
+  const optionGroups = optionGroupsRaw ?? [];
+  const optionGroupIds = optionGroups.map((group) => group.id);
+
+  const { data: optionOptionsRaw } = optionGroupIds.length > 0
+    ? await supabase
+      .schema("pass")
+      .from("catalog_item_options")
+      .select("id,option_group_id,code,name,description,price_delta_amount,product_id,effect_type,is_default,is_active,sort_order,metadata")
+      .in("option_group_id", optionGroupIds)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true })
+    : { data: [] };
+
+  const options = optionOptionsRaw ?? [];
+  const optionIds = options.map((option) => option.id);
+
+  const [
+    { data: consumptionRulesRaw },
+    { data: recipeEffectsRaw },
+    { data: recipeIngredientsRaw },
+    { data: consumptionProductsRaw },
+    { data: inventoryUnitsRaw },
+    { data: commercialCatalogItemsRaw },
+  ] = await Promise.all([
+    optionIds.length > 0
+      ? supabase
+        .schema("pass")
+        .from("catalog_item_option_consumption_rules")
+        .select("id,option_id,code,name,product_id,effect_type,quantity_per_option,stock_unit_code,input_quantity_per_option,input_unit_code,conversion_factor_to_stock,input_uom_profile_id,source_location_strategy,source_location_id,source_location_position_id,is_active,sort_order,metadata")
+        .in("option_id", optionIds)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true })
+      : Promise.resolve({ data: [] }),
+    optionIds.length > 0
+      ? supabase
+        .schema("pass")
+        .from("catalog_item_option_recipe_effects")
+        .select("id,option_id,effect_type,target_ingredient_product_id,recipe_component_code,quantity_mode,quantity_amount,stock_unit_code,is_active,sort_order,metadata")
+        .in("option_id", optionIds)
+        .order("sort_order", { ascending: true })
+      : Promise.resolve({ data: [] }),
+    item.product_id
+      ? supabase
+        .from("recipes")
+        .select("id,product_id,ingredient_product_id,quantity,is_active")
+        .eq("product_id", item.product_id)
+        .eq("is_active", true)
+        .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] }),
+    supabase
+      .from("products")
+      .select("id,name,sku,unit,stock_unit_code,product_type,is_active")
+      .eq("is_active", true)
+      .order("name", { ascending: true }),
+    supabase
+      .from("inventory_units")
+      .select("code,name,symbol,family,is_active")
+      .eq("is_active", true)
+      .order("family", { ascending: true })
+      .order("name", { ascending: true }),
+    supabase
+      .schema("pass")
+      .from("catalog_items")
+      .select("id,name,price_amount,image_url,category_label,is_active")
+      .eq("site_id", item.site_id)
+      .eq("is_active", true)
+      .neq("id", itemId)
+      .order("name", { ascending: true }),
+  ]);
+
+  const consumptionProducts = consumptionProductsRaw ?? [];
+  const consumptionProductById = new Map(consumptionProducts.map((product) => [product.id, product]));
+  const recipeIngredients = (recipeIngredientsRaw ?? [])
+    .map((ingredient) => ({
+      ...ingredient,
+      product: consumptionProductById.get(ingredient.ingredient_product_id) ?? null,
+    }))
+    .filter((ingredient) => Boolean(ingredient.product));
+
+  return {
+    optionGroups,
+    options,
+    consumptionRules: consumptionRulesRaw ?? [],
+    recipeEffects: recipeEffectsRaw ?? [],
+    recipeIngredients,
+    consumptionProducts,
+    inventoryUnits: inventoryUnitsRaw ?? [],
+    commercialCatalogItems: (commercialCatalogItemsRaw ?? []).filter((item) => item.is_active !== false),
+  };
+}
+
+async function jsonOk(supabase: ReturnType<typeof createAdminClient>, itemId: string, message: string) {
+  revalidatePath(`/menu/${itemId}`);
+  const snapshot = await fetchSnapshot(supabase, itemId);
+  return NextResponse.json({ ok: true, message, snapshot });
+}
+
+function jsonError(message: string, status = 400) {
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
+
+export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const { id: itemId } = await context.params;
+
+  try {
+    await requireAppAccess({ appId: "viso", returnTo: `/menu/${itemId}` });
+  } catch {
+    return jsonError("No tienes acceso a VISO.", 401);
+  }
+
+  const supabase = createAdminClient();
+  const body = (await request.json().catch(() => null)) as { action?: string; payload?: JsonRecord } | null;
+  const action = readString(body?.action);
+  const payload = body?.payload ?? {};
+
+  try {
+    if (action === "create_group") {
+      const groupKind = parseSimpleGroupKind(payload.groupKind);
+      const defaults = getSimpleGroupCreationDefaults(groupKind);
+      const name = readString(payload.name) || defaults.name;
+      const description = readString(payload.description) || defaults.description;
+      const code = asCatalogCode(payload.code, name);
+      const requestedMax = Math.round(Math.max(0, readNumber(payload.maxSelect, 0)));
+      const maxSelect = defaults.selectionType === "single" ? 1 : Math.max(defaults.maxSelect, requestedMax || defaults.maxSelect);
+      const sortOrder = await getNextOptionGroupSortOrder(supabase, itemId, defaults.sortBase);
+
+      const { data: existingGroup, error: existingGroupError } = await supabase
+        .schema("pass")
+        .from("catalog_item_option_groups")
+        .select("id,is_active")
+        .eq("catalog_item_id", itemId)
+        .eq("code", code)
+        .maybeSingle();
+
+      if (existingGroupError) return jsonError(existingGroupError.message);
+
+      if (existingGroup?.id) {
+        if (existingGroup.is_active === false) {
+          const { error } = await supabase
+            .schema("pass")
+            .from("catalog_item_option_groups")
+            .update({
+              name,
+              description,
+              selection_type: defaults.selectionType,
+              is_required: defaults.isRequired,
+              min_select: defaults.minSelect,
+              max_select: maxSelect,
+              sort_order: sortOrder,
+              is_active: true,
+              metadata: { preset: groupKind, configured_from: "simple_product_page" },
+            })
+            .eq("id", existingGroup.id)
+            .eq("catalog_item_id", itemId);
+          if (error) return jsonError(error.message);
+          return jsonOk(supabase, itemId, "Personalización reactivada.");
+        }
+        return jsonOk(supabase, itemId, "Esa personalización ya existe.");
+      }
+
+      const { error } = await supabase.schema("pass").from("catalog_item_option_groups").insert({
+        catalog_item_id: itemId,
+        code,
+        name,
+        description,
+        selection_type: defaults.selectionType,
+        is_required: defaults.isRequired,
+        min_select: defaults.minSelect,
+        max_select: maxSelect,
+        sort_order: sortOrder,
+        is_active: true,
+        metadata: { preset: groupKind, configured_from: "simple_product_page" },
+      });
+      if (error) return jsonError(error.code === "23505" ? "Esa personalización ya existe." : error.message);
+      return jsonOk(supabase, itemId, "Grupo creado.");
+    }
+
+    if (action === "update_group") {
+      const groupId = readString(payload.groupId);
+      const name = readString(payload.name);
+      const code = asCatalogCode(payload.code, name);
+      const selectionType = readString(payload.selectionType) === "multiple" ? "multiple" : "single";
+      const isRequired = readBool(payload.isRequired);
+      const { minSelect, maxSelect } = normalizeSelectBounds(selectionType, isRequired, payload.minSelect, payload.maxSelect);
+      if (!groupId || !name || !code) return jsonError("Faltan datos para actualizar el grupo.");
+
+      const { error } = await supabase
+        .schema("pass")
+        .from("catalog_item_option_groups")
+        .update({
+          code,
+          name,
+          description: readOptionalText(payload.description),
+          selection_type: selectionType,
+          is_required: isRequired,
+          min_select: minSelect,
+          max_select: maxSelect,
+          sort_order: Math.round(Math.max(0, readNumber(payload.sortOrder, 0))),
+          is_active: readBool(payload.isActive, true),
+        })
+        .eq("id", groupId)
+        .eq("catalog_item_id", itemId);
+      if (error) return jsonError(error.message);
+      return jsonOk(supabase, itemId, "Grupo de opciones actualizado.");
+    }
+
+    if (action === "disable_group") {
+      const groupId = readString(payload.groupId);
+      if (!groupId) return jsonError("Grupo inválido.");
+      const { error } = await supabase.schema("pass").from("catalog_item_option_groups").update({ is_active: false }).eq("id", groupId).eq("catalog_item_id", itemId);
+      if (error) return jsonError(error.message);
+      return jsonOk(supabase, itemId, "Grupo de opciones desactivado.");
+    }
+
+    if (action === "create_option") {
+      const groupId = readString(payload.groupId);
+      const name = readString(payload.name);
+      const description = readOptionalText(payload.description);
+      const linkedCatalogItemId = readOptionalText(payload.linkedCatalogItemId);
+      const optionOperationalProductId = readString(payload.optionProductId);
+      const optionQuantityPerOption = Math.max(0, readNumber(payload.optionQuantityPerOption, 0));
+      const optionStockUnitCode = readOptionalText(payload.optionStockUnitCode);
+      const replacementTargetIngredientProductId = readString(payload.replacementTargetIngredientProductId);
+
+      if (!groupId) return jsonError("Faltan datos para crear la opción.");
+
+      const { data: group, error: groupError } = await supabase
+        .schema("pass")
+        .from("catalog_item_option_groups")
+        .select("id,catalog_item_id,code,name,selection_type,metadata")
+        .eq("id", groupId)
+        .eq("catalog_item_id", itemId)
+        .maybeSingle();
+      if (groupError || !group) return jsonError(groupError?.message || "El grupo no pertenece a este producto.");
+
+      const groupKind = getSimpleGroupKind(group);
+      const requiresLinkedProduct = groupKind === "recommendations";
+      const requiresOperationalConsumption = groupKind === "extras" || groupKind === "replacements";
+      const hasPartialOperationalConsumption = Boolean(optionOperationalProductId) || optionQuantityPerOption > 0 || Boolean(optionStockUnitCode);
+
+      if (requiresLinkedProduct && !linkedCatalogItemId) return jsonError("Selecciona el producto comercial sugerido.");
+      if (!requiresLinkedProduct && !name) return jsonError("Falta el nombre de la opción.");
+      if ((requiresOperationalConsumption || hasPartialOperationalConsumption) && (!optionOperationalProductId || optionQuantityPerOption <= 0)) {
+        return jsonError("La opción necesita producto operacional y cantidad de consumo mayor a 0.");
+      }
+      if (groupKind === "replacements" && !replacementTargetIngredientProductId) return jsonError("El cambio necesita indicar qué ingrediente de receta reemplaza.");
+
+      const sortOrder = await getNextOptionSortOrder(supabase, groupId);
+      let finalName = name;
+      let finalDescription = description;
+      let finalPriceDeltaAmount = Math.max(0, readNumber(payload.priceDeltaAmount, 0));
+      let linkedCatalogMetadata: JsonRecord = {};
+      let finalEffectType = getSimpleDefaultEffect(groupKind);
+
+      if (groupKind === "choice" && optionOperationalProductId) finalEffectType = "additive";
+
+      if (linkedCatalogItemId) {
+        const [{ data: currentItem }, { data: linkedItem, error: linkedError }] = await Promise.all([
+          supabase.schema("pass").from("catalog_items").select("id,site_id").eq("id", itemId).maybeSingle(),
+          supabase.schema("pass").from("catalog_items").select("id,site_id,name,description,price_amount,is_active").eq("id", linkedCatalogItemId).maybeSingle(),
+        ]);
+
+        if (linkedError || !currentItem || !linkedItem || linkedItem.site_id !== currentItem.site_id || linkedItem.is_active === false) {
+          return jsonError("El producto sugerido no está disponible en esta sede.");
+        }
+
+        const linkedPrice = Number(linkedItem.price_amount ?? 0);
+        finalName = linkedItem.name || name;
+        finalDescription = description || linkedItem.description || null;
+        finalPriceDeltaAmount = Number.isFinite(linkedPrice) ? Math.max(0, linkedPrice) : 0;
+        linkedCatalogMetadata = { linked_catalog_item_id: linkedItem.id, linked_catalog_item_price_amount: finalPriceDeltaAmount };
+      }
+
+      const optionCode = asCatalogCode(payload.code, finalName);
+      if (!optionCode) return jsonError("No se pudo generar el código de la opción.");
+
+      const { data: createdOption, error } = await supabase
+        .schema("pass")
+        .from("catalog_item_options")
+        .insert({
+          option_group_id: groupId,
+          code: optionCode,
+          name: finalName,
+          description: finalDescription,
+          price_delta_amount: finalPriceDeltaAmount,
+          product_id: optionOperationalProductId || null,
+          effect_type: finalEffectType,
+          is_default: readBool(payload.isDefault),
+          is_active: true,
+          sort_order: sortOrder,
+          metadata: {
+            preset: groupKind,
+            configured_from: "product_personalization_page",
+            operational_product_id: optionOperationalProductId || null,
+            replacement_target_ingredient_product_id: replacementTargetIngredientProductId || null,
+            ...linkedCatalogMetadata,
+          },
+        })
+        .select("id")
+        .single();
+
+      if (error || !createdOption?.id) return jsonError(error?.message || "No se pudo crear la opción.");
+
+      if (optionOperationalProductId) {
+        const { error: ruleError } = await supabase.schema("pass").from("catalog_item_option_consumption_rules").insert({
+          option_id: createdOption.id,
+          code: `consumo-${optionCode}`,
+          name: `Consumir ${finalName}`,
+          product_id: optionOperationalProductId,
+          effect_type: finalEffectType === "replacement" ? "replacement" : "additive",
+          quantity_per_option: optionQuantityPerOption,
+          stock_unit_code: optionStockUnitCode,
+          input_quantity_per_option: optionQuantityPerOption,
+          input_unit_code: optionStockUnitCode,
+          conversion_factor_to_stock: 1,
+          input_uom_profile_id: null,
+          source_location_strategy: "product_production_location",
+          source_location_id: null,
+          source_location_position_id: null,
+          is_active: true,
+          sort_order: 0,
+          metadata: { configured_from: "product_personalization_page" },
+        });
+
+        if (ruleError) {
+          await supabase.schema("pass").from("catalog_item_options").delete().eq("id", createdOption.id);
+          return jsonError(ruleError.message);
+        }
+      }
+
+      if (replacementTargetIngredientProductId) {
+        const { error: recipeEffectError } = await supabase.schema("pass").from("catalog_item_option_recipe_effects").insert({
+          option_id: createdOption.id,
+          effect_type: "replacement",
+          target_ingredient_product_id: replacementTargetIngredientProductId,
+          recipe_component_code: null,
+          quantity_mode: "full_recipe_component",
+          quantity_amount: null,
+          stock_unit_code: null,
+          is_active: true,
+          sort_order: 0,
+          metadata: { configured_from: "product_personalization_page" },
+        });
+
+        if (recipeEffectError) {
+          await supabase.schema("pass").from("catalog_item_options").delete().eq("id", createdOption.id);
+          return jsonError(recipeEffectError.message);
+        }
+      }
+
+      return jsonOk(supabase, itemId, "Opción creada y mapeada.");
+    }
+
+    if (action === "update_option") {
+      const groupId = readString(payload.groupId);
+      const optionId = readString(payload.optionId);
+      const name = readString(payload.name);
+      const code = asCatalogCode(payload.code, name);
+      if (!groupId || !optionId || !name || !code) return jsonError("Faltan datos para actualizar la opción.");
+
+      const { data: group, error: groupError } = await supabase
+        .schema("pass")
+        .from("catalog_item_option_groups")
+        .select("id,catalog_item_id")
+        .eq("id", groupId)
+        .eq("catalog_item_id", itemId)
+        .maybeSingle();
+      if (groupError || !group) return jsonError(groupError?.message || "El grupo de opciones no pertenece a este item.");
+
+      const { error } = await supabase.schema("pass").from("catalog_item_options").update({
+        code,
+        name,
+        description: readOptionalText(payload.description),
+        price_delta_amount: Math.max(0, readNumber(payload.priceDeltaAmount, 0)),
+        effect_type: parseOptionEffectType(payload.effectType),
+        is_default: readBool(payload.isDefault),
+        is_active: readBool(payload.isActive, true),
+        sort_order: Math.round(Math.max(0, readNumber(payload.sortOrder, 0))),
+      }).eq("id", optionId).eq("option_group_id", groupId);
+
+      if (error) return jsonError(error.message);
+      return jsonOk(supabase, itemId, "Opción actualizada.");
+    }
+
+    if (action === "disable_option") {
+      const groupId = readString(payload.groupId);
+      const optionId = readString(payload.optionId);
+      if (!groupId || !optionId) return jsonError("Opción inválida.");
+      const { error } = await supabase.schema("pass").from("catalog_item_options").update({ is_active: false }).eq("id", optionId).eq("option_group_id", groupId);
+      if (error) return jsonError(error.message);
+      return jsonOk(supabase, itemId, "Opción desactivada.");
+    }
+
+    if (action === "create_consumption_rule") {
+      const optionId = readString(payload.optionId);
+      const productId = readString(payload.productId);
+      const quantityPerOption = Math.max(0, readNumber(payload.quantityPerOption, 0));
+      if (!optionId || !productId || quantityPerOption <= 0) return jsonError("Faltan datos para crear la regla de consumo.");
+
+      const { data: option } = await supabase.schema("pass").from("catalog_item_options").select("id,code,name").eq("id", optionId).maybeSingle();
+      if (!option) return jsonError("Opción no encontrada.");
+
+      const { error } = await supabase.schema("pass").from("catalog_item_option_consumption_rules").insert({
+        option_id: optionId,
+        code: `consumo-${option.code}`,
+        name: `Consumo de ${option.name}`,
+        product_id: productId,
+        effect_type: parseOptionEffectType(payload.effectType) === "replacement" ? "replacement" : "additive",
+        quantity_per_option: quantityPerOption,
+        stock_unit_code: readOptionalText(payload.stockUnitCode),
+        input_quantity_per_option: quantityPerOption,
+        input_unit_code: readOptionalText(payload.stockUnitCode),
+        conversion_factor_to_stock: 1,
+        input_uom_profile_id: null,
+        source_location_strategy: "product_production_location",
+        source_location_id: null,
+        source_location_position_id: null,
+        is_active: true,
+        sort_order: 0,
+        metadata: {},
+      });
+      if (error) return jsonError(error.message);
+      return jsonOk(supabase, itemId, "Regla de consumo creada.");
+    }
+
+    if (action === "disable_consumption_rule") {
+      const optionId = readString(payload.optionId);
+      const ruleId = readString(payload.ruleId);
+      if (!optionId || !ruleId) return jsonError("Regla de consumo inválida.");
+      const { error } = await supabase.schema("pass").from("catalog_item_option_consumption_rules").update({ is_active: false }).eq("id", ruleId).eq("option_id", optionId);
+      if (error) return jsonError(error.message);
+      return jsonOk(supabase, itemId, "Regla de consumo desactivada.");
+    }
+
+    if (action === "create_recipe_effect") {
+      const optionId = readString(payload.optionId);
+      const targetIngredientProductId = readString(payload.targetIngredientProductId);
+      if (!optionId || !targetIngredientProductId) return jsonError("Faltan datos para crear el efecto de receta.");
+      const { error } = await supabase.schema("pass").from("catalog_item_option_recipe_effects").insert({
+        option_id: optionId,
+        effect_type: readString(payload.effectType) === "replacement" ? "replacement" : "removal",
+        target_ingredient_product_id: targetIngredientProductId,
+        recipe_component_code: null,
+        quantity_mode: "full_recipe_component",
+        quantity_amount: null,
+        stock_unit_code: null,
+        is_active: true,
+        sort_order: 0,
+        metadata: {},
+      });
+      if (error) return jsonError(error.message);
+      await supabase.schema("pass").from("catalog_item_options").update({ effect_type: "replacement" }).eq("id", optionId);
+      return jsonOk(supabase, itemId, "Efecto de receta creado.");
+    }
+
+    if (action === "disable_recipe_effect") {
+      const optionId = readString(payload.optionId);
+      const effectId = readString(payload.effectId);
+      if (!optionId || !effectId) return jsonError("Efecto de receta inválido.");
+      const { error } = await supabase.schema("pass").from("catalog_item_option_recipe_effects").update({ is_active: false }).eq("id", effectId).eq("option_id", optionId);
+      if (error) return jsonError(error.message);
+      return jsonOk(supabase, itemId, "Efecto de receta desactivado.");
+    }
+
+    if (action === "create_removal_option_from_recipe") {
+      const requestedGroupId = readString(payload.groupId);
+      const ingredientProductId = readString(payload.ingredientProductId);
+      const ingredientName = readString(payload.ingredientName);
+      const stockUnitCode = readOptionalText(payload.stockUnitCode);
+      if (!ingredientProductId || !ingredientName) return jsonError("Ingrediente inválido para crear opción de retiro.");
+
+      const groupCode = "quitar-ingredientes";
+      let groupId = requestedGroupId || "";
+
+      if (groupId) {
+        const { data: requestedGroup, error: requestedGroupError } = await supabase.schema("pass").from("catalog_item_option_groups").select("id,catalog_item_id,is_active").eq("id", groupId).eq("catalog_item_id", itemId).maybeSingle();
+        if (requestedGroupError || !requestedGroup || requestedGroup.is_active === false) return jsonError(requestedGroupError?.message || "El grupo de ingredientes no pertenece a este producto o está inactivo.");
+      }
+
+      if (!groupId) {
+        const { data: existingGroup, error: existingGroupError } = await supabase.schema("pass").from("catalog_item_option_groups").select("id,is_active").eq("catalog_item_id", itemId).eq("code", groupCode).maybeSingle();
+        if (existingGroupError) return jsonError(existingGroupError.message);
+        if (existingGroup?.id && existingGroup.is_active !== false) groupId = existingGroup.id;
+      }
+
+      if (!groupId) {
+        const { data: createdGroup, error: groupError } = await supabase.schema("pass").from("catalog_item_option_groups").insert({
+          catalog_item_id: itemId,
+          code: groupCode,
+          name: "Quitar ingredientes",
+          description: "Ingredientes que el cliente puede pedir retirar de este producto.",
+          selection_type: "multiple",
+          is_required: false,
+          min_select: 0,
+          max_select: 99,
+          sort_order: 900,
+          is_active: true,
+          metadata: { preset: "removals", source: "recipe_removals", configured_from: "simple_product_page" },
+        }).select("id").single();
+        if (groupError || !createdGroup?.id) return jsonError(groupError?.message || "No se pudo crear el grupo de retiros.");
+        groupId = createdGroup.id;
+      }
+
+      const optionCode = `sin-${slugify(ingredientName)}`;
+      const { data: existingOption, error: existingOptionError } = await supabase.schema("pass").from("catalog_item_options").select("id").eq("option_group_id", groupId).eq("code", optionCode).maybeSingle();
+      if (existingOptionError) return jsonError(existingOptionError.message);
+
+      let optionId = existingOption?.id as string | undefined;
+      if (!optionId) {
+        const sortOrder = await getNextOptionSortOrder(supabase, groupId);
+        const { data: createdOption, error: optionError } = await supabase.schema("pass").from("catalog_item_options").insert({
+          option_group_id: groupId,
+          code: optionCode,
+          name: `Sin ${ingredientName}`,
+          description: `No descontar ${ingredientName} si el cliente pide retirarlo.`,
+          price_delta_amount: 0,
+          product_id: null,
+          effect_type: "removal",
+          is_default: false,
+          is_active: true,
+          sort_order: sortOrder,
+          metadata: { preset: "removals", source: "recipe_removals", configured_from: "simple_product_page", ingredient_product_id: ingredientProductId },
+        }).select("id").single();
+        if (optionError || !createdOption?.id) return jsonError(optionError?.message || "No se pudo crear la opción de retiro.");
+        optionId = createdOption.id;
+      }
+
+      const { data: existingEffect, error: existingEffectError } = await supabase.schema("pass").from("catalog_item_option_recipe_effects").select("id").eq("option_id", optionId).eq("target_ingredient_product_id", ingredientProductId).eq("effect_type", "removal").maybeSingle();
+      if (existingEffectError) return jsonError(existingEffectError.message);
+
+      if (!existingEffect) {
+        const { error } = await supabase.schema("pass").from("catalog_item_option_recipe_effects").insert({
+          option_id: optionId,
+          effect_type: "removal",
+          target_ingredient_product_id: ingredientProductId,
+          recipe_component_code: slugify(ingredientName),
+          quantity_mode: "full_recipe_component",
+          quantity_amount: null,
+          stock_unit_code: stockUnitCode,
+          is_active: true,
+          sort_order: 0,
+          metadata: { source: "recipe_removals" },
+        });
+        if (error) return jsonError(error.message);
+      }
+
+      return jsonOk(supabase, itemId, `Opción "Sin ${ingredientName}" creada.`);
+    }
+
+    return jsonError("Acción de personalización no soportada.", 404);
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Error inesperado.", 500);
+  }
+}
