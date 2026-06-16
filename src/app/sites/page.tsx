@@ -85,9 +85,14 @@ export default async function SitesPage({
         title="Sedes"
         subtitle="Todas las sedes. Configura aquí los documentos requeridos para Vento Group, centro de producción y cualquier sede sin Pass."
         actions={
-          <Link href="/businesses" className="ui-btn ui-btn--ghost">
-            Ver negocios (Pass)
-          </Link>
+          <>
+            <Link href="/operations-map" className="ui-btn ui-btn--brand">
+              Mapa operativo
+            </Link>
+            <Link href="/businesses" className="ui-btn ui-btn--ghost">
+              Ver negocios (Pass)
+            </Link>
+          </>
         }
       />
 
