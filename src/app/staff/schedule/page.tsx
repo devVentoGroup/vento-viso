@@ -420,12 +420,32 @@ async function saveShiftAction(formData: FormData) {
   const shiftDate = asText(formData.get("shift_date"));
   const startTime = asText(formData.get("start_time"));
   const endTime = asText(formData.get("end_time"));
+  const blockStartTimes = formData.getAll("block_start_time").map((value) => asText(value));
+  const blockEndTimes = formData.getAll("block_end_time").map((value) => asText(value));
   const explicitShiftKind = asText(formData.get("shift_kind"));
   const isRestShift = asText(formData.get("rest_shift")) === "1";
   const isFullDayRest = asText(formData.get("full_day_rest")) === "1";
   const shiftKind = explicitShiftKind === "descanso" || isRestShift || isFullDayRest ? "descanso" : "laboral";
-  const resolvedStartTime = isFullDayRest ? FULL_DAY_REST_START_TIME : startTime;
-  const resolvedEndTime = isFullDayRest ? FULL_DAY_REST_END_TIME : endTime;
+  const rawShiftBlocks = blockStartTimes
+    .map((blockStart, index) => ({
+      startTime: blockStart,
+      endTime: blockEndTimes[index] ?? "",
+    }))
+    .filter((block) => block.startTime || block.endTime);
+  const firstRawShiftBlock = rawShiftBlocks[0] ?? { startTime: "", endTime: "" };
+  const resolvedShiftBlocks = shiftKind === "descanso"
+    ? [
+        {
+          startTime: isFullDayRest ? FULL_DAY_REST_START_TIME : startTime || firstRawShiftBlock.startTime,
+          endTime: isFullDayRest ? FULL_DAY_REST_END_TIME : endTime || firstRawShiftBlock.endTime,
+        },
+      ]
+    : rawShiftBlocks.length > 0
+      ? rawShiftBlocks
+      : [{ startTime, endTime }];
+  const firstShiftBlock = resolvedShiftBlocks[0] ?? { startTime: "", endTime: "" };
+  const resolvedStartTime = firstShiftBlock.startTime;
+  const resolvedEndTime = firstShiftBlock.endTime;
   const showEndAsClose = asText(formData.get("show_end_as_close")) === "1";
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
   const keepSlot = asText(formData.get("keep_slot")) === "1";
@@ -442,7 +462,7 @@ async function saveShiftAction(formData: FormData) {
   });
   const supabase = createAdminClient();
 
-  if (requestedEmployeeIds.length === 0 || !siteId || !shiftDate || !resolvedStartTime || !resolvedEndTime) {
+  if (requestedEmployeeIds.length === 0 || !siteId || !shiftDate || resolvedShiftBlocks.length === 0) {
     redirect(`${returnTo}&error=${encodeURIComponent("Completa trabajador, fecha y horario.")}`);
   }
 
@@ -450,8 +470,35 @@ async function saveShiftAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un trabajador por turno.")}`);
   }
 
-  if (shiftKind !== "descanso" && resolvedEndTime <= resolvedStartTime) {
-    redirect(`${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio.")}`);
+  if (shiftId && resolvedShiftBlocks.length !== 1) {
+    redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un bloque horario por turno.")}`);
+  }
+
+  const incompleteBlocks = resolvedShiftBlocks.some((block) => !block.startTime || !block.endTime);
+  if (incompleteBlocks) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Completa inicio y fin de cada bloque horario.")}`);
+  }
+
+  if (shiftKind !== "descanso") {
+    const invalidBlocks = resolvedShiftBlocks.filter((block) => block.endTime <= block.startTime);
+    if (invalidBlocks.length > 0) {
+      redirect(`${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio en todos los bloques.")}`);
+    }
+
+    for (let i = 0; i < resolvedShiftBlocks.length; i += 1) {
+      for (let j = i + 1; j < resolvedShiftBlocks.length; j += 1) {
+        const first = resolvedShiftBlocks[i];
+        const second = resolvedShiftBlocks[j];
+        if (!first || !second) continue;
+        if (first.startTime < second.endTime && second.startTime < first.endTime) {
+          redirect(
+            `${returnTo}&error=${encodeURIComponent(
+              `Los bloques del turno partido se solapan (${first.startTime.slice(0, 5)} - ${first.endTime.slice(0, 5)} y ${second.startTime.slice(0, 5)} - ${second.endTime.slice(0, 5)}).`,
+            )}`,
+          );
+        }
+      }
+    }
   }
 
   // Validar solapamiento: mismo empleado, misma fecha, rangos que se cruzan
@@ -471,7 +518,9 @@ async function saveShiftAction(formData: FormData) {
     }
     const overlaps = (sameDayShifts ?? []).filter(
       (s: { employee_id: string; start_time: string; end_time: string }) =>
-        resolvedStartTime < s.end_time && s.start_time < resolvedEndTime,
+        resolvedShiftBlocks.some(
+          (block) => block.startTime < s.end_time && s.start_time < block.endTime,
+        ),
     );
     if (overlaps.length > 0) {
       const conflictingIds = [...new Set(overlaps.map((shift) => shift.employee_id))];
@@ -503,8 +552,6 @@ async function saveShiftAction(formData: FormData) {
   const basePayload = {
     site_id: siteId,
     shift_date: shiftDate,
-    start_time: resolvedStartTime,
-    end_time: resolvedEndTime,
     shift_kind: shiftKind,
     break_minutes: shiftKind === "descanso" ? 0 : Math.max(0, asNumber(formData.get("break_minutes"), 0)),
     show_end_as_close: shiftKind === "descanso" ? false : showEndAsClose,
@@ -514,17 +561,26 @@ async function saveShiftAction(formData: FormData) {
     published_by: null,
   };
 
+  const insertPayload = requestedEmployeeIds.flatMap((id) =>
+    resolvedShiftBlocks.map((block) => ({
+      ...basePayload,
+      employee_id: id,
+      start_time: block.startTime,
+      end_time: block.endTime,
+    })),
+  );
+
   const query = shiftId
     ? supabase
         .from("employee_shifts")
-        .update({ ...basePayload, employee_id: requestedEmployeeIds[0] })
-        .eq("id", shiftId)
-    : supabase.from("employee_shifts").insert(
-        requestedEmployeeIds.map((id) => ({
+        .update({
           ...basePayload,
-          employee_id: id,
-        })),
-      );
+          employee_id: requestedEmployeeIds[0],
+          start_time: resolvedStartTime,
+          end_time: resolvedEndTime,
+        })
+        .eq("id", shiftId)
+    : supabase.from("employee_shifts").insert(insertPayload);
 
   const { error } = await query;
   if (error) {
@@ -535,7 +591,7 @@ async function saveShiftAction(formData: FormData) {
   revalidatePath("/staff/schedule");
   const successCode = shiftId
     ? "turno_actualizado_borrador"
-    : requestedEmployeeIds.length > 1
+    : insertPayload.length > 1
       ? "turnos_creados_borrador"
       : "turno_creado_borrador";
   const nextReturnTo =
@@ -2280,11 +2336,11 @@ export default async function StaffSchedulePage({
                 <div>
                   <div className="ui-h3">Agregar turno por horas</div>
                   <p className="text-xs text-[var(--ui-muted)]">
-                    Flujo rápido: eliges persona, día y rango horario. Para turno partido crea dos filas.
+                    Flujo rápido: eliges persona, día y uno o varios bloques horarios. Cada bloque se guarda como una fila independiente.
                   </p>
                 </div>
               </div>
-              <form action={saveShiftAction} className="grid gap-3 md:grid-cols-6">
+              <form action={saveShiftAction} className="grid gap-3 md:grid-cols-6" data-quick-shift-form>
                 <input type="hidden" name="site_id" value={selectedSiteId} />
                 <input type="hidden" name="return_to" value={returnToWithoutEdit} />
                 <input type="hidden" name="break_minutes" value="0" />
@@ -2318,14 +2374,67 @@ export default async function StaffSchedulePage({
                 </label>
 
                 <label className="flex flex-col gap-1">
-                  <span className="ui-label">Inicio</span>
-                  <input name="start_time" type="time" className="ui-input" required defaultValue="06:00" />
+                  <span className="ui-label">Inicio bloque 1</span>
+                  <input name="block_start_time" type="time" className="ui-input" required defaultValue="06:00" />
                 </label>
 
                 <label className="flex flex-col gap-1">
-                  <span className="ui-label">Fin</span>
-                  <input name="end_time" type="time" className="ui-input" required defaultValue="14:00" />
+                  <span className="ui-label">Fin bloque 1</span>
+                  <input name="block_end_time" type="time" className="ui-input" required defaultValue="14:00" />
                 </label>
+
+                <div
+                  className="hidden rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 md:col-span-6"
+                  data-quick-shift-block="optional"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-[var(--ui-text)]">Bloque 2</div>
+                    <button type="button" className="text-xs font-semibold text-[var(--ui-danger)]" data-remove-shift-block>
+                      Quitar
+                    </button>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Inicio bloque 2</span>
+                      <input name="block_start_time" type="time" className="ui-input" />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Fin bloque 2</span>
+                      <input name="block_end_time" type="time" className="ui-input" />
+                    </label>
+                  </div>
+                </div>
+
+                <div
+                  className="hidden rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 md:col-span-6"
+                  data-quick-shift-block="optional"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-[var(--ui-text)]">Bloque 3</div>
+                    <button type="button" className="text-xs font-semibold text-[var(--ui-danger)]" data-remove-shift-block>
+                      Quitar
+                    </button>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Inicio bloque 3</span>
+                      <input name="block_start_time" type="time" className="ui-input" />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Fin bloque 3</span>
+                      <input name="block_end_time" type="time" className="ui-input" />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 md:col-span-6">
+                  <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" data-add-shift-block>
+                    + Agregar otro bloque
+                  </button>
+                  <span className="text-xs text-[var(--ui-muted)]">
+                    Úsalo para turnos partidos de la misma persona en el mismo día.
+                  </span>
+                </div>
 
                 <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                   <input
@@ -2362,6 +2471,67 @@ export default async function StaffSchedulePage({
                   </button>
                 </div>
               </form>
+              <Script id="viso-quick-shift-blocks" strategy="afterInteractive">
+                {`
+                  (function () {
+                    function clearBlock(block) {
+                      block.querySelectorAll("input").forEach(function (input) {
+                        input.value = "";
+                      });
+                    }
+
+                    function refreshBlockControls(form) {
+                      var optionalBlocks = Array.from(form.querySelectorAll('[data-quick-shift-block="optional"]'));
+                      var addButton = form.querySelector("[data-add-shift-block]");
+                      var hiddenBlocks = optionalBlocks.filter(function (block) {
+                        return block.classList.contains("hidden");
+                      });
+                      if (addButton) {
+                        addButton.disabled = hiddenBlocks.length === 0;
+                      }
+                    }
+
+                    function initQuickShiftForm(form) {
+                      if (!form || form.getAttribute("data-quick-shift-ready") === "1") return;
+                      form.setAttribute("data-quick-shift-ready", "1");
+
+                      var addButton = form.querySelector("[data-add-shift-block]");
+                      if (addButton) {
+                        addButton.addEventListener("click", function () {
+                          var nextBlock = Array.from(form.querySelectorAll('[data-quick-shift-block="optional"]')).find(function (block) {
+                            return block.classList.contains("hidden");
+                          });
+                          if (!nextBlock) return;
+                          nextBlock.classList.remove("hidden");
+                          refreshBlockControls(form);
+                        });
+                      }
+
+                      form.querySelectorAll("[data-remove-shift-block]").forEach(function (button) {
+                        button.addEventListener("click", function () {
+                          var block = button.closest('[data-quick-shift-block="optional"]');
+                          if (!block) return;
+                          clearBlock(block);
+                          block.classList.add("hidden");
+                          refreshBlockControls(form);
+                        });
+                      });
+
+                      refreshBlockControls(form);
+                    }
+
+                    function initAllQuickShiftForms() {
+                      document.querySelectorAll("[data-quick-shift-form]").forEach(initQuickShiftForm);
+                    }
+
+                    if (document.readyState === "loading") {
+                      document.addEventListener("DOMContentLoaded", initAllQuickShiftForms, { once: true });
+                    } else {
+                      initAllQuickShiftForms();
+                    }
+                  })();
+                `}
+              </Script>
             </div>
 
             <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2">
