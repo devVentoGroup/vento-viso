@@ -476,7 +476,7 @@ export function MenuPersonalizationsClient({
         isDefault: formBool(form, "is_default"),
       },
       "Opción creada y mapeada.",
-      { pendingKey: detailsKey, closeDetailsKey: detailsKey, resetForm: form },
+      { pendingKey: detailsKey, resetForm: form },
     );
   }
 
@@ -569,7 +569,7 @@ export function MenuPersonalizationsClient({
               <button
                 key={type.kind}
                 type="button"
-                disabled={Boolean(pendingKey)}
+                disabled={pendingKey === `create-group:${type.kind}`}
                 onClick={() => handleCreateGroup(type)}
                 className="flex min-h-24 w-full flex-col justify-between rounded-2xl border border-[var(--ui-border)] bg-white p-4 text-left shadow-[var(--ui-shadow-1)] transition hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-2)] disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -616,7 +616,7 @@ export function MenuPersonalizationsClient({
                         <button
                           type="button"
                           className="ui-btn ui-btn--danger"
-                          disabled={Boolean(pendingKey)}
+                          disabled={pendingKey === `disable-group:${group.id}`}
                           onClick={() => void mutate("disable_group", { groupId: group.id }, "Grupo desactivado.", { pendingKey: `disable-group:${group.id}` })}
                         >
                           {pendingKey === `disable-group:${group.id}` ? "Eliminando..." : "Eliminar"}
@@ -669,7 +669,7 @@ export function MenuPersonalizationsClient({
                         </label>
 
                         <div className="flex justify-end">
-                          <button type="submit" className="ui-btn ui-btn--brand" disabled={Boolean(pendingKey)}>
+                          <button type="submit" className="ui-btn ui-btn--brand" disabled={pendingKey === groupEditKey}>
                             {pendingKey === groupEditKey ? "Guardando..." : "Guardar"}
                           </button>
                         </div>
@@ -709,7 +709,7 @@ export function MenuPersonalizationsClient({
                                     <button
                                       type="button"
                                       className="ui-btn ui-btn--ghost"
-                                      disabled={Boolean(pendingKey)}
+                                      disabled={pendingKey === `disable-option:${removalOption.id}`}
                                       onClick={() => void mutate("disable_option", { groupId: group.id, optionId: removalOption.id }, "Opción desactivada.", { pendingKey: `disable-option:${removalOption.id}` })}
                                     >
                                       {pendingKey === `disable-option:${removalOption.id}` ? "Quitando..." : "Quitar"}
@@ -722,7 +722,7 @@ export function MenuPersonalizationsClient({
                                 <button
                                   key={ingredient.id}
                                   type="button"
-                                  disabled={Boolean(pendingKey)}
+                                  disabled={pendingKey === `create-removal:${ingredient.id}`}
                                   onClick={() => void mutate("create_removal_option_from_recipe", { groupId: group.id, ingredientProductId: ingredient.ingredient_product_id, ingredientName, stockUnitCode: product.stock_unit_code || product.unit || "" }, `Opción Sin ${ingredientName} creada.`, { pendingKey: `create-removal:${ingredient.id}` })}
                                   className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 text-left disabled:cursor-not-allowed disabled:opacity-60"
                                 >
@@ -802,7 +802,7 @@ export function MenuPersonalizationsClient({
                                       ) : (
                                         <input type="hidden" name="is_default" value="false" />
                                       )}
-                                      <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={Boolean(pendingKey)}>
+                                      <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={pendingKey === optionEditKey}>
                                         {pendingKey === optionEditKey ? "Guardando..." : "Guardar opción"}
                                       </button>
                                     </form>
@@ -841,7 +841,7 @@ export function MenuPersonalizationsClient({
                                             </select>
                                           </label>
                                         </div>
-                                        <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={Boolean(pendingKey)}>
+                                        <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={pendingKey === optionInventoryKey}>
                                           {pendingKey === optionInventoryKey ? "Guardando..." : "Guardar consumo"}
                                         </button>
                                       </form>
@@ -858,7 +858,7 @@ export function MenuPersonalizationsClient({
                                                 <button
                                                   type="button"
                                                   className="ui-btn ui-btn--ghost"
-                                                  disabled={Boolean(pendingKey)}
+                                                  disabled={pendingKey === `disable-consumption:${rule.id}`}
                                                   onClick={() => void mutate("disable_consumption_rule", { optionId: option.id, ruleId: rule.id }, "Regla de consumo desactivada.", { pendingKey: `disable-consumption:${rule.id}` })}
                                                 >
                                                   {pendingKey === `disable-consumption:${rule.id}` ? "Quitando..." : "Quitar"}
@@ -887,7 +887,7 @@ export function MenuPersonalizationsClient({
                                               })}
                                             </select>
                                           </label>
-                                          <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={Boolean(pendingKey)}>
+                                          <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={pendingKey === optionInventoryKey}>
                                             {pendingKey === optionInventoryKey ? "Guardando..." : "Guardar reemplazo"}
                                           </button>
                                         </form>
@@ -903,7 +903,7 @@ export function MenuPersonalizationsClient({
                                                 <button
                                                   type="button"
                                                   className="ui-btn ui-btn--ghost"
-                                                  disabled={Boolean(pendingKey)}
+                                                  disabled={pendingKey === `disable-recipe-effect:${effect.id}`}
                                                   onClick={() => void mutate("disable_recipe_effect", { optionId: option.id, effectId: effect.id }, "Efecto de receta desactivado.", { pendingKey: `disable-recipe-effect:${effect.id}` })}
                                                 >
                                                   {pendingKey === `disable-recipe-effect:${effect.id}` ? "Quitando..." : "Quitar"}
@@ -919,7 +919,7 @@ export function MenuPersonalizationsClient({
                                   <button
                                     type="button"
                                     className="ui-btn ui-btn--ghost"
-                                    disabled={Boolean(pendingKey)}
+                                    disabled={pendingKey === `disable-option:${option.id}`}
                                     onClick={() => void mutate("disable_option", { groupId: group.id, optionId: option.id }, "Opción desactivada.", { pendingKey: `disable-option:${option.id}` })}
                                   >
                                     {pendingKey === `disable-option:${option.id}` ? "Eliminando..." : "Eliminar"}
@@ -955,7 +955,7 @@ export function MenuPersonalizationsClient({
                                 <span className="ui-label">Texto opcional</span>
                                 <input name="description" className="ui-input" placeholder="Ej. Queda bien con este producto." />
                               </label>
-                              <button type="submit" className="ui-btn ui-btn--brand" disabled={Boolean(pendingKey)}>
+                              <button type="submit" className="ui-btn ui-btn--brand" disabled={pendingKey === addOptionKey}>
                                 {pendingKey === addOptionKey ? "Agregando..." : "Agregar sugerencia"}
                               </button>
                             </div>
@@ -983,7 +983,7 @@ export function MenuPersonalizationsClient({
                                   ) : (
                                     <input type="hidden" name="is_default" value="false" />
                                   )}
-                                  <button type="submit" className="ui-btn ui-btn--brand" disabled={Boolean(pendingKey)}>
+                                  <button type="submit" className="ui-btn ui-btn--brand" disabled={pendingKey === addOptionKey}>
                                     {pendingKey === addOptionKey ? "Agregando..." : "Agregar"}
                                   </button>
                                 </div>
@@ -1077,7 +1077,7 @@ export function MenuPersonalizationsClient({
                 <button
                   key={ingredient.id}
                   type="button"
-                  disabled={Boolean(pendingKey)}
+                  disabled={pendingKey === `create-removal:${ingredient.id}`}
                   onClick={() => void mutate("create_removal_option_from_recipe", { ingredientProductId: ingredient.ingredient_product_id, ingredientName: product.name ?? "Ingrediente", stockUnitCode: product.stock_unit_code || product.unit || "" }, `Opción Sin ${product.name ?? "Ingrediente"} creada.`, { pendingKey: `create-removal:${ingredient.id}` })}
                   className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 text-left disabled:cursor-not-allowed disabled:opacity-60"
                 >
