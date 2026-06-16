@@ -117,6 +117,28 @@ type RolePermissionRow = {
   is_allowed: boolean | null;
 };
 
+type LocationRefRow = {
+  id?: string;
+  location_id?: string | null;
+  from_loc_id?: string | null;
+  to_loc_id?: string | null;
+  source_location_id?: string | null;
+  source_loc_id?: string | null;
+  destination_location_id?: string | null;
+  production_location_id?: string | null;
+  input_location_id?: string | null;
+  output_location_id?: string | null;
+  current_qty?: number | null;
+  is_active?: boolean | null;
+};
+
+type LocationUsage = {
+  key: string;
+  label: string;
+  count: number;
+  tone?: "success" | "warning";
+};
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -170,6 +192,48 @@ function locationTypeLabel(value: string | null | undefined) {
 
 function roleLabel(value: string | null | undefined) {
   return String(value ?? "sin_rol").replace(/_/g, " ");
+}
+
+function addCount(map: Map<string, number>, key: string | null | undefined, amount = 1) {
+  const cleanKey = String(key ?? "").trim();
+  if (!cleanKey) return;
+  map.set(cleanKey, (map.get(cleanKey) ?? 0) + amount);
+}
+
+function usageList(params: {
+  locAssignments: number;
+  routeInputs: number;
+  routeOutputs: number;
+  entryItems: number;
+  stockProducts: number;
+  transferOut: number;
+  transferIn: number;
+  productDefaults: number;
+  recipeInputs: number;
+  recipeOutputs: number;
+  productionConsumptions: number;
+  productionOutputs: number;
+  salesRules: number;
+  physicalAssets: number;
+}) {
+  const rows: LocationUsage[] = [
+    { key: "entry", label: "Recibe compras/Origo", count: params.entryItems, tone: "success" },
+    { key: "stock", label: "Guarda stock", count: params.stockProducts, tone: "success" },
+    { key: "transfer_out", label: "Salida transferencia", count: params.transferOut },
+    { key: "transfer_in", label: "Entrada transferencia", count: params.transferIn },
+    { key: "route_input", label: "Insumos producción", count: params.routeInputs },
+    { key: "route_output", label: "Recibe producido", count: params.routeOutputs },
+    { key: "product_default", label: "LOC producto/sede", count: params.productDefaults },
+    { key: "recipe_input", label: "Receta consume", count: params.recipeInputs },
+    { key: "recipe_output", label: "Receta deposita", count: params.recipeOutputs },
+    { key: "batch_input", label: "Lote consume", count: params.productionConsumptions },
+    { key: "batch_output", label: "Lote ingresa", count: params.productionOutputs },
+    { key: "sales", label: "Venta descuenta", count: params.salesRules, tone: "warning" },
+    { key: "people", label: "Persona asignada", count: params.locAssignments },
+    { key: "assets", label: "Activos físicos", count: params.physicalAssets },
+  ];
+
+  return rows.filter((row) => row.count > 0);
 }
 
 function normalizeLocationType(value: string) {
@@ -673,6 +737,17 @@ export default async function OperationsMapPage({
     locAssignmentsRes,
     routesRes,
     rolePermissionsRes,
+    entryItemsRes,
+    stockRes,
+    transfersRes,
+    productSettingsRes,
+    recipeSiteUsesRes,
+    recipeOutputsRes,
+    productionConsumptionsRes,
+    productionOutputsRes,
+    salesRulesRes,
+    assetItemsRes,
+    assetGroupsRes,
   ] = await Promise.all([
     supabase.from("sites").select("id,code,name,site_type,is_active,operational_visibility").order("name", { ascending: true }),
     supabase
@@ -701,6 +776,32 @@ export default async function OperationsMapPage({
       .from("role_permissions")
       .select("role,scope_type,scope_site_id,scope_area_id,scope_area_kind,is_allowed")
       .eq("is_allowed", true),
+    supabase.from("inventory_entry_items").select("id,location_id").not("location_id", "is", null),
+    supabase
+      .from("inventory_stock_by_location")
+      .select("location_id,product_id,current_qty")
+      .neq("current_qty", 0),
+    supabase.from("inventory_transfers").select("id,from_loc_id,to_loc_id"),
+    supabase
+      .from("product_site_settings")
+      .select("id,site_id,production_location_id,is_active")
+      .not("production_location_id", "is", null),
+    supabase
+      .from("recipe_site_uses")
+      .select("id,source_location_id,destination_location_id,is_active")
+      .eq("is_active", true),
+    supabase
+      .from("recipe_outputs")
+      .select("id,destination_location_id,is_active")
+      .eq("is_active", true),
+    supabase.from("production_batch_consumptions").select("id,location_id"),
+    supabase.from("production_batch_outputs").select("id,destination_location_id"),
+    supabase
+      .from("pulso_sales_consumption_rules")
+      .select("id,source_loc_id,is_active")
+      .eq("is_active", true),
+    supabase.from("asset_items").select("id,location_id").not("location_id", "is", null),
+    supabase.from("asset_groups").select("id,location_id").not("location_id", "is", null),
   ]);
 
   const loadError =
@@ -712,6 +813,17 @@ export default async function OperationsMapPage({
     locAssignmentsRes.error?.message ||
     routesRes.error?.message ||
     rolePermissionsRes.error?.message ||
+    entryItemsRes.error?.message ||
+    stockRes.error?.message ||
+    transfersRes.error?.message ||
+    productSettingsRes.error?.message ||
+    recipeSiteUsesRes.error?.message ||
+    recipeOutputsRes.error?.message ||
+    productionConsumptionsRes.error?.message ||
+    productionOutputsRes.error?.message ||
+    salesRulesRes.error?.message ||
+    assetItemsRes.error?.message ||
+    assetGroupsRes.error?.message ||
     "";
 
   if (loadError) {
@@ -737,6 +849,17 @@ export default async function OperationsMapPage({
   const locAssignments = (locAssignmentsRes.data ?? []) as LocAssignmentRow[];
   const routes = (routesRes.data ?? []) as RouteRow[];
   const rolePermissions = (rolePermissionsRes.data ?? []) as RolePermissionRow[];
+  const entryItems = (entryItemsRes.data ?? []) as LocationRefRow[];
+  const stockRows = (stockRes.data ?? []) as LocationRefRow[];
+  const transferRows = (transfersRes.data ?? []) as LocationRefRow[];
+  const productSettingRows = (productSettingsRes.data ?? []) as LocationRefRow[];
+  const recipeSiteUseRows = (recipeSiteUsesRes.data ?? []) as LocationRefRow[];
+  const recipeOutputRows = (recipeOutputsRes.data ?? []) as LocationRefRow[];
+  const productionConsumptionRows = (productionConsumptionsRes.data ?? []) as LocationRefRow[];
+  const productionOutputRows = (productionOutputsRes.data ?? []) as LocationRefRow[];
+  const salesRuleRows = (salesRulesRes.data ?? []) as LocationRefRow[];
+  const assetItemRows = (assetItemsRes.data ?? []) as LocationRefRow[];
+  const assetGroupRows = (assetGroupsRes.data ?? []) as LocationRefRow[];
 
   const areasBySite = new Map<string, AreaRow[]>();
   for (const area of areas) {
@@ -778,6 +901,36 @@ export default async function OperationsMapPage({
       ]);
     }
   }
+
+  const entryItemsByLocation = new Map<string, number>();
+  const stockProductsByLocation = new Map<string, number>();
+  const transfersOutByLocation = new Map<string, number>();
+  const transfersInByLocation = new Map<string, number>();
+  const productDefaultsByLocation = new Map<string, number>();
+  const recipeInputsByLocation = new Map<string, number>();
+  const recipeOutputsByLocation = new Map<string, number>();
+  const productionConsumptionsByLocation = new Map<string, number>();
+  const productionOutputsByLocation = new Map<string, number>();
+  const salesRulesByLocation = new Map<string, number>();
+  const physicalAssetsByLocation = new Map<string, number>();
+
+  for (const row of entryItems) addCount(entryItemsByLocation, row.location_id);
+  for (const row of stockRows) addCount(stockProductsByLocation, row.location_id);
+  for (const row of transferRows) {
+    addCount(transfersOutByLocation, row.from_loc_id);
+    addCount(transfersInByLocation, row.to_loc_id);
+  }
+  for (const row of productSettingRows) addCount(productDefaultsByLocation, row.production_location_id);
+  for (const row of recipeSiteUseRows) {
+    addCount(recipeInputsByLocation, row.source_location_id);
+    addCount(recipeOutputsByLocation, row.destination_location_id);
+  }
+  for (const row of recipeOutputRows) addCount(recipeOutputsByLocation, row.destination_location_id);
+  for (const row of productionConsumptionRows) addCount(productionConsumptionsByLocation, row.location_id);
+  for (const row of productionOutputRows) addCount(productionOutputsByLocation, row.destination_location_id);
+  for (const row of salesRuleRows) addCount(salesRulesByLocation, row.source_loc_id);
+  for (const row of assetItemRows) addCount(physicalAssetsByLocation, row.location_id);
+  for (const row of assetGroupRows) addCount(physicalAssetsByLocation, row.location_id);
 
   const rolesBySite = new Map<string, Set<string>>();
   const rolesByArea = new Map<string, Set<string>>();
@@ -1135,6 +1288,22 @@ export default async function OperationsMapPage({
                               routeInputCount: routesByInputLocation.get(loc.id)?.length ?? 0,
                               routeOutputCount: routesByOutputLocation.get(loc.id)?.length ?? 0,
                             });
+                            const operationalUsages = usageList({
+                              locAssignments: assignedPeople.length,
+                              routeInputs: routesByInputLocation.get(loc.id)?.length ?? 0,
+                              routeOutputs: routesByOutputLocation.get(loc.id)?.length ?? 0,
+                              entryItems: entryItemsByLocation.get(loc.id) ?? 0,
+                              stockProducts: stockProductsByLocation.get(loc.id) ?? 0,
+                              transferOut: transfersOutByLocation.get(loc.id) ?? 0,
+                              transferIn: transfersInByLocation.get(loc.id) ?? 0,
+                              productDefaults: productDefaultsByLocation.get(loc.id) ?? 0,
+                              recipeInputs: recipeInputsByLocation.get(loc.id) ?? 0,
+                              recipeOutputs: recipeOutputsByLocation.get(loc.id) ?? 0,
+                              productionConsumptions: productionConsumptionsByLocation.get(loc.id) ?? 0,
+                              productionOutputs: productionOutputsByLocation.get(loc.id) ?? 0,
+                              salesRules: salesRulesByLocation.get(loc.id) ?? 0,
+                              physicalAssets: physicalAssetsByLocation.get(loc.id) ?? 0,
+                            });
 
                             return (
                               <div key={loc.id} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
@@ -1217,6 +1386,29 @@ export default async function OperationsMapPage({
                                     <span className="text-xs text-[var(--ui-muted)]">Sin uso inferido.</span>
                                   )}
                                 </div>
+                                <div className="mt-3 rounded-xl border border-dashed border-[var(--ui-border)] bg-white p-3">
+                                  <div className="ui-caption">Usos reales</div>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {operationalUsages.length ? (
+                                      operationalUsages.map((usage) => (
+                                        <span
+                                          key={`${loc.id}-${usage.key}`}
+                                          className={
+                                            usage.tone === "success"
+                                              ? "ui-chip ui-chip--success"
+                                              : usage.tone === "warning"
+                                                ? "ui-chip ui-chip--warning"
+                                                : "ui-chip"
+                                          }
+                                        >
+                                          {usage.label}: {usage.count}
+                                        </span>
+                                      ))
+                                    ) : (
+                                      <span className="text-xs text-[var(--ui-muted)]">Sin vínculos reales.</span>
+                                    )}
+                                  </div>
+                                </div>
                                 {assignedPeople.length ? (
                                   <div className="mt-3 text-xs text-[var(--ui-muted)]">
                                     {assignedPeople
@@ -1242,8 +1434,27 @@ export default async function OperationsMapPage({
                     <div className="rounded-xl border border-[var(--ui-border)] bg-white p-4">
                       <div className="text-base font-semibold text-[var(--ui-text)]">LOCs sin area</div>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        {unassignedLocations.map((loc) => (
-                          <div key={loc.id} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
+                        {unassignedLocations.map((loc) => {
+                          const assignedPeople = locAssignmentsByLocation.get(loc.id) ?? [];
+                          const operationalUsages = usageList({
+                            locAssignments: assignedPeople.length,
+                            routeInputs: routesByInputLocation.get(loc.id)?.length ?? 0,
+                            routeOutputs: routesByOutputLocation.get(loc.id)?.length ?? 0,
+                            entryItems: entryItemsByLocation.get(loc.id) ?? 0,
+                            stockProducts: stockProductsByLocation.get(loc.id) ?? 0,
+                            transferOut: transfersOutByLocation.get(loc.id) ?? 0,
+                            transferIn: transfersInByLocation.get(loc.id) ?? 0,
+                            productDefaults: productDefaultsByLocation.get(loc.id) ?? 0,
+                            recipeInputs: recipeInputsByLocation.get(loc.id) ?? 0,
+                            recipeOutputs: recipeOutputsByLocation.get(loc.id) ?? 0,
+                            productionConsumptions: productionConsumptionsByLocation.get(loc.id) ?? 0,
+                            productionOutputs: productionOutputsByLocation.get(loc.id) ?? 0,
+                            salesRules: salesRulesByLocation.get(loc.id) ?? 0,
+                            physicalAssets: physicalAssetsByLocation.get(loc.id) ?? 0,
+                          });
+
+                          return (
+                            <div key={loc.id} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
                             <div className="font-semibold text-[var(--ui-text)]">{loc.code ?? loc.zone ?? "LOC"}</div>
                             <div className="mt-1 text-xs text-[var(--ui-muted)]">{locationTypeLabel(loc.location_type)}</div>
                             <form action={updateLocation} className="mt-3 grid gap-3">
@@ -1305,8 +1516,32 @@ export default async function OperationsMapPage({
                                 </div>
                               </div>
                             </form>
+                            <div className="mt-3 rounded-xl border border-dashed border-[var(--ui-border)] bg-white p-3">
+                              <div className="ui-caption">Usos reales</div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {operationalUsages.length ? (
+                                  operationalUsages.map((usage) => (
+                                    <span
+                                      key={`${loc.id}-${usage.key}`}
+                                      className={
+                                        usage.tone === "success"
+                                          ? "ui-chip ui-chip--success"
+                                          : usage.tone === "warning"
+                                            ? "ui-chip ui-chip--warning"
+                                            : "ui-chip"
+                                      }
+                                    >
+                                      {usage.label}: {usage.count}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="text-xs text-[var(--ui-muted)]">Sin vínculos reales.</span>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ) : null}

@@ -1,7 +1,6 @@
 ﻿import { redirect } from "next/navigation";
 import Link from "next/link";
 
-import { MenuItemForm } from "@/components/viso/menu-item-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -16,37 +15,6 @@ type SellOptionRow = {
   sku: string | null;
   base_price: number | string | null;
   recipe_cost_amount: number | string | null;
-};
-
-type InventoryProductRow = {
-  id: string;
-  name: string | null;
-  sku: string | null;
-  unit: string | null;
-  stock_unit_code: string | null;
-  is_active: boolean | null;
-};
-
-type CatalogOptionInput = {
-  name: string;
-  description: string | null;
-  price_delta_amount: number;
-  product_id: string;
-  quantity_per_option: number;
-  stock_unit_code: string;
-  is_default: boolean;
-  sort_order: number;
-};
-
-type CatalogOptionGroupInput = {
-  name: string;
-  description: string | null;
-  selection_type: "single" | "multiple";
-  is_required: boolean;
-  min_select: number;
-  max_select: number;
-  sort_order: number;
-  options: CatalogOptionInput[];
 };
 
 type CommercialCategoryRow = {
@@ -127,6 +95,16 @@ function slugify(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function formatCopAdmin(value: number | string | null | undefined) {
+  const parsed = typeof value === "number" ? value : Number(value ?? 0);
+
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(parsed) ? parsed : 0);
 }
 
 type MenuReferencesValidation = {
@@ -428,302 +406,6 @@ async function getNextCatalogItemSortOrder(
   return Number(data?.sort_order ?? 0) + 10;
 }
 
-
-type ParsedCatalogOptionGroups = {
-  error: string;
-  groups: CatalogOptionGroupInput[];
-};
-
-function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function readString(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function readBoolean(value: unknown, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (["true", "on", "1", "yes", "si", "sí"].includes(normalized)) return true;
-    if (["false", "off", "0", "no"].includes(normalized)) return false;
-  }
-  return fallback;
-}
-
-function readNonNegativeNumber(value: unknown, fallback = 0) {
-  const parsed = typeof value === "number" ? value : Number(readString(value));
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(0, parsed);
-}
-
-function readPositiveNumber(value: unknown, fallback = 1) {
-  const parsed = typeof value === "number" ? value : Number(readString(value));
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return parsed;
-}
-
-function parseCatalogOptionGroups(value: FormDataEntryValue | null): ParsedCatalogOptionGroups {
-  const raw = asText(value);
-  if (!raw) return { error: "", groups: [] };
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { error: "La configuración de opciones operacionales no tiene un formato válido.", groups: [] };
-  }
-
-  if (!Array.isArray(parsed)) {
-    return { error: "La configuración de opciones operacionales debe ser una lista de grupos.", groups: [] };
-  }
-
-  const groups: CatalogOptionGroupInput[] = [];
-
-  for (const [groupIndex, rawGroup] of parsed.entries()) {
-    const group = readRecord(rawGroup);
-    if (readBoolean(group.is_active, true) === false) continue;
-
-    const groupName = readString(group.name);
-    const rawOptions = Array.isArray(group.options) ? group.options : [];
-    const activeRawOptions = rawOptions.filter((option) => readBoolean(readRecord(option).is_active, true) !== false);
-
-    if (!groupName && activeRawOptions.length === 0) continue;
-
-    if (!groupName) {
-      return { error: `El grupo de opciones ${groupIndex + 1} necesita nombre.`, groups: [] };
-    }
-
-    const selectionType = readString(group.selection_type) === "multiple" ? "multiple" : "single";
-    const isRequired = readBoolean(group.is_required, true);
-
-    let minSelect = Math.floor(readNonNegativeNumber(group.min_select, isRequired ? 1 : 0));
-    let maxSelect = Math.floor(readPositiveNumber(group.max_select, selectionType === "multiple" ? 3 : 1));
-
-    if (selectionType === "single") {
-      minSelect = isRequired ? 1 : 0;
-      maxSelect = 1;
-    } else {
-      if (isRequired && minSelect < 1) minSelect = 1;
-      if (maxSelect < 1) maxSelect = 1;
-      if (minSelect > maxSelect) {
-        return {
-          error: `El grupo "${groupName}" tiene mínimo mayor que máximo.`,
-          groups: [],
-        };
-      }
-    }
-
-    const options: CatalogOptionInput[] = [];
-
-    for (const [optionIndex, rawOption] of activeRawOptions.entries()) {
-      const option = readRecord(rawOption);
-      const optionName = readString(option.name);
-      const optionProductId = readString(option.product_id);
-      const quantityPerOption = readPositiveNumber(option.quantity_per_option, 0);
-      const stockUnitCode = readString(option.stock_unit_code);
-
-      if (!optionName) {
-        return {
-          error: `La opción ${optionIndex + 1} del grupo "${groupName}" necesita nombre visible.`,
-          groups: [],
-        };
-      }
-
-      if (!optionProductId) {
-        return {
-          error: `La opción "${optionName}" necesita un producto operacional para descontar inventario.`,
-          groups: [],
-        };
-      }
-
-      if (quantityPerOption <= 0) {
-        return {
-          error: `La opción "${optionName}" necesita una cantidad de consumo mayor a 0.`,
-          groups: [],
-        };
-      }
-
-      if (!stockUnitCode) {
-        return {
-          error: `La opción "${optionName}" necesita unidad de consumo.`,
-          groups: [],
-        };
-      }
-
-      options.push({
-        name: optionName,
-        description: readString(option.description) || null,
-        price_delta_amount: Math.round(readNonNegativeNumber(option.price_delta_amount, 0)),
-        product_id: optionProductId,
-        quantity_per_option: quantityPerOption,
-        stock_unit_code: stockUnitCode,
-        is_default: readBoolean(option.is_default, false),
-        sort_order: Math.floor(readNonNegativeNumber(option.sort_order, (optionIndex + 1) * 10)),
-      });
-    }
-
-    if (options.length === 0) {
-      return {
-        error: `El grupo "${groupName}" necesita al menos una opción activa.`,
-        groups: [],
-      };
-    }
-
-    groups.push({
-      name: groupName,
-      description: readString(group.description) || null,
-      selection_type: selectionType,
-      is_required: isRequired,
-      min_select: minSelect,
-      max_select: maxSelect,
-      sort_order: Math.floor(readNonNegativeNumber(group.sort_order, (groupIndex + 1) * 10)),
-      options,
-    });
-  }
-
-  return { error: "", groups };
-}
-
-async function validateOperationalOptionProducts(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  groups: CatalogOptionGroupInput[],
-) {
-  const productIds = Array.from(
-    new Set(
-      groups
-        .flatMap((group) => group.options.map((option) => option.product_id))
-        .map((productId) => productId.trim())
-        .filter(Boolean),
-    ),
-  );
-
-  if (productIds.length === 0) return "";
-
-  const { data, error } = await supabase
-    .from("products")
-    .select("id,name,is_active")
-    .in("id", productIds);
-
-  if (error) {
-    return `No se pudieron validar los productos operacionales de las opciones: ${error.message}`;
-  }
-
-  const rows = ((data ?? []) as { id: string; name: string | null; is_active: boolean | null }[]);
-  const foundById = new Map(rows.map((product) => [product.id, product]));
-
-  const missing = productIds.filter((productId) => !foundById.has(productId));
-  if (missing.length > 0) {
-    return "Hay opciones vinculadas a productos operacionales que no existen.";
-  }
-
-  const inactive = rows.find((product) => product.is_active === false);
-  if (inactive) {
-    return `El producto operacional "${inactive.name || inactive.id}" está inactivo.`;
-  }
-
-  return "";
-}
-
-async function saveCatalogItemOptionGroups(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  catalogItemId: string,
-  groups: CatalogOptionGroupInput[],
-) {
-  for (const group of groups) {
-    const groupCode = slugify(group.name) || `grupo-${group.sort_order}`;
-
-    const { data: createdGroup, error: groupError } = await supabase
-      .schema("pass")
-      .from("catalog_item_option_groups")
-      .insert({
-        catalog_item_id: catalogItemId,
-        code: groupCode,
-        name: group.name,
-        description: group.description,
-        selection_type: group.selection_type,
-        is_required: group.is_required,
-        min_select: group.min_select,
-        max_select: group.max_select,
-        sort_order: group.sort_order,
-        is_active: true,
-      })
-      .select("id")
-      .single();
-
-    if (groupError) {
-      throw new Error(`No se pudo guardar el grupo "${group.name}": ${groupError.message}`);
-    }
-
-    if (!createdGroup?.id) {
-      throw new Error(`El grupo "${group.name}" se guardó sin identificador.`);
-    }
-
-    for (const option of group.options) {
-      const optionCode = slugify(option.name) || `opcion-${option.sort_order}`;
-
-      const { data: createdOption, error: optionError } = await supabase
-        .schema("pass")
-        .from("catalog_item_options")
-        .insert({
-          option_group_id: createdGroup.id,
-          code: optionCode,
-          name: option.name,
-          description: option.description,
-          price_delta_amount: option.price_delta_amount,
-          product_id: option.product_id,
-          effect_type: "inventory_consumption",
-          is_default: option.is_default,
-          is_active: true,
-          sort_order: option.sort_order,
-          metadata: {
-            source_app: "viso",
-            source_module: "menu_comercial",
-          },
-        })
-        .select("id")
-        .single();
-
-      if (optionError) {
-        throw new Error(`No se pudo guardar la opción "${option.name}": ${optionError.message}`);
-      }
-
-      if (!createdOption?.id) {
-        throw new Error(`La opción "${option.name}" se guardó sin identificador.`);
-      }
-
-      const { error: ruleError } = await supabase
-        .schema("pass")
-        .from("catalog_item_option_consumption_rules")
-        .insert({
-          option_id: createdOption.id,
-          code: `${optionCode}-consume`,
-          name: `Consumir ${option.name}`,
-          product_id: option.product_id,
-          effect_type: "inventory_consumption",
-          quantity_per_option: option.quantity_per_option,
-          stock_unit_code: option.stock_unit_code,
-          input_quantity_per_option: option.quantity_per_option,
-          input_unit_code: option.stock_unit_code,
-          conversion_factor_to_stock_unit: 1,
-          source_location_strategy: "product_production_location",
-          source_location_id: null,
-          source_location_position_id: null,
-          is_active: true,
-          sort_order: option.sort_order,
-        });
-
-      if (ruleError) {
-        throw new Error(`No se pudo guardar el consumo de "${option.name}": ${ruleError.message}`);
-      }
-    }
-  }
-}
-
-
 async function createMenuItem(formData: FormData) {
   "use server";
   const supabase = await createClient();
@@ -731,7 +413,6 @@ async function createMenuItem(formData: FormData) {
   const name = asText(formData.get("name"));
   const siteId = asText(formData.get("site_id"));
   const productId = asText(formData.get("product_id"));
-
   const commercialCollectionId = asText(formData.get("commercial_collection_id"));
   const commercialCategoryId = asText(formData.get("commercial_category_id"));
 
@@ -751,12 +432,7 @@ async function createMenuItem(formData: FormData) {
     : null;
 
   const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
-  const parsedOptionGroups = parseCatalogOptionGroups(formData.get("catalog_option_groups"));
-  if (parsedOptionGroups.error) {
-    redirect("/menu/new?error=" + encodeURIComponent(parsedOptionGroups.error));
-  }
-  const hasOperationalOptions = parsedOptionGroups.groups.length > 0;
-  const opensDetailModal = hasOperationalOptions || asBool(formData.get("opens_detail_modal"));
+  const opensDetailModal = asBool(formData.get("opens_detail_modal"));
 
   const referencesValidation = await validateCommercialMenuReferences(
     supabase,
@@ -770,35 +446,39 @@ async function createMenuItem(formData: FormData) {
     redirect("/menu/new?error=" + encodeURIComponent(referencesValidation.error));
   }
 
-  const optionProductValidationError = await validateOperationalOptionProducts(
-    supabase,
-    parsedOptionGroups.groups,
-  );
-  if (optionProductValidationError) {
-    redirect("/menu/new?error=" + encodeURIComponent(optionProductValidationError));
-  }
-
   let code = "";
   let sortOrder = 0;
 
   try {
-    code = await getAvailableCatalogItemCode(
-      supabase,
-      [
-        referencesValidation.siteCode,
-        referencesValidation.collectionCode,
-        referencesValidation.productCode,
-      ]
-        .filter(Boolean)
-        .join("-"),
-    );
+    const requestedCode = slugify(asText(formData.get("code")));
+    if (requestedCode) {
+      const availableCode = await getAvailableCatalogItemCode(supabase, requestedCode);
+      if (availableCode !== requestedCode) {
+        redirect("/menu/new?error=" + encodeURIComponent("Ya existe un item comercial con ese código."));
+      }
+      code = requestedCode;
+    } else {
+      code = await getAvailableCatalogItemCode(
+        supabase,
+        [
+          referencesValidation.siteCode,
+          referencesValidation.collectionCode,
+          referencesValidation.productCode,
+        ]
+          .filter(Boolean)
+          .join("-"),
+      );
+    }
 
-    sortOrder = await getNextCatalogItemSortOrder(
-      supabase,
-      siteId,
-      commercialCollectionId,
-      commercialCategoryId,
-    );
+    const requestedSortOrder = asText(formData.get("sort_order"));
+    sortOrder = requestedSortOrder
+      ? Math.round(asNonNegativeNumber(formData.get("sort_order")))
+      : await getNextCatalogItemSortOrder(
+        supabase,
+        siteId,
+        commercialCollectionId,
+        commercialCategoryId,
+      );
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo generar código u orden automático.";
     redirect("/menu/new?error=" + encodeURIComponent(message));
@@ -814,7 +494,6 @@ async function createMenuItem(formData: FormData) {
     recipe_cost_amount: referencesValidation.recipeCostAmount,
     display_group: asText(formData.get("display_group")) || null,
     variant_label: asText(formData.get("variant_label")) || null,
-    has_operational_options: hasOperationalOptions,
   };
 
   const { data: createdItem, error } = await supabase
@@ -850,16 +529,6 @@ async function createMenuItem(formData: FormData) {
     redirect("/menu/new?error=" + encodeURIComponent("Item creado sin identificador."));
   }
 
-  if (hasOperationalOptions) {
-    try {
-      await saveCatalogItemOptionGroups(supabase, createdItem.id, parsedOptionGroups.groups);
-    } catch (error) {
-      await supabase.schema("pass").from("catalog_items").delete().eq("id", createdItem.id);
-      const message = error instanceof Error ? error.message : "No se pudieron guardar opciones operacionales.";
-      redirect("/menu/new?error=" + encodeURIComponent(message));
-    }
-  }
-
   const { error: presentationError } = await supabase
     .schema("pass")
     .from("catalog_item_presentation")
@@ -880,7 +549,7 @@ async function createMenuItem(formData: FormData) {
     redirect("/menu/new?error=" + encodeURIComponent(presentationError.message));
   }
 
-  redirect("/menu?ok=" + encodeURIComponent("Item creado."));
+  redirect(`/menu/${createdItem.id}?ok=${encodeURIComponent("Producto creado. Ahora configura sus personalizaciones.")}`);
 }
 
 function safeDecode(value: string | null | undefined) {
@@ -915,7 +584,6 @@ export default async function NewMenuItemPage({
 
   const [
     { data: sellOptionsRaw },
-    { data: inventoryProductsRaw },
     { data: categoriesRaw },
     { data: collectionsRaw },
     { data: collectionCategoryLinksRaw },
@@ -925,12 +593,6 @@ export default async function NewMenuItemPage({
       .from("sell_products_by_site")
       .select("site_id,product_id,name,sku,base_price,recipe_cost_amount")
       .order("name", { ascending: true }),
-    supabase
-      .from("products")
-      .select("id,name,sku,unit,stock_unit_code,is_active")
-      .eq("is_active", true)
-      .order("name", { ascending: true })
-      .limit(2000),
     supabase
       .schema("pass")
       .from("commercial_categories")
@@ -952,13 +614,16 @@ export default async function NewMenuItemPage({
       .order("sort_order", { ascending: true }),
   ]);
 
+  const siteNameById = new Map(
+    activeSites.map((site) => [site.id, site.name || site.code || site.id]),
+  );
+
   const productsMap = new Map<
     string,
     {
       id: string;
       name: string | null;
       sku: string | null;
-      is_active: boolean;
       site_ids: Set<string>;
       site_prices: Record<string, number | null>;
       site_recipe_costs: Record<string, number | null>;
@@ -976,7 +641,6 @@ export default async function NewMenuItemPage({
         id: productId,
         name: row.name ?? null,
         sku: row.sku ?? null,
-        is_active: true,
         site_ids: new Set<string>(),
         site_prices: {},
         site_recipe_costs: {},
@@ -1011,27 +675,10 @@ export default async function NewMenuItemPage({
       id: item.id,
       name: item.name,
       sku: item.sku,
-      is_active: item.is_active,
       site_ids: Array.from(item.site_ids),
       site_prices: item.site_prices,
       site_recipe_costs: item.site_recipe_costs,
       default_price: item.default_price,
-    }))
-    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
-
-
-  const inventoryProducts = ((inventoryProductsRaw ?? []) as InventoryProductRow[])
-    .map((product) => ({
-      id: product.id,
-      name: product.name,
-      sku: product.sku,
-      unit: product.unit,
-      stock_unit_code: product.stock_unit_code,
-      is_active: product.is_active,
-      site_ids: [],
-      site_prices: {},
-      site_recipe_costs: {},
-      default_price: null,
     }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
 
@@ -1051,54 +698,309 @@ export default async function NewMenuItemPage({
     return categorySiteIds.has(site.id) && collectionSiteIds.has(site.id);
   });
 
+  const categories = (categoriesRaw ?? []) as CommercialCategoryRow[];
+  const collections = (collectionsRaw ?? []) as CommercialCollectionRow[];
+  const collectionCategoryLinks = (collectionCategoryLinksRaw ?? []) as CollectionCategoryLinkRow[];
+
+  const collectionCategoryText = collectionCategoryLinks
+    .map((link) => {
+      const collection = collections.find((item) => item.id === link.collection_id);
+      const category = categories.find((item) => item.id === link.commercial_category_id);
+      if (!collection || !category) return null;
+      const siteName = siteNameById.get(collection.site_id) || collection.site_id;
+      return `${siteName}: ${collection.name || collection.code} → ${category.name || category.code}`;
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Crear item comercial"
-        subtitle="Catálogo de compras por satélite. Las categorías comerciales se crean por sede."
+        subtitle="Crea solo la ficha comercial base. Las personalizaciones se configuran después, desde la edición del producto."
         actions={
           <Link href="/menu" className="ui-btn ui-btn--ghost">
             Volver
           </Link>
         }
       />
+
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
-      <MenuItemForm
-        mode="create"
-        action={createMenuItem}
-        sites={commercialSites}
-        products={products}
-        inventoryProducts={inventoryProducts}
-        categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
-        collections={(collectionsRaw ?? []) as CommercialCollectionRow[]}
-        collectionCategoryLinks={(collectionCategoryLinksRaw ?? []) as CollectionCategoryLinkRow[]}
-        initial={{
-          code: "",
-          name: "",
-          description: "",
-          product_id: "",
-          price_amount: "",
-          compare_at_amount: "",
-          sort_order: "0",
-          is_active: true,
-          is_featured: false,
-          site_id: commercialSites[0]?.id ?? "",
-          commercial_collection_id: "",
-          commercial_category_id: "",
-          category_label: "",
-          image_url: "",
-          badges_csv: "",
-          fulfillment_delivery: true,
-          fulfillment_pickup: true,
-          fulfillment_on_premise: true,
-          metadata_extra: "",
-          display_group: "",
-          variant_label: "",
-          pass_card_layout: "compact",
-          opens_detail_modal: false,
-          option_groups: [],
-        }}
-      />
+
+      <form action={createMenuItem} className="space-y-6">
+        <section className="ui-card space-y-4 p-6">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Base comercial</h2>
+            <p className="text-sm text-slate-500">
+              Elige la sede, el producto operacional base y la estructura comercial donde aparecerá en Vento Pass.
+            </p>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Sede *
+              <select name="site_id" required defaultValue={commercialSites[0]?.id ?? ""} className="ui-input">
+                {commercialSites.length === 0 ? (
+                  <option value="">Sin sedes comerciales configuradas</option>
+                ) : null}
+                {commercialSites.map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.name || site.code || site.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Producto operacional base *
+              <select name="product_id" required defaultValue="" className="ui-input">
+                <option value="">Selecciona producto operacional</option>
+                {products.map((product) => {
+                  const sites = product.site_ids
+                    .map((siteId) => siteNameById.get(siteId) || siteId)
+                    .join(", ");
+                  const price = product.default_price != null ? ` · base ${formatCopAdmin(product.default_price)}` : "";
+                  return (
+                    <option key={product.id} value={product.id}>
+                      {product.name || product.sku || product.id}{price}{sites ? ` · ${sites}` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+              <span className="block text-xs font-normal text-slate-500">
+                Debe estar habilitado para venta en la sede seleccionada.
+              </span>
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Colección comercial *
+              <select name="commercial_collection_id" required defaultValue="" className="ui-input">
+                <option value="">Selecciona colección</option>
+                {collections.map((collection) => (
+                  <option key={collection.id} value={collection.id}>
+                    {siteNameById.get(collection.site_id) || collection.site_id} · {collection.name || collection.code || collection.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Categoría comercial *
+              <select name="commercial_category_id" required defaultValue="" className="ui-input">
+                <option value="">Selecciona categoría</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {siteNameById.get(category.site_id) || category.site_id} · {category.name || category.code || category.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {collectionCategoryText.length > 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+              <p className="mb-2 font-semibold text-slate-700">Colecciones y categorías válidas:</p>
+              <ul className="space-y-1">
+                {collectionCategoryText.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="ui-card space-y-4 p-6">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Información visible</h2>
+            <p className="text-sm text-slate-500">
+              Estos campos definen cómo se muestra el producto comercial en Vento Pass.
+            </p>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Código comercial
+              <input
+                name="code"
+                type="text"
+                className="ui-input"
+                placeholder="Ej. vaso-o-cono-vainilla"
+              />
+              <span className="block text-xs font-normal text-slate-500">
+                Opcional. Si lo dejas vacío, Viso lo genera automáticamente.
+              </span>
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Nombre comercial *
+              <input
+                name="name"
+                type="text"
+                required
+                className="ui-input"
+                placeholder="Ej. Vaso o cono vainilla"
+              />
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700 lg:col-span-2">
+              Descripción
+              <textarea
+                name="description"
+                rows={3}
+                className="ui-input"
+                placeholder="Helado servido en vaso o cono, con toppings a elección."
+              />
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Precio base comercial *
+              <input
+                name="price_amount"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                required
+                className="ui-input"
+                placeholder="Ej. 10000"
+              />
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Precio antes / tachado
+              <input
+                name="compare_at_amount"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                className="ui-input"
+                placeholder="Opcional"
+              />
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Orden
+              <input
+                name="sort_order"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                className="ui-input"
+                placeholder="Automático"
+              />
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700 lg:col-span-2">
+              Imagen comercial URL
+              <input
+                name="image_url"
+                type="url"
+                className="ui-input"
+                placeholder="https://..."
+              />
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Badges
+              <input
+                name="badges_csv"
+                type="text"
+                className="ui-input"
+                placeholder="Helado, Personalizable"
+              />
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Agrupación visual
+              <input
+                name="display_group"
+                type="text"
+                className="ui-input"
+                placeholder="Ej. Vaso o Cono"
+              />
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Variante visual
+              <input
+                name="variant_label"
+                type="text"
+                className="ui-input"
+                placeholder="Ej. Vainilla"
+              />
+            </label>
+          </div>
+        </section>
+
+        <section className="ui-card grid gap-6 p-6 lg:grid-cols-3">
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold text-slate-900">Estado</h2>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input name="is_active" type="checkbox" defaultChecked />
+              Publicado en Pass
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input name="is_featured" type="checkbox" />
+              Mostrar en destacados
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold text-slate-900">Modalidades</h2>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input name="fulfillment_delivery" type="checkbox" defaultChecked />
+              Domicilio
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input name="fulfillment_pickup" type="checkbox" defaultChecked />
+              Recoger
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input name="fulfillment_on_premise" type="checkbox" defaultChecked />
+              En sitio
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold text-slate-900">Visualización en Pass</h2>
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Layout
+              <select name="pass_card_layout" defaultValue="compact" className="ui-input">
+                <option value="compact">Compacta</option>
+                <option value="featured">Destacada</option>
+              </select>
+            </label>
+            <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
+              <input name="opens_detail_modal" type="checkbox" />
+              <span>
+                Abrir modal antes de agregar
+                <span className="block text-xs font-normal text-slate-500">
+                  Actívalo si el producto tendrá presentación, toppings o cualquier personalización.
+                </span>
+              </span>
+            </label>
+          </div>
+        </section>
+
+        <section className="ui-card border-dashed border-amber-300 bg-amber-50/60 p-5 text-sm text-amber-900">
+          <p className="font-semibold">Personalizaciones</p>
+          <p>
+            La creación ya no configura opciones operacionales. Guarda el producto y Viso te llevará a edición,
+            donde se configuran presentación, toppings, cambios, retiros, preferencias y sugerencias.
+          </p>
+        </section>
+
+        <div className="flex justify-end gap-3">
+          <Link href="/menu" className="ui-btn ui-btn--ghost">
+            Cancelar
+          </Link>
+          <button type="submit" className="ui-btn ui-btn--primary">
+            Crear producto comercial
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
