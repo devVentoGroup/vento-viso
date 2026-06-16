@@ -356,7 +356,7 @@ function buildDiagnostics(params: {
 
   if (operationModel !== "single_loc") {
     for (const loc of activeLocations) {
-      if (!loc.area_id) diagnostics.push(`${loc.code ?? "LOC"} no tiene area asignada.`);
+      if (!loc.area_id) diagnostics.push(`${loc.code ?? "LOC"} no tiene área principal.`);
     }
     for (const area of activeAreas) {
       if (!activeLocations.some((loc) => loc.area_id === area.id)) {
@@ -1134,9 +1134,9 @@ export default async function OperationsMapPage({
                           </select>
                         </label>
                         <label className="grid gap-1">
-                          <span className="ui-caption">Área</span>
+                          <span className="ui-caption">Área principal</span>
                           <select name="area_id" defaultValue="" className="ui-input">
-                            <option value="">Sin área</option>
+                            <option value="">Sin área principal</option>
                             {siteAreas.map((area) => (
                               <option key={area.id} value={area.id}>
                                 {area.name ?? area.kind ?? area.code ?? area.id}
@@ -1336,9 +1336,9 @@ export default async function OperationsMapPage({
                                       </select>
                                     </label>
                                     <label className="grid gap-1">
-                                      <span className="ui-caption">Area</span>
+                                      <span className="ui-caption">Área principal</span>
                                       <select name="area_id" defaultValue={loc.area_id ?? ""} className="ui-input">
-                                        <option value="">Sin area</option>
+                                        <option value="">Sin área principal</option>
                                         {siteAreas.map((optionArea) => (
                                           <option key={optionArea.id} value={optionArea.id}>
                                             {optionArea.name ?? optionArea.kind ?? optionArea.code ?? optionArea.id}
@@ -1423,7 +1423,7 @@ export default async function OperationsMapPage({
                           })}
                           {areaLocations.length === 0 ? (
                             <div className="rounded-xl border border-dashed border-[var(--ui-border)] p-3 text-sm text-[var(--ui-muted)]">
-                              Sin LOCs en esta area.
+                              Sin LOCs en esta área.
                             </div>
                           ) : null}
                         </div>
@@ -1433,7 +1433,7 @@ export default async function OperationsMapPage({
 
                   {unassignedLocations.length ? (
                     <div className="rounded-xl border border-[var(--ui-border)] bg-white p-4">
-                      <div className="text-base font-semibold text-[var(--ui-text)]">LOCs sin area</div>
+                      <div className="text-base font-semibold text-[var(--ui-text)]">LOCs sin área principal</div>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         {unassignedLocations.map((loc) => {
                           const assignedPeople = locAssignmentsByLocation.get(loc.id) ?? [];
@@ -1477,9 +1477,9 @@ export default async function OperationsMapPage({
                                   </select>
                                 </label>
                                 <label className="grid gap-1">
-                                  <span className="ui-caption">Area</span>
+                                  <span className="ui-caption">Área principal</span>
                                   <select name="area_id" defaultValue="" className="ui-input">
-                                    <option value="">Sin area</option>
+                                    <option value="">Sin área principal</option>
                                     {siteAreas.map((optionArea) => (
                                       <option key={optionArea.id} value={optionArea.id}>
                                         {optionArea.name ?? optionArea.kind ?? optionArea.code ?? optionArea.id}
