@@ -16,6 +16,7 @@ type SiteRow = {
   name: string | null;
   site_type: string | null;
   is_active: boolean | null;
+  operational_visibility: string | null;
 };
 
 type CapabilityRow = {
@@ -137,6 +138,19 @@ function operationModelLabel(value: string | null | undefined) {
   return "Multi area";
 }
 
+function visibilityLabel(value: string | null | undefined) {
+  if (value === "app_review") return "App Review";
+  if (value === "test") return "Test";
+  if (value === "hidden") return "Oculta";
+  return "Operativa";
+}
+
+function visibilityChipClass(value: string | null | undefined) {
+  if (value === "operational" || !value) return "ui-chip ui-chip--success";
+  if (value === "hidden") return "ui-chip";
+  return "ui-chip ui-chip--warning";
+}
+
 function locationTypeLabel(value: string | null | undefined) {
   switch (String(value ?? "")) {
     case "receiving":
@@ -156,6 +170,65 @@ function locationTypeLabel(value: string | null | undefined) {
 
 function roleLabel(value: string | null | undefined) {
   return String(value ?? "sin_rol").replace(/_/g, " ");
+}
+
+function normalizeLocationType(value: string) {
+  if (["receiving", "storage", "picking", "production", "staging"].includes(value)) return value;
+  return "storage";
+}
+
+function booleanFromForm(value: FormDataEntryValue | null) {
+  return value === "on" || value === "true";
+}
+
+function backToMap(search = "") {
+  return `/operations-map${search}`;
+}
+
+async function countRows(
+  supabase: ReturnType<typeof createAdminClient>,
+  table: string,
+  column: string,
+  value: string
+) {
+  const { count, error } = await supabase.from(table).select("id", { count: "exact", head: true }).eq(column, value);
+  if (error) return 1;
+  return count ?? 0;
+}
+
+async function countNonZeroStock(
+  supabase: ReturnType<typeof createAdminClient>,
+  table: string,
+  locationId: string
+) {
+  const { count, error } = await supabase
+    .from(table)
+    .select("product_id", { count: "exact", head: true })
+    .eq("location_id", locationId)
+    .neq("current_qty", 0);
+  if (error) return 1;
+  return count ?? 0;
+}
+
+async function locDeleteBlockers(supabase: ReturnType<typeof createAdminClient>, locationId: string) {
+  const checks = await Promise.all([
+    countRows(supabase, "employee_inventory_location_assignments", "location_id", locationId),
+    countRows(supabase, "inventory_transfers", "from_loc_id", locationId),
+    countRows(supabase, "inventory_transfers", "to_loc_id", locationId),
+    countRows(supabase, "product_site_production_routes", "input_location_id", locationId),
+    countRows(supabase, "product_site_production_routes", "output_location_id", locationId),
+    countRows(supabase, "production_batch_consumptions", "location_id", locationId),
+    countRows(supabase, "production_batch_outputs", "destination_location_id", locationId),
+    countRows(supabase, "pulso_sales_consumption_rules", "source_loc_id", locationId),
+    countRows(supabase, "recipe_outputs", "destination_location_id", locationId),
+    countRows(supabase, "recipe_site_uses", "source_location_id", locationId),
+    countRows(supabase, "recipe_site_uses", "destination_location_id", locationId),
+    countRows(supabase, "restock_request_item_picks", "source_location_id", locationId),
+    countNonZeroStock(supabase, "inventory_stock_by_location", locationId),
+    countNonZeroStock(supabase, "inventory_stock_by_uom_profile", locationId),
+  ]);
+
+  return checks.reduce((total, value) => total + value, 0);
 }
 
 function capabilityLabels(capability: CapabilityRow | undefined) {
@@ -244,6 +317,10 @@ async function updateSiteOperation(formData: FormData) {
   const siteId = asText(formData.get("site_id"));
   const operationModel = normalizeOperationModel(asText(formData.get("operation_model")));
   const primaryLocationId = asText(formData.get("primary_operational_location_id")) || null;
+  const visibilityRaw = asText(formData.get("operational_visibility"));
+  const operationalVisibility = ["app_review", "test", "hidden"].includes(visibilityRaw)
+    ? visibilityRaw
+    : "operational";
 
   await requireAppAccess({
     appId: "viso",
@@ -285,18 +362,219 @@ async function updateSiteOperation(formData: FormData) {
     redirect("/operations-map?error=" + encodeURIComponent(error.message));
   }
 
+  const { error: siteError } = await supabase
+    .from("sites")
+    .update({ operational_visibility: operationalVisibility })
+    .eq("id", siteId);
+
+  if (siteError) {
+    redirect("/operations-map?error=" + encodeURIComponent(siteError.message));
+  }
+
   revalidatePath("/operations-map");
-  redirect("/operations-map?ok=" + encodeURIComponent("Mapa operativo actualizado."));
+  const visibilityQuery = operationalVisibility === "operational" ? "" : "&show_all=1";
+  redirect("/operations-map?ok=" + encodeURIComponent("Mapa operativo actualizado.") + visibilityQuery);
+}
+
+async function updateArea(formData: FormData) {
+  "use server";
+
+  const areaId = asText(formData.get("area_id"));
+  const siteId = asText(formData.get("site_id"));
+  const name = asText(formData.get("name"));
+  const code = asText(formData.get("code"));
+  const kind = asText(formData.get("kind"));
+  const isActive = booleanFromForm(formData.get("is_active"));
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: "/operations-map",
+    permissionCode: "staff.permissions.manage",
+  });
+
+  if (!areaId || !siteId || !name || !kind) {
+    redirect(backToMap("?error=" + encodeURIComponent("Completa nombre y tipo del area.")));
+  }
+
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from("areas")
+    .update({ name, code: code || null, kind, is_active: isActive })
+    .eq("id", areaId)
+    .eq("site_id", siteId);
+
+  if (error) {
+    redirect(backToMap("?error=" + encodeURIComponent(error.message)));
+  }
+
+  revalidatePath("/operations-map");
+  redirect(backToMap("?ok=" + encodeURIComponent("Area actualizada.")));
+}
+
+async function deleteArea(formData: FormData) {
+  "use server";
+
+  const areaId = asText(formData.get("area_id"));
+  const siteId = asText(formData.get("site_id"));
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: "/operations-map",
+    permissionCode: "staff.permissions.manage",
+  });
+
+  if (!areaId || !siteId) {
+    redirect(backToMap("?error=" + encodeURIComponent("Selecciona un area.")));
+  }
+
+  const supabase = createAdminClient();
+  const { data: area } = await supabase
+    .from("areas")
+    .select("id,is_active")
+    .eq("id", areaId)
+    .eq("site_id", siteId)
+    .maybeSingle();
+
+  if (!area) {
+    redirect(backToMap("?error=" + encodeURIComponent("Area no encontrada.")));
+  }
+
+  if (area.is_active !== false) {
+    redirect(backToMap("?error=" + encodeURIComponent("Primero desactiva el area antes de eliminarla.")));
+  }
+
+  const [locs, employeePermissions, employeeSettings, recipes, rules, recipeUses] = await Promise.all([
+    countRows(supabase, "inventory_locations", "area_id", areaId),
+    countRows(supabase, "employee_permissions", "scope_area_id", areaId),
+    countRows(supabase, "employee_settings", "selected_area_id", areaId),
+    countRows(supabase, "recipe_cards", "area_id", areaId),
+    countRows(supabase, "pulso_sales_consumption_rules", "area_id", areaId),
+    countRows(supabase, "recipe_site_uses", "area_id", areaId),
+  ]);
+  const blockers = locs + employeePermissions + employeeSettings + recipes + rules + recipeUses;
+
+  if (blockers > 0) {
+    redirect(backToMap("?error=" + encodeURIComponent("No se puede eliminar: todavía tiene LOCs, recetas, reglas o permisos vinculados.")));
+  }
+
+  const { error } = await supabase.from("areas").delete().eq("id", areaId).eq("site_id", siteId);
+
+  if (error) {
+    redirect(backToMap("?error=" + encodeURIComponent(error.message)));
+  }
+
+  revalidatePath("/operations-map");
+  redirect(backToMap("?ok=" + encodeURIComponent("Area eliminada definitivamente.")));
+}
+
+async function updateLocation(formData: FormData) {
+  "use server";
+
+  const locationId = asText(formData.get("location_id"));
+  const siteId = asText(formData.get("site_id"));
+  const areaId = asText(formData.get("area_id")) || null;
+  const code = asText(formData.get("code"));
+  const zone = asText(formData.get("zone"));
+  const description = asText(formData.get("description"));
+  const locationType = normalizeLocationType(asText(formData.get("location_type")));
+  const isActive = booleanFromForm(formData.get("is_active"));
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: "/operations-map",
+    permissionCode: "staff.permissions.manage",
+  });
+
+  if (!locationId || !siteId || !code) {
+    redirect(backToMap("?error=" + encodeURIComponent("Completa el codigo del LOC.")));
+  }
+
+  const supabase = createAdminClient();
+
+  if (areaId) {
+    const { data: area } = await supabase.from("areas").select("id,site_id").eq("id", areaId).maybeSingle();
+    if (!area || area.site_id !== siteId) {
+      redirect(backToMap("?error=" + encodeURIComponent("El area no pertenece a la sede.")));
+    }
+  }
+
+  const { error } = await supabase
+    .from("inventory_locations")
+    .update({
+      area_id: areaId,
+      code,
+      zone: zone || null,
+      description: description || null,
+      location_type: locationType,
+      is_active: isActive,
+    })
+    .eq("id", locationId)
+    .eq("site_id", siteId);
+
+  if (error) {
+    redirect(backToMap("?error=" + encodeURIComponent(error.message)));
+  }
+
+  revalidatePath("/operations-map");
+  redirect(backToMap("?ok=" + encodeURIComponent("LOC actualizado.")));
+}
+
+async function deleteLocation(formData: FormData) {
+  "use server";
+
+  const locationId = asText(formData.get("location_id"));
+  const siteId = asText(formData.get("site_id"));
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: "/operations-map",
+    permissionCode: "staff.permissions.manage",
+  });
+
+  if (!locationId || !siteId) {
+    redirect(backToMap("?error=" + encodeURIComponent("Selecciona un LOC.")));
+  }
+
+  const supabase = createAdminClient();
+  const { data: location } = await supabase
+    .from("inventory_locations")
+    .select("id,is_active")
+    .eq("id", locationId)
+    .eq("site_id", siteId)
+    .maybeSingle();
+
+  if (!location) {
+    redirect(backToMap("?error=" + encodeURIComponent("LOC no encontrado.")));
+  }
+
+  if (location.is_active !== false) {
+    redirect(backToMap("?error=" + encodeURIComponent("Primero desactiva el LOC antes de eliminarlo.")));
+  }
+
+  const blockers = await locDeleteBlockers(supabase, locationId);
+  if (blockers > 0) {
+    redirect(backToMap("?error=" + encodeURIComponent("No se puede eliminar: todavía tiene stock, rutas, recetas, lotes, ventas o personas vinculadas.")));
+  }
+
+  const { error } = await supabase.from("inventory_locations").delete().eq("id", locationId).eq("site_id", siteId);
+
+  if (error) {
+    redirect(backToMap("?error=" + encodeURIComponent(error.message)));
+  }
+
+  revalidatePath("/operations-map");
+  redirect(backToMap("?ok=" + encodeURIComponent("LOC eliminado definitivamente.")));
 }
 
 export default async function OperationsMapPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ ok?: string; error?: string }>;
+  searchParams?: Promise<{ ok?: string; error?: string; show_all?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
   const okMsg = sp.ok ? decodeURIComponent(sp.ok) : "";
   const errorMsg = sp.error ? decodeURIComponent(sp.error) : "";
+  const showAllSites = sp.show_all === "1";
 
   const { supabase } = await requireAppAccess({
     appId: "viso",
@@ -314,7 +592,7 @@ export default async function OperationsMapPage({
     routesRes,
     rolePermissionsRes,
   ] = await Promise.all([
-    supabase.from("sites").select("id,code,name,site_type,is_active").order("name", { ascending: true }),
+    supabase.from("sites").select("id,code,name,site_type,is_active,operational_visibility").order("name", { ascending: true }),
     supabase
       .from("site_operational_capabilities")
       .select(
@@ -363,7 +641,11 @@ export default async function OperationsMapPage({
     );
   }
 
-  const sites = (sitesRes.data ?? []) as SiteRow[];
+  const allSites = (sitesRes.data ?? []) as SiteRow[];
+  const sites = showAllSites
+    ? allSites
+    : allSites.filter((site) => String(site.operational_visibility ?? "operational") === "operational");
+  const hiddenSiteCount = allSites.length - sites.length;
   const capabilitiesBySite = new Map(
     ((capabilitiesRes.data ?? []) as CapabilityRow[]).map((row) => [row.site_id, row])
   );
@@ -443,6 +725,12 @@ export default async function OperationsMapPage({
         subtitle="Vista gerencial simple de sedes, areas, LOCs, capacidades y responsables."
         actions={
           <div className="flex flex-wrap gap-2">
+            <Link
+              href={showAllSites ? "/operations-map" : "/operations-map?show_all=1"}
+              className="ui-btn ui-btn--ghost"
+            >
+              {showAllSites ? "Ver solo operativas" : `Ver no operativas${hiddenSiteCount ? ` (${hiddenSiteCount})` : ""}`}
+            </Link>
             <Link href="/sites" className="ui-btn ui-btn--ghost">
               Sedes
             </Link>
@@ -503,6 +791,9 @@ export default async function OperationsMapPage({
                     <span className={site.is_active ? "ui-chip ui-chip--success" : "ui-chip"}>
                       {site.is_active ? "Activa" : "Inactiva"}
                     </span>
+                    <span className={visibilityChipClass(site.operational_visibility)}>
+                      {visibilityLabel(site.operational_visibility)}
+                    </span>
                     <span className="ui-chip">{operationModelLabel(capability?.operation_model)}</span>
                     {diagnostics.length ? <span className="ui-chip ui-chip--warning">{diagnostics.length} alerta(s)</span> : null}
                   </div>
@@ -519,6 +810,19 @@ export default async function OperationsMapPage({
                     <input type="hidden" name="site_id" value={site.id} />
                     <div className="ui-label">Configuración simple</div>
                     <div className="mt-3 grid gap-3">
+                      <label className="grid gap-1">
+                        <span className="ui-caption">Visibilidad</span>
+                        <select
+                          name="operational_visibility"
+                          defaultValue={site.operational_visibility ?? "operational"}
+                          className="ui-input"
+                        >
+                          <option value="operational">Operativa</option>
+                          <option value="app_review">App Review</option>
+                          <option value="test">Test</option>
+                          <option value="hidden">Oculta</option>
+                        </select>
+                      </label>
                       <label className="grid gap-1">
                         <span className="ui-caption">Modelo operativo</span>
                         <select name="operation_model" defaultValue={capability?.operation_model ?? "multi_area"} className="ui-input">
@@ -625,6 +929,41 @@ export default async function OperationsMapPage({
                           </span>
                         </div>
 
+                        <form action={updateArea} className="mt-3 grid gap-3">
+                          <input type="hidden" name="area_id" value={area.id} />
+                          <input type="hidden" name="site_id" value={site.id} />
+                          <div className="grid gap-2 md:grid-cols-[1fr_0.8fr_0.8fr]">
+                            <label className="grid gap-1">
+                              <span className="ui-caption">Area</span>
+                              <input name="name" defaultValue={area.name ?? ""} className="ui-input" />
+                            </label>
+                            <label className="grid gap-1">
+                              <span className="ui-caption">Codigo</span>
+                              <input name="code" defaultValue={area.code ?? ""} className="ui-input" />
+                            </label>
+                            <label className="grid gap-1">
+                              <span className="ui-caption">Tipo</span>
+                              <input name="kind" defaultValue={area.kind ?? ""} className="ui-input" />
+                            </label>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <label className="flex items-center gap-2 text-sm text-[var(--ui-muted)]">
+                              <input type="checkbox" name="is_active" defaultChecked={area.is_active !== false} />
+                              Activa
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                              {area.is_active === false ? (
+                                <button type="submit" formAction={deleteArea} className="ui-btn ui-btn--ghost text-red-700">
+                                  Eliminar area
+                                </button>
+                              ) : null}
+                              <button type="submit" className="ui-btn ui-btn--ghost">
+                                Guardar area
+                              </button>
+                            </div>
+                          </div>
+                        </form>
+
                         {areaRoles.length ? (
                           <div className="mt-3 flex flex-wrap gap-2">
                             {areaRoles.map((role) => (
@@ -657,6 +996,65 @@ export default async function OperationsMapPage({
                                     {loc.is_active === false ? "Inactivo" : "Activo"}
                                   </span>
                                 </div>
+                                <form action={updateLocation} className="mt-3 grid gap-3">
+                                  <input type="hidden" name="location_id" value={loc.id} />
+                                  <input type="hidden" name="site_id" value={site.id} />
+                                  <div className="grid gap-2 md:grid-cols-2">
+                                    <label className="grid gap-1">
+                                      <span className="ui-caption">LOC</span>
+                                      <input name="code" defaultValue={loc.code ?? ""} className="ui-input" />
+                                    </label>
+                                    <label className="grid gap-1">
+                                      <span className="ui-caption">Tipo</span>
+                                      <select name="location_type" defaultValue={loc.location_type ?? "storage"} className="ui-input">
+                                        <option value="storage">Almacenamiento</option>
+                                        <option value="production">Producción</option>
+                                        <option value="picking">Operacion</option>
+                                        <option value="receiving">Recepcion</option>
+                                        <option value="staging">Alistamiento</option>
+                                      </select>
+                                    </label>
+                                    <label className="grid gap-1">
+                                      <span className="ui-caption">Area</span>
+                                      <select name="area_id" defaultValue={loc.area_id ?? ""} className="ui-input">
+                                        <option value="">Sin area</option>
+                                        {siteAreas.map((optionArea) => (
+                                          <option key={optionArea.id} value={optionArea.id}>
+                                            {optionArea.name ?? optionArea.kind ?? optionArea.code ?? optionArea.id}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <label className="grid gap-1">
+                                      <span className="ui-caption">Zona</span>
+                                      <input name="zone" defaultValue={loc.zone ?? ""} className="ui-input" />
+                                    </label>
+                                  </div>
+                                  <label className="grid gap-1">
+                                    <span className="ui-caption">Descripción</span>
+                                    <input name="description" defaultValue={loc.description ?? ""} className="ui-input" />
+                                  </label>
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <label className="flex items-center gap-2 text-sm text-[var(--ui-muted)]">
+                                      <input type="checkbox" name="is_active" defaultChecked={loc.is_active !== false} />
+                                      Activo
+                                    </label>
+                                    <div className="flex flex-wrap gap-2">
+                                      {loc.is_active === false ? (
+                                        <button
+                                          type="submit"
+                                          formAction={deleteLocation}
+                                          className="ui-btn ui-btn--ghost text-red-700"
+                                        >
+                                          Eliminar LOC
+                                        </button>
+                                      ) : null}
+                                      <button type="submit" className="ui-btn ui-btn--ghost">
+                                        Guardar LOC
+                                      </button>
+                                    </div>
+                                  </div>
+                                </form>
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   {uses.length ? (
                                     uses.map((use) => (
@@ -697,6 +1095,65 @@ export default async function OperationsMapPage({
                           <div key={loc.id} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
                             <div className="font-semibold text-[var(--ui-text)]">{loc.code ?? loc.zone ?? "LOC"}</div>
                             <div className="mt-1 text-xs text-[var(--ui-muted)]">{locationTypeLabel(loc.location_type)}</div>
+                            <form action={updateLocation} className="mt-3 grid gap-3">
+                              <input type="hidden" name="location_id" value={loc.id} />
+                              <input type="hidden" name="site_id" value={site.id} />
+                              <div className="grid gap-2 md:grid-cols-2">
+                                <label className="grid gap-1">
+                                  <span className="ui-caption">LOC</span>
+                                  <input name="code" defaultValue={loc.code ?? ""} className="ui-input" />
+                                </label>
+                                <label className="grid gap-1">
+                                  <span className="ui-caption">Tipo</span>
+                                  <select name="location_type" defaultValue={loc.location_type ?? "storage"} className="ui-input">
+                                    <option value="storage">Almacenamiento</option>
+                                    <option value="production">Producción</option>
+                                    <option value="picking">Operacion</option>
+                                    <option value="receiving">Recepcion</option>
+                                    <option value="staging">Alistamiento</option>
+                                  </select>
+                                </label>
+                                <label className="grid gap-1">
+                                  <span className="ui-caption">Area</span>
+                                  <select name="area_id" defaultValue="" className="ui-input">
+                                    <option value="">Sin area</option>
+                                    {siteAreas.map((optionArea) => (
+                                      <option key={optionArea.id} value={optionArea.id}>
+                                        {optionArea.name ?? optionArea.kind ?? optionArea.code ?? optionArea.id}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="grid gap-1">
+                                  <span className="ui-caption">Zona</span>
+                                  <input name="zone" defaultValue={loc.zone ?? ""} className="ui-input" />
+                                </label>
+                              </div>
+                              <label className="grid gap-1">
+                                <span className="ui-caption">Descripción</span>
+                                <input name="description" defaultValue={loc.description ?? ""} className="ui-input" />
+                              </label>
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <label className="flex items-center gap-2 text-sm text-[var(--ui-muted)]">
+                                  <input type="checkbox" name="is_active" defaultChecked={loc.is_active !== false} />
+                                  Activo
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                  {loc.is_active === false ? (
+                                    <button
+                                      type="submit"
+                                      formAction={deleteLocation}
+                                      className="ui-btn ui-btn--ghost text-red-700"
+                                    >
+                                      Eliminar LOC
+                                    </button>
+                                  ) : null}
+                                  <button type="submit" className="ui-btn ui-btn--ghost">
+                                    Guardar LOC
+                                  </button>
+                                </div>
+                              </div>
+                            </form>
                           </div>
                         ))}
                       </div>
