@@ -330,6 +330,7 @@ export function MenuPersonalizationsClient({
 }) {
   const [snapshot, setSnapshot] = useState<PersonalizationSnapshot>(initialSnapshot);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [openDetailsKey, setOpenDetailsKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const visibleOptionGroups = useMemo(() => snapshot.optionGroups.filter((group) => group.is_active), [snapshot.optionGroups]);
@@ -370,8 +371,18 @@ export function MenuPersonalizationsClient({
   const consumptionProductById = useMemo(() => new Map(snapshot.consumptionProducts.map((product) => [product.id, product])), [snapshot.consumptionProducts]);
   const commercialCatalogItemsById = useMemo(() => new Map(snapshot.commercialCatalogItems.map((item) => [item.id, item])), [snapshot.commercialCatalogItems]);
 
-  async function mutate(action: string, payload: JsonRecord, successFallback: string) {
-    setPendingKey(action);
+  async function mutate(
+    action: string,
+    payload: JsonRecord,
+    successFallback: string,
+    options?: {
+      pendingKey?: string;
+      closeDetailsKey?: string;
+      resetForm?: HTMLFormElement;
+    },
+  ) {
+    const nextPendingKey = options?.pendingKey ?? action;
+    setPendingKey(nextPendingKey);
     setNotice(null);
 
     try {
@@ -388,24 +399,45 @@ export function MenuPersonalizationsClient({
 
       setSnapshot(data.snapshot);
       setNotice({ type: "success", message: data.message || successFallback });
+
+      if (options?.resetForm) {
+        options.resetForm.reset();
+      }
+
+      if (options?.closeDetailsKey) {
+        setOpenDetailsKey((current) => (current === options.closeDetailsKey ? null : current));
+      }
+
+      return true;
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Error inesperado." });
+      return false;
     } finally {
-      setPendingKey(null);
+      setPendingKey((current) => (current === nextPendingKey ? null : current));
     }
   }
 
+  function updateDetailsState(key: string, isOpen: boolean) {
+    setOpenDetailsKey((current) => {
+      if (isOpen) return key;
+      return current === key ? null : current;
+    });
+  }
+
   function handleCreateGroup(type: PersonalizationTypeCard) {
+    const detailsKey = `create-group:${type.kind}`;
     void mutate(
       "create_group",
       { groupKind: type.kind, name: type.defaultName, description: type.description, maxSelect: type.maxSelect ? Number(type.maxSelect) : null },
       "Grupo creado.",
+      { pendingKey: detailsKey },
     );
   }
 
   function handleUpdateGroup(event: FormEvent<HTMLFormElement>, group: CatalogItemOptionGroupRow) {
     event.preventDefault();
     const form = event.currentTarget;
+    const detailsKey = `edit-group:${group.id}`;
     void mutate(
       "update_group",
       {
@@ -421,12 +453,14 @@ export function MenuPersonalizationsClient({
         code: group.code,
       },
       "Grupo actualizado.",
+      { pendingKey: detailsKey, closeDetailsKey: detailsKey },
     );
   }
 
   function handleCreateOption(event: FormEvent<HTMLFormElement>, group: CatalogItemOptionGroupRow) {
     event.preventDefault();
     const form = event.currentTarget;
+    const detailsKey = `add-option:${group.id}`;
     void mutate(
       "create_option",
       {
@@ -442,13 +476,14 @@ export function MenuPersonalizationsClient({
         isDefault: formBool(form, "is_default"),
       },
       "Opción creada y mapeada.",
+      { pendingKey: detailsKey, closeDetailsKey: detailsKey, resetForm: form },
     );
-    form.reset();
   }
 
   function handleUpdateOption(event: FormEvent<HTMLFormElement>, option: CatalogItemOptionRow, group: CatalogItemOptionGroupRow) {
     event.preventDefault();
     const form = event.currentTarget;
+    const detailsKey = `edit-option:${option.id}`;
     void mutate(
       "update_option",
       {
@@ -464,12 +499,14 @@ export function MenuPersonalizationsClient({
         code: option.code,
       },
       "Opción actualizada.",
+      { pendingKey: detailsKey, closeDetailsKey: detailsKey },
     );
   }
 
   function handleCreateConsumptionRule(event: FormEvent<HTMLFormElement>, option: CatalogItemOptionRow) {
     event.preventDefault();
     const form = event.currentTarget;
+    const detailsKey = `inventory-option:${option.id}`;
     void mutate(
       "create_consumption_rule",
       {
@@ -480,13 +517,14 @@ export function MenuPersonalizationsClient({
         effectType: parseOptionEffectType(option.effect_type) === "replacement" ? "replacement" : "additive",
       },
       "Regla de consumo creada.",
+      { pendingKey: detailsKey, closeDetailsKey: detailsKey, resetForm: form },
     );
-    form.reset();
   }
 
   function handleCreateRecipeEffect(event: FormEvent<HTMLFormElement>, option: CatalogItemOptionRow) {
     event.preventDefault();
     const form = event.currentTarget;
+    const detailsKey = `inventory-option:${option.id}`;
     void mutate(
       "create_recipe_effect",
       {
@@ -495,8 +533,8 @@ export function MenuPersonalizationsClient({
         effectType: "replacement",
       },
       "Efecto de receta creado.",
+      { pendingKey: detailsKey, closeDetailsKey: detailsKey, resetForm: form },
     );
-    form.reset();
   }
 
   return (
@@ -556,6 +594,9 @@ export function MenuPersonalizationsClient({
               const supportsDefaultOption = groupKind === "choice";
               const isMultiple = parseSelectionType(group.selection_type) === "multiple";
               const groupDisplayName = getSimpleGroupDisplayName(group);
+              const groupEditKey = `edit-group:${group.id}`;
+              const addOptionKey = `add-option:${group.id}`;
+              const shouldOpenAddOption = openDetailsKey === addOptionKey || (visibleOptions.length === 0 && openDetailsKey === null);
 
               return (
                 <div key={group.id} className="overflow-hidden rounded-[30px] border border-[var(--ui-border)] bg-white shadow-[var(--ui-shadow-1)]">
@@ -576,16 +617,20 @@ export function MenuPersonalizationsClient({
                           type="button"
                           className="ui-btn ui-btn--danger"
                           disabled={Boolean(pendingKey)}
-                          onClick={() => void mutate("disable_group", { groupId: group.id }, "Grupo desactivado.")}
+                          onClick={() => void mutate("disable_group", { groupId: group.id }, "Grupo desactivado.", { pendingKey: `disable-group:${group.id}` })}
                         >
-                          Eliminar
+                          {pendingKey === `disable-group:${group.id}` ? "Eliminando..." : "Eliminar"}
                         </button>
                       </div>
                     </div>
                   </div>
 
                   <div className="divide-y divide-[var(--ui-border)]">
-                    <details className="px-5 py-4">
+                    <details
+                      className="px-5 py-4"
+                      open={openDetailsKey === groupEditKey}
+                      onToggle={(event) => updateDetailsState(groupEditKey, event.currentTarget.open)}
+                    >
                       <summary className="cursor-pointer list-none text-sm font-black text-[var(--ui-brand)]">Editar nombre y reglas</summary>
                       <form onSubmit={(event) => handleUpdateGroup(event, group)} className="mt-4 space-y-4 rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
                         <div className="grid gap-3 lg:grid-cols-[1fr_180px_120px_120px]">
@@ -624,7 +669,9 @@ export function MenuPersonalizationsClient({
                         </label>
 
                         <div className="flex justify-end">
-                          <button type="submit" className="ui-btn ui-btn--brand" disabled={Boolean(pendingKey)}>Guardar</button>
+                          <button type="submit" className="ui-btn ui-btn--brand" disabled={Boolean(pendingKey)}>
+                            {pendingKey === groupEditKey ? "Guardando..." : "Guardar"}
+                          </button>
                         </div>
                       </form>
                     </details>
@@ -663,9 +710,9 @@ export function MenuPersonalizationsClient({
                                       type="button"
                                       className="ui-btn ui-btn--ghost"
                                       disabled={Boolean(pendingKey)}
-                                      onClick={() => void mutate("disable_option", { groupId: group.id, optionId: removalOption.id }, "Opción desactivada.")}
+                                      onClick={() => void mutate("disable_option", { groupId: group.id, optionId: removalOption.id }, "Opción desactivada.", { pendingKey: `disable-option:${removalOption.id}` })}
                                     >
-                                      Quitar
+                                      {pendingKey === `disable-option:${removalOption.id}` ? "Quitando..." : "Quitar"}
                                     </button>
                                   </div>
                                 );
@@ -676,7 +723,7 @@ export function MenuPersonalizationsClient({
                                   key={ingredient.id}
                                   type="button"
                                   disabled={Boolean(pendingKey)}
-                                  onClick={() => void mutate("create_removal_option_from_recipe", { groupId: group.id, ingredientProductId: ingredient.ingredient_product_id, ingredientName, stockUnitCode: product.stock_unit_code || product.unit || "" }, `Opción Sin ${ingredientName} creada.`)}
+                                  onClick={() => void mutate("create_removal_option_from_recipe", { groupId: group.id, ingredientProductId: ingredient.ingredient_product_id, ingredientName, stockUnitCode: product.stock_unit_code || product.unit || "" }, `Opción Sin ${ingredientName} creada.`, { pendingKey: `create-removal:${ingredient.id}` })}
                                   className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 text-left disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                   <span className="min-w-0">
@@ -709,6 +756,8 @@ export function MenuPersonalizationsClient({
                           const optionMeta = getOptionDisplayCategory(option, commercialCatalogItemsById);
                           const optionPrice = Number(option.price_delta_amount ?? 0);
                           const hasOperationalRules = consumptionRules.length > 0 || recipeEffects.length > 0;
+                          const optionEditKey = `edit-option:${option.id}`;
+                          const optionInventoryKey = `inventory-option:${option.id}`;
 
                           return (
                             <div key={option.id} className="px-5 py-4">
@@ -726,7 +775,11 @@ export function MenuPersonalizationsClient({
                                 </div>
 
                                 <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
-                                  <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                  <details
+                                    className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2"
+                                    open={openDetailsKey === optionEditKey}
+                                    onToggle={(event) => updateDetailsState(optionEditKey, event.currentTarget.open)}
+                                  >
                                     <summary className="cursor-pointer list-none text-sm font-black text-[var(--ui-text)]">Editar</summary>
                                     <form onSubmit={(event) => handleUpdateOption(event, option, group)} className="mt-4 w-full min-w-[280px] space-y-3">
                                       <label className="space-y-2">
@@ -749,11 +802,17 @@ export function MenuPersonalizationsClient({
                                       ) : (
                                         <input type="hidden" name="is_default" value="false" />
                                       )}
-                                      <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={Boolean(pendingKey)}>Guardar opción</button>
+                                      <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={Boolean(pendingKey)}>
+                                        {pendingKey === optionEditKey ? "Guardando..." : "Guardar opción"}
+                                      </button>
                                     </form>
                                   </details>
 
-                                  <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                  <details
+                                    className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2"
+                                    open={openDetailsKey === optionInventoryKey}
+                                    onToggle={(event) => updateDetailsState(optionInventoryKey, event.currentTarget.open)}
+                                  >
                                     <summary className="cursor-pointer list-none text-sm font-black text-[var(--ui-text)]">{hasOperationalRules ? "Inventario listo" : "Inventario"}</summary>
                                     <div className="mt-4 w-full min-w-[320px] space-y-4">
                                       <form onSubmit={(event) => handleCreateConsumptionRule(event, option)} className="space-y-3 rounded-2xl border border-[var(--ui-border)] bg-white p-4">
@@ -782,7 +841,9 @@ export function MenuPersonalizationsClient({
                                             </select>
                                           </label>
                                         </div>
-                                        <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={Boolean(pendingKey)}>Guardar consumo</button>
+                                        <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={Boolean(pendingKey)}>
+                                          {pendingKey === optionInventoryKey ? "Guardando..." : "Guardar consumo"}
+                                        </button>
                                       </form>
 
                                       {consumptionRules.length > 0 ? (
@@ -794,7 +855,14 @@ export function MenuPersonalizationsClient({
                                                 <div className="text-sm font-semibold text-[var(--ui-text)]">
                                                   {product?.name ?? "Insumo"} · {formatQuantityAdmin(rule.quantity_per_option)} {rule.stock_unit_code || product?.stock_unit_code || product?.unit || "unidad"}
                                                 </div>
-                                                <button type="button" className="ui-btn ui-btn--ghost" disabled={Boolean(pendingKey)} onClick={() => void mutate("disable_consumption_rule", { optionId: option.id, ruleId: rule.id }, "Regla de consumo desactivada.")}>Quitar</button>
+                                                <button
+                                                  type="button"
+                                                  className="ui-btn ui-btn--ghost"
+                                                  disabled={Boolean(pendingKey)}
+                                                  onClick={() => void mutate("disable_consumption_rule", { optionId: option.id, ruleId: rule.id }, "Regla de consumo desactivada.", { pendingKey: `disable-consumption:${rule.id}` })}
+                                                >
+                                                  {pendingKey === `disable-consumption:${rule.id}` ? "Quitando..." : "Quitar"}
+                                                </button>
                                               </div>
                                             );
                                           })}
@@ -819,7 +887,9 @@ export function MenuPersonalizationsClient({
                                               })}
                                             </select>
                                           </label>
-                                          <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={Boolean(pendingKey)}>Guardar reemplazo</button>
+                                          <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={Boolean(pendingKey)}>
+                                            {pendingKey === optionInventoryKey ? "Guardando..." : "Guardar reemplazo"}
+                                          </button>
                                         </form>
                                       ) : null}
 
@@ -830,7 +900,14 @@ export function MenuPersonalizationsClient({
                                             return (
                                               <div key={effect.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-white p-3">
                                                 <div className="text-sm font-semibold text-[var(--ui-text)]">{effect.effect_type === "replacement" ? "Reemplaza" : "Quita"} {targetProduct?.name ?? "ingrediente"}</div>
-                                                <button type="button" className="ui-btn ui-btn--ghost" disabled={Boolean(pendingKey)} onClick={() => void mutate("disable_recipe_effect", { optionId: option.id, effectId: effect.id }, "Efecto de receta desactivado.")}>Quitar</button>
+                                                <button
+                                                  type="button"
+                                                  className="ui-btn ui-btn--ghost"
+                                                  disabled={Boolean(pendingKey)}
+                                                  onClick={() => void mutate("disable_recipe_effect", { optionId: option.id, effectId: effect.id }, "Efecto de receta desactivado.", { pendingKey: `disable-recipe-effect:${effect.id}` })}
+                                                >
+                                                  {pendingKey === `disable-recipe-effect:${effect.id}` ? "Quitando..." : "Quitar"}
+                                                </button>
                                               </div>
                                             );
                                           })}
@@ -839,7 +916,14 @@ export function MenuPersonalizationsClient({
                                     </div>
                                   </details>
 
-                                  <button type="button" className="ui-btn ui-btn--ghost" disabled={Boolean(pendingKey)} onClick={() => void mutate("disable_option", { groupId: group.id, optionId: option.id }, "Opción desactivada.")}>Eliminar</button>
+                                  <button
+                                    type="button"
+                                    className="ui-btn ui-btn--ghost"
+                                    disabled={Boolean(pendingKey)}
+                                    onClick={() => void mutate("disable_option", { groupId: group.id, optionId: option.id }, "Opción desactivada.", { pendingKey: `disable-option:${option.id}` })}
+                                  >
+                                    {pendingKey === `disable-option:${option.id}` ? "Eliminando..." : "Eliminar"}
+                                  </button>
                                 </div>
                               </div>
                             </div>
@@ -849,7 +933,11 @@ export function MenuPersonalizationsClient({
                     )}
 
                     {groupKind === "removals" ? null : (
-                      <details className="px-5 py-4" open={visibleOptions.length === 0}>
+                      <details
+                        className="px-5 py-4"
+                        open={shouldOpenAddOption}
+                        onToggle={(event) => updateDetailsState(addOptionKey, event.currentTarget.open)}
+                      >
                         <summary className="cursor-pointer list-none text-sm font-black text-[var(--ui-brand)]">+ Agregar opción</summary>
                         <form onSubmit={(event) => handleCreateOption(event, group)} className="mt-4 rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
                           {groupKind === "recommendations" ? (
@@ -867,7 +955,9 @@ export function MenuPersonalizationsClient({
                                 <span className="ui-label">Texto opcional</span>
                                 <input name="description" className="ui-input" placeholder="Ej. Queda bien con este producto." />
                               </label>
-                              <button type="submit" className="ui-btn ui-btn--brand" disabled={Boolean(pendingKey)}>Agregar sugerencia</button>
+                              <button type="submit" className="ui-btn ui-btn--brand" disabled={Boolean(pendingKey)}>
+                                {pendingKey === addOptionKey ? "Agregando..." : "Agregar sugerencia"}
+                              </button>
                             </div>
                           ) : (
                             <div className="space-y-4">
@@ -893,7 +983,9 @@ export function MenuPersonalizationsClient({
                                   ) : (
                                     <input type="hidden" name="is_default" value="false" />
                                   )}
-                                  <button type="submit" className="ui-btn ui-btn--brand" disabled={Boolean(pendingKey)}>Agregar</button>
+                                  <button type="submit" className="ui-btn ui-btn--brand" disabled={Boolean(pendingKey)}>
+                                    {pendingKey === addOptionKey ? "Agregando..." : "Agregar"}
+                                  </button>
                                 </div>
                               </div>
 
@@ -986,7 +1078,7 @@ export function MenuPersonalizationsClient({
                   key={ingredient.id}
                   type="button"
                   disabled={Boolean(pendingKey)}
-                  onClick={() => void mutate("create_removal_option_from_recipe", { ingredientProductId: ingredient.ingredient_product_id, ingredientName: product.name ?? "Ingrediente", stockUnitCode: product.stock_unit_code || product.unit || "" }, `Opción Sin ${product.name ?? "Ingrediente"} creada.`)}
+                  onClick={() => void mutate("create_removal_option_from_recipe", { ingredientProductId: ingredient.ingredient_product_id, ingredientName: product.name ?? "Ingrediente", stockUnitCode: product.stock_unit_code || product.unit || "" }, `Opción Sin ${product.name ?? "Ingrediente"} creada.`, { pendingKey: `create-removal:${ingredient.id}` })}
                   className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 text-left disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span className="min-w-0">
