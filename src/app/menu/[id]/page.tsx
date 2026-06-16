@@ -2,7 +2,6 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
-import { MenuItemForm } from "@/components/viso/menu-item-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -150,25 +149,6 @@ type InventoryUnitRow = {
   is_active: boolean | null;
 };
 
-type ProductUomProfileRow = {
-  id: string;
-  product_id: string;
-  label: string;
-  input_unit_code: string;
-  qty_in_input_unit: number | string;
-  qty_in_stock_unit: number | string;
-  is_active: boolean | null;
-};
-
-type InventoryLocationPositionRow = {
-  id: string;
-  site_id: string;
-  location_id: string;
-  code: string;
-  name: string;
-  kind: string;
-  is_active: boolean | null;
-};
 
 type CommercialCategoryRow = {
   id: string;
@@ -269,7 +249,7 @@ function parseRecipeEffectQuantityMode(value: FormDataEntryValue | string | null
   return mode === "fixed_quantity" ? "fixed_quantity" : "full_recipe_component";
 }
 
-type SimpleGroupKind = "choice" | "extras" | "removals" | "preferences" | "recommendations";
+type SimpleGroupKind = "choice" | "extras" | "replacements" | "removals" | "preferences" | "recommendations";
 
 function readGroupMetadata(value: Record<string, unknown> | null | undefined) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -283,6 +263,17 @@ function getSimpleGroupKind(group: CatalogItemOptionGroupRow): SimpleGroupKind {
 
   if (preset === "extras" || code.includes("extra") || name.includes("extra") || name.includes("adicion")) {
     return "extras";
+  }
+
+  if (
+    preset === "replacements" ||
+    code.includes("cambio") ||
+    code.includes("reemplazo") ||
+    name.includes("cambio") ||
+    name.includes("reemplazo") ||
+    name.includes("sustit")
+  ) {
+    return "replacements";
   }
 
   if (preset === "removals" || code.includes("quitar") || name.includes("quitar") || name.includes("sin ")) {
@@ -310,6 +301,8 @@ function getSimpleGroupLabel(kind: SimpleGroupKind) {
   switch (kind) {
     case "extras":
       return "Adiciones";
+    case "replacements":
+      return "Cambios";
     case "removals":
       return "Quitar ingredientes";
     case "preferences":
@@ -343,6 +336,8 @@ function getSimpleGroupHelp(kind: SimpleGroupKind) {
   switch (kind) {
     case "extras":
       return "Para queso extra, salsas, leche vegetal, shot adicional o complementos.";
+    case "replacements":
+      return "Para cambios como leche normal por vegetal, queso estándar por queso premium o ingrediente base por otro insumo.";
     case "removals":
       return "Para opciones como “sin cebolla”, “sin tomate” o “sin salsa”.";
     case "preferences":
@@ -360,6 +355,8 @@ function getSimpleDefaultEffect(kind: SimpleGroupKind) {
     case "extras":
     case "recommendations":
       return "additive";
+    case "replacements":
+      return "replacement";
     case "removals":
       return "removal";
     case "preferences":
@@ -427,6 +424,7 @@ function parseSimpleGroupKind(value: FormDataEntryValue | string | null | undefi
 
   if (
     kind === "extras" ||
+    kind === "replacements" ||
     kind === "removals" ||
     kind === "preferences" ||
     kind === "recommendations"
@@ -448,6 +446,16 @@ function getSimpleGroupCreationDefaults(kind: SimpleGroupKind) {
         minSelect: 0,
         maxSelect: 10,
         sortBase: 200,
+      };
+    case "replacements":
+      return {
+        name: "Cambios",
+        description: "El cliente puede reemplazar un ingrediente de la receta por otro insumo.",
+        selectionType: "multiple",
+        isRequired: false,
+        minSelect: 0,
+        maxSelect: 10,
+        sortBase: 300,
       };
     case "removals":
       return {
@@ -815,10 +823,14 @@ async function updateMenuItem(formData: FormData) {
   }
 
   const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
-  const opensDetailModal = asBool(formData.get("opens_detail_modal"));
+  const requestedOpensDetailModal = asBool(formData.get("opens_detail_modal"));
 
   const admin = createAdminClient();
-  const [{ data: currentItem }, { data: currentPresentationRaw }] = await Promise.all([
+  const [
+    { data: currentItem },
+    { data: currentPresentationRaw },
+    { count: activePersonalizationCount },
+  ] = await Promise.all([
     admin
       .schema("pass")
       .from("catalog_items")
@@ -832,8 +844,15 @@ async function updateMenuItem(formData: FormData) {
       .eq("catalog_item_id", id)
       .eq("surface", "vento_pass_menu")
       .maybeSingle(),
+    admin
+      .schema("pass")
+      .from("catalog_item_option_groups")
+      .select("id", { count: "exact", head: true })
+      .eq("catalog_item_id", id)
+      .eq("is_active", true),
   ]);
 
+  const opensDetailModal = requestedOpensDetailModal || Number(activePersonalizationCount ?? 0) > 0;
   const currentPresentation = (currentPresentationRaw ?? null) as CatalogItemPresentationRow | null;
   const currentPassCardLayout = parsePassCardLayout(currentPresentation?.card_layout);
   const currentOpensDetailModal = Boolean(currentPresentation?.opens_detail_modal);
@@ -1136,9 +1155,13 @@ async function createOption(formData: FormData) {
   const description = asText(formData.get("description")) || null;
   const priceDeltaAmount = asNonNegativeNumber(formData.get("price_delta_amount"));
   const linkedCatalogItemId = asOptionalText(formData.get("linked_catalog_item_id"));
+  const optionOperationalProductId = asText(formData.get("option_product_id"));
+  const optionQuantityPerOption = asNonNegativeNumber(formData.get("option_quantity_per_option"));
+  const optionStockUnitCode = asOptionalText(formData.get("option_stock_unit_code"));
+  const replacementTargetIngredientProductId = asText(formData.get("replacement_target_ingredient_product_id"));
 
-  if (!itemId || !groupId || (!name && !linkedCatalogItemId)) {
-    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Falta el nombre de la opción.")}`);
+  if (!itemId || !groupId) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para crear la opción.")}`);
   }
 
   const { data: group, error: groupError } = await supabase
@@ -1154,13 +1177,36 @@ async function createOption(formData: FormData) {
   }
 
   const groupKind = getSimpleGroupKind(group as CatalogItemOptionGroupRow);
-  const requestedEffect = asText(formData.get("effect_type"));
-  const effectType = requestedEffect ? parseOptionEffectType(requestedEffect) : getSimpleDefaultEffect(groupKind);
+  const requiresLinkedProduct = groupKind === "recommendations";
+  const requiresOperationalConsumption = groupKind === "extras" || groupKind === "replacements";
+  const hasPartialOperationalConsumption = Boolean(optionOperationalProductId) || optionQuantityPerOption > 0 || Boolean(optionStockUnitCode);
+
+  if (requiresLinkedProduct && !linkedCatalogItemId) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent("Selecciona el producto comercial sugerido.")}`);
+  }
+
+  if (!requiresLinkedProduct && !name) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent("Falta el nombre de la opción.")}`);
+  }
+
+  if ((requiresOperationalConsumption || hasPartialOperationalConsumption) && (!optionOperationalProductId || optionQuantityPerOption <= 0)) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent("La opción necesita producto operacional y cantidad de consumo mayor a 0.")}`);
+  }
+
+  if (groupKind === "replacements" && !replacementTargetIngredientProductId) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent("El cambio necesita indicar qué ingrediente de receta reemplaza.")}`);
+  }
+
   const sortOrder = await getNextOptionSortOrder(supabase, groupId);
   let finalName = name;
   let finalDescription = description;
   let finalPriceDeltaAmount = priceDeltaAmount;
   let linkedCatalogMetadata: Record<string, unknown> = {};
+  let finalEffectType = getSimpleDefaultEffect(groupKind);
+
+  if (groupKind === "choice" && optionOperationalProductId) {
+    finalEffectType = "additive";
+  }
 
   if (linkedCatalogItemId) {
     const [{ data: currentItem }, { data: linkedItem, error: linkedError }] = await Promise.all([
@@ -1198,32 +1244,99 @@ async function createOption(formData: FormData) {
     };
   }
 
-  const { error } = await supabase
+  const optionCode = asCatalogCode(formData.get("code"), finalName);
+  if (!optionCode) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent("No se pudo generar el código de la opción.")}`);
+  }
+
+  const { data: createdOption, error } = await supabase
     .schema("pass")
     .from("catalog_item_options")
     .insert({
       option_group_id: groupId,
-      code: asCatalogCode(formData.get("code"), finalName),
+      code: optionCode,
       name: finalName,
       description: finalDescription,
       price_delta_amount: finalPriceDeltaAmount,
-      product_id: null,
-      effect_type: effectType,
+      product_id: optionOperationalProductId || null,
+      effect_type: finalEffectType,
       is_default: asBool(formData.get("is_default")),
       is_active: true,
       sort_order: sortOrder,
       metadata: {
-        configured_from: "simple_product_page",
+        preset: groupKind,
+        configured_from: "product_personalization_page",
+        operational_product_id: optionOperationalProductId || null,
+        replacement_target_ingredient_product_id: replacementTargetIngredientProductId || null,
         ...linkedCatalogMetadata,
       },
-    });
+    })
+    .select("id")
+    .single();
 
-  if (error) {
-    redirect(`/menu/${itemId}?error=${encodeURIComponent(error.message)}`);
+  if (error || !createdOption?.id) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(error?.message || "No se pudo crear la opción.")}`);
+  }
+
+  if (optionOperationalProductId) {
+    const { error: ruleError } = await supabase
+      .schema("pass")
+      .from("catalog_item_option_consumption_rules")
+      .insert({
+        option_id: createdOption.id,
+        code: `consumo-${optionCode}`,
+        name: `Consumir ${finalName}`,
+        product_id: optionOperationalProductId,
+        effect_type: finalEffectType === "replacement" ? "replacement" : "additive",
+        quantity_per_option: optionQuantityPerOption,
+        stock_unit_code: optionStockUnitCode,
+        input_quantity_per_option: optionQuantityPerOption,
+        input_unit_code: optionStockUnitCode,
+        conversion_factor_to_stock: 1,
+        input_uom_profile_id: null,
+        source_location_strategy: "product_production_location",
+        source_location_id: null,
+        source_location_position_id: null,
+        is_active: true,
+        sort_order: 0,
+        metadata: {
+          configured_from: "product_personalization_page",
+        },
+      });
+
+    if (ruleError) {
+      await supabase.schema("pass").from("catalog_item_options").delete().eq("id", createdOption.id);
+      redirect(`/menu/${itemId}?error=${encodeURIComponent(ruleError.message)}`);
+    }
+  }
+
+  if (replacementTargetIngredientProductId) {
+    const { error: recipeEffectError } = await supabase
+      .schema("pass")
+      .from("catalog_item_option_recipe_effects")
+      .insert({
+        option_id: createdOption.id,
+        effect_type: "replacement",
+        target_ingredient_product_id: replacementTargetIngredientProductId,
+        recipe_component_code: null,
+        quantity_mode: "full_recipe_component",
+        quantity_amount: null,
+        stock_unit_code: null,
+        is_active: true,
+        sort_order: 0,
+        metadata: {
+          configured_from: "product_personalization_page",
+        },
+      });
+
+    if (recipeEffectError) {
+      await supabase.schema("pass").from("catalog_item_options").delete().eq("id", createdOption.id);
+      redirect(`/menu/${itemId}?error=${encodeURIComponent(recipeEffectError.message)}`);
+    }
   }
 
   revalidatePath(`/menu/${itemId}`);
-  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Opción creada.")}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Opción creada y mapeada.")}`);
 }
 
 async function updateOption(formData: FormData) {
@@ -1871,8 +1984,6 @@ export default async function MenuItemDetailPage({
     { data: recipeIngredientsRaw },
     { data: consumptionProductsRaw },
     { data: inventoryUnitsRaw },
-    { data: productUomProfilesRaw },
-    { data: inventoryPositionsRaw },
   ] = await Promise.all([
     optionIds.length > 0
       ? supabase
@@ -1910,17 +2021,6 @@ export default async function MenuItemDetailPage({
       .eq("is_active", true)
       .order("family", { ascending: true })
       .order("name", { ascending: true }),
-    supabase
-      .from("product_uom_profiles")
-      .select("id,product_id,label,input_unit_code,qty_in_input_unit,qty_in_stock_unit,is_active")
-      .eq("is_active", true)
-      .order("label", { ascending: true }),
-    supabase
-      .from("inventory_location_positions")
-      .select("id,site_id,location_id,code,name,kind,is_active")
-      .eq("site_id", row.site_id)
-      .eq("is_active", true)
-      .order("code", { ascending: true }),
   ]);
 
   const consumptionRulesByOption = new Map<string, CatalogItemOptionConsumptionRuleRow[]>();
@@ -1945,22 +2045,6 @@ export default async function MenuItemDetailPage({
 
   const consumptionProductById = new Map(consumptionProducts.map((product) => [product.id, product]));
   const inventoryUnits = (inventoryUnitsRaw ?? []) as InventoryUnitRow[];
-  const inventoryPositions = (inventoryPositionsRaw ?? []) as InventoryLocationPositionRow[];
-  const uomProfiles = (productUomProfilesRaw ?? []) as ProductUomProfileRow[];
-
-  const uomProfilesByProduct = new Map<string, ProductUomProfileRow[]>();
-  for (const profile of uomProfiles) {
-    const current = uomProfilesByProduct.get(profile.product_id) ?? [];
-    current.push(profile);
-    uomProfilesByProduct.set(profile.product_id, current);
-  }
-
-  const positionsByLocation = new Map<string, InventoryLocationPositionRow[]>();
-  for (const position of inventoryPositions) {
-    const current = positionsByLocation.get(position.location_id) ?? [];
-    current.push(position);
-    positionsByLocation.set(position.location_id, current);
-  }
 
   const recipeIngredients = ((recipeIngredientsRaw ?? []) as RecipeIngredientRow[])
     .map((ingredient) => ({
@@ -2041,6 +2125,13 @@ export default async function MenuItemDetailPage({
     }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
 
+  const commercialCategories = (categoriesRaw ?? []) as CommercialCategoryRow[];
+  const commercialCollections = (collectionsRaw ?? []) as CommercialCollectionRow[];
+  const currentSite = sites.find((site) => site.id === row.site_id) ?? null;
+  const currentOperationalProduct = products.find((product) => product.id === row.product_id) ?? null;
+  const currentCollection = commercialCollections.find((collection) => collection.id === row.commercial_collection_id) ?? null;
+  const currentCategory = commercialCategories.find((category) => category.id === row.commercial_category_id) ?? null;
+
   const visibleOptionGroups = optionGroups.filter((group) => group.is_active);
   const hasVisibleRemovalsGroup = visibleOptionGroups.some((group) => getSimpleGroupKind(group) === "removals");
   const visibleOptionGroupIds = new Set(visibleOptionGroups.map((group) => group.id));
@@ -2060,6 +2151,13 @@ export default async function MenuItemDetailPage({
       label: "Tamaño o cantidad",
       defaultName: "Elige una opción",
       description: "Tamaños, cantidades, bases o acompañamientos obligatorios.",
+    },
+    {
+      kind: "replacements",
+      label: "Cambios",
+      defaultName: "Cambios",
+      description: "Reemplazos que consumen un insumo nuevo y retiran uno de la receta base.",
+      maxSelect: "10",
     },
     {
       kind: "removals",
@@ -2112,68 +2210,198 @@ export default async function MenuItemDetailPage({
 
       <div id="producto-comercial" className="ui-panel space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="ui-h3">1. Producto</div>
-            <p className="ui-caption">Datos comerciales que ve el cliente en Pass.</p>
+              <form action={updateMenuItem} className="space-y-6">
+          <input type="hidden" name="id" value={row.id} />
+          <input type="hidden" name="metadata_extra" value={Object.keys(metadata).length ? JSON.stringify(metadata) : ""} />
+
+          <div className="grid gap-4 lg:grid-cols-3">
+            <label className="space-y-2">
+              <span className="ui-label">Código interno</span>
+              <input name="code" className="ui-input" defaultValue={row.code} required />
+            </label>
+
+            <label className="space-y-2 lg:col-span-2">
+              <span className="ui-label">Nombre comercial</span>
+              <input name="name" className="ui-input" defaultValue={row.name} placeholder="Ej. Barra de helados" required />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Sede</span>
+              <select name="site_id" className="ui-input" defaultValue={row.site_id} required>
+                {sites.map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.name ?? site.code ?? "Sin sede"}
+                  </option>
+                ))}
+              </select>
+              {currentSite ? <p className="ui-caption">Actual: {currentSite.name ?? currentSite.code}</p> : null}
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Colección comercial</span>
+              <select name="commercial_collection_id" className="ui-input" defaultValue={row.commercial_collection_id ?? ""} required>
+                <option value="">Selecciona colección</option>
+                {commercialCollections.map((collection) => (
+                  <option key={collection.id} value={collection.id}>
+                    {(collection.name ?? collection.code ?? "Sin nombre") + (collection.site_id === row.site_id ? "" : " · otra sede")}
+                  </option>
+                ))}
+              </select>
+              {currentCollection ? <p className="ui-caption">Actual: {currentCollection.name ?? currentCollection.code}</p> : null}
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Categoría comercial</span>
+              <select name="commercial_category_id" className="ui-input" defaultValue={row.commercial_category_id ?? ""} required>
+                <option value="">Selecciona categoría</option>
+                {commercialCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {(category.name ?? category.code ?? "Sin nombre") + (category.site_id === row.site_id ? "" : " · otra sede")}
+                  </option>
+                ))}
+              </select>
+              {currentCategory ? <p className="ui-caption">Actual: {currentCategory.name ?? currentCategory.code}</p> : null}
+            </label>
+
+            <label className="space-y-2 lg:col-span-3">
+              <span className="ui-label">Producto operacional base obligatorio</span>
+              <select name="product_id" className="ui-input" defaultValue={row.product_id ?? ""} required>
+                <option value="">Selecciona producto operacional</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {(product.name ?? product.sku ?? "Producto sin nombre") +
+                      (product.sku ? ` · ${product.sku}` : "") +
+                      (product.site_ids.includes(row.site_id) ? "" : " · no habilitado en esta sede")}
+                  </option>
+                ))}
+              </select>
+              <p className="ui-caption">
+                Este producto soporta la receta base y el descuento principal de inventario. El producto comercial solo define cómo se vende y se muestra en Pass.
+                {currentOperationalProduct ? ` Actual: ${currentOperationalProduct.name ?? currentOperationalProduct.sku ?? currentOperationalProduct.id}.` : ""}
+              </p>
+            </label>
+
+            <label className="space-y-2 lg:col-span-3">
+              <span className="ui-label">Descripción comercial</span>
+              <textarea
+                name="description"
+                className="ui-input min-h-28 py-3"
+                defaultValue={row.description ?? ""}
+                placeholder="Texto que verá el cliente antes de personalizar."
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Precio base comercial</span>
+              <input name="price_amount" type="number" min="1" step="1" className="ui-input" defaultValue={String(row.price_amount ?? 0)} required />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Precio antes / tachado</span>
+              <input name="compare_at_amount" type="number" min="0" step="1" className="ui-input" defaultValue={row.compare_at_amount == null ? "" : String(row.compare_at_amount)} />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Orden</span>
+              <input name="sort_order" type="number" min="0" step="1" className="ui-input" defaultValue={String(row.sort_order ?? 0)} />
+            </label>
+
+            <label className="space-y-2 lg:col-span-3">
+              <span className="ui-label">Imagen comercial URL</span>
+              <input name="image_url" className="ui-input" defaultValue={row.image_url ?? ""} placeholder="https://..." />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Badges</span>
+              <input name="badges_csv" className="ui-input" defaultValue={(row.badges ?? []).join(", ")} placeholder="Popular, Nuevo, Club" />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Agrupación visual</span>
+              <input
+                name="display_group"
+                className="ui-input"
+                defaultValue={typeof metadata.display_group === "string" ? metadata.display_group : ""}
+                placeholder="Ej. Barra de helados"
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Variante visual</span>
+              <input
+                name="variant_label"
+                className="ui-input"
+                defaultValue={typeof metadata.variant_label === "string" ? metadata.variant_label : ""}
+                placeholder="Ej. Yogurt light"
+              />
+            </label>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <span className={`ui-chip ${row.is_active ? "ui-chip--success" : ""}`}>
-              {row.is_active ? "Publicado" : "Oculto"}
-            </span>
-            <span className={`ui-chip ${passModalEnabled ? "ui-chip--success" : ""}`}>
-              {passModalEnabled ? "Con personalizaciones" : "Compra directa"}
-            </span>
+          <div className="grid gap-4 rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 lg:grid-cols-3">
+            <div>
+              <div className="ui-label">Estado</div>
+              <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                <input type="checkbox" name="is_active" defaultChecked={row.is_active} />
+                Publicado en Pass
+              </label>
+              <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                <input type="checkbox" name="is_featured" defaultChecked={row.is_featured} />
+                Mostrar en destacados
+              </label>
+            </div>
+
+            <div>
+              <div className="ui-label">Modalidades</div>
+              <div className="mt-3 space-y-2">
+                <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                  <input type="checkbox" name="fulfillment_delivery" defaultChecked={(row.fulfillment_modes ?? []).includes("delivery")} />
+                  Domicilio
+                </label>
+                <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                  <input type="checkbox" name="fulfillment_pickup" defaultChecked={(row.fulfillment_modes ?? []).includes("pickup")} />
+                  Recoger
+                </label>
+                <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                  <input type="checkbox" name="fulfillment_on_premise" defaultChecked={(row.fulfillment_modes ?? []).includes("on_premise")} />
+                  En sitio
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <div className="ui-label">Visualización en Pass</div>
+              <label className="mt-3 block space-y-2">
+                <span className="ui-caption">Layout</span>
+                <select name="pass_card_layout" className="ui-input" defaultValue={parsePassCardLayout(presentation?.card_layout)}>
+                  <option value="compact">Compacta</option>
+                  <option value="featured">Destacada</option>
+                </select>
+              </label>
+              <label className="mt-3 flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                <input type="checkbox" name="opens_detail_modal" defaultChecked={passModalEnabled} />
+                <span>
+                  Abrir modal antes de agregar
+                  <span className="ui-caption block">Si hay personalizaciones activas, Viso lo mantendrá encendido aunque lo desmarques.</span>
+                </span>
+              </label>
+            </div>
           </div>
+
+          <div className="flex justify-end rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+            <button type="submit" className="ui-btn ui-btn--brand">Guardar producto</button>
+          </div>
+        </form>
+
+        <div className="flex flex-wrap gap-2 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+          <form action={disableMenuItem}>
+            <input type="hidden" name="id" value={row.id} />
+            <button type="submit" className="ui-btn ui-btn--ghost">Deshabilitar</button>
+          </form>
+          <form action={deleteMenuItem}>
+            <input type="hidden" name="id" value={row.id} />
+            <button type="submit" className="ui-btn ui-btn--danger">Eliminar producto</button>
+          </form>
         </div>
-
-        <MenuItemForm
-          mode="edit"
-          action={updateMenuItem}
-          formId={`menu-item-form-${row.id}`}
-          secondaryActions={(
-            <>
-              <form action={disableMenuItem}>
-                <input type="hidden" name="id" value={row.id} />
-                <button type="submit" className="ui-btn ui-btn--ghost">Deshabilitar</button>
-              </form>
-              <form action={deleteMenuItem}>
-                <input type="hidden" name="id" value={row.id} />
-                <button type="submit" className="ui-btn ui-btn--danger">Eliminar producto</button>
-              </form>
-            </>
-          )}
-          sites={sites ?? []}
-          products={products}
-          categories={(categoriesRaw ?? []) as CommercialCategoryRow[]}
-          collections={(collectionsRaw ?? []) as CommercialCollectionRow[]}
-          initial={{
-            id: row.id,
-            code: row.code,
-            name: row.name,
-            description: row.description ?? "",
-            product_id: row.product_id ?? "",
-            price_amount: String(row.price_amount ?? 0),
-            compare_at_amount: row.compare_at_amount == null ? "" : String(row.compare_at_amount),
-            sort_order: String(row.sort_order ?? 0),
-            is_active: row.is_active,
-            is_featured: row.is_featured,
-            site_id: row.site_id,
-            commercial_collection_id: row.commercial_collection_id ?? "",
-            commercial_category_id: row.commercial_category_id ?? "",
-            category_label: row.category_label ?? "",
-            image_url: row.image_url ?? "",
-            badges_csv: (row.badges ?? []).join(", "),
-            fulfillment_delivery: (row.fulfillment_modes ?? []).includes("delivery"),
-            fulfillment_pickup: (row.fulfillment_modes ?? []).includes("pickup"),
-            fulfillment_on_premise: (row.fulfillment_modes ?? []).includes("on_premise"),
-            metadata_extra: Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : "",
-            display_group: typeof metadata.display_group === "string" ? metadata.display_group : "",
-            variant_label: typeof metadata.variant_label === "string" ? metadata.variant_label : "",
-            pass_card_layout: parsePassCardLayout(presentation?.card_layout),
-            opens_detail_modal: Boolean(presentation?.opens_detail_modal),
-          }}
-        />
       </div>
 
       <div id="personalizaciones" className="ui-panel space-y-6">
@@ -2193,7 +2421,7 @@ export default async function MenuItemDetailPage({
           <summary className="cursor-pointer list-none">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-base font-black text-[var(--ui-text)]">+ Agregar personalización</div>
-              <span className="ui-chip">Tamaño · Ingredientes · Extras · Preferencias · Sugerir producto</span>
+              <span className="ui-chip">Tamaño · Cambios · Ingredientes · Extras · Preferencias · Sugerir producto</span>
             </div>
           </summary>
 
@@ -2633,33 +2861,118 @@ export default async function MenuItemDetailPage({
                             <button type="submit" className="ui-btn ui-btn--brand">Agregar sugerencia</button>
                           </div>
                         ) : (
-                          <div className="grid gap-3 lg:grid-cols-[1fr_160px_1fr_auto] lg:items-end">
-                            <label className="space-y-2">
-                              <span className="ui-label">Opción</span>
-                              <input name="name" className="ui-input" placeholder="Ej. x12, leche de almendra, queso extra" required />
-                            </label>
+                          <div className="space-y-4">
+                            <div className="grid gap-3 lg:grid-cols-[1fr_160px_1fr_auto] lg:items-end">
+                              <label className="space-y-2">
+                                <span className="ui-label">Opción visible</span>
+                                <input name="name" className="ui-input" placeholder="Ej. Vaso, cono, Oreo, leche de almendra" required />
+                              </label>
 
-                            <label className="space-y-2">
-                              <span className="ui-label">Precio adicional</span>
-                              <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue="0" />
-                            </label>
+                              <label className="space-y-2">
+                                <span className="ui-label">Precio adicional</span>
+                                <input name="price_delta_amount" type="number" min="0" className="ui-input" defaultValue="0" />
+                              </label>
 
-                            <label className="space-y-2">
-                              <span className="ui-label">Descripción</span>
-                              <input name="description" className="ui-input" placeholder="Opcional" />
-                            </label>
+                              <label className="space-y-2">
+                                <span className="ui-label">Descripción</span>
+                                <input name="description" className="ui-input" placeholder="Opcional" />
+                              </label>
 
-                            <div className="flex flex-wrap items-center gap-3">
-                              {supportsDefaultOption ? (
-                                <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                                  <input type="checkbox" name="is_default" />
-                                  Opción estándar
-                                </label>
-                              ) : (
-                                <input type="hidden" name="is_default" value="false" />
-                              )}
-                              <button type="submit" className="ui-btn ui-btn--brand">Agregar</button>
+                              <div className="flex flex-wrap items-center gap-3">
+                                {supportsDefaultOption ? (
+                                  <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                                    <input type="checkbox" name="is_default" />
+                                    Opción estándar
+                                  </label>
+                                ) : (
+                                  <input type="hidden" name="is_default" value="false" />
+                                )}
+                                <button type="submit" className="ui-btn ui-btn--brand">Agregar</button>
+                              </div>
                             </div>
+
+                            {groupKind === "extras" || groupKind === "replacements" || groupKind === "choice" ? (
+                              <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                <div className="mb-3">
+                                  <div className="text-sm font-black text-[var(--ui-text)]">
+                                    {groupKind === "replacements" ? "Inventario del producto que entra" : "Inventario que descuenta esta opción"}
+                                  </div>
+                                  <p className="ui-caption">
+                                    {groupKind === "choice"
+                                      ? "Opcional para tamaños o presentaciones. Úsalo si esta opción debe descontar un insumo específico, como vaso o cono."
+                                      : "Obligatorio para adiciones y cambios. Se crea la regla de consumo al mismo tiempo que la opción."}
+                                  </p>
+                                </div>
+
+                                <div className="grid gap-3 lg:grid-cols-[1fr_120px_150px]">
+                                  <label className="space-y-2">
+                                    <span className="ui-label">Producto operacional</span>
+                                    <select name="option_product_id" className="ui-input" required={groupKind === "extras" || groupKind === "replacements"}>
+                                      <option value="">Selecciona insumo</option>
+                                      {consumptionProducts.map((product) => (
+                                        <option key={product.id} value={product.id}>
+                                          {(product.name ?? "Sin nombre") + (product.sku ? ` · ${product.sku}` : "")}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+
+                                  <label className="space-y-2">
+                                    <span className="ui-label">Cantidad</span>
+                                    <input
+                                      name="option_quantity_per_option"
+                                      type="number"
+                                      min="0.0001"
+                                      step="0.0001"
+                                      className="ui-input"
+                                      required={groupKind === "extras" || groupKind === "replacements"}
+                                    />
+                                  </label>
+
+                                  <label className="space-y-2">
+                                    <span className="ui-label">Unidad</span>
+                                    <select name="option_stock_unit_code" className="ui-input" defaultValue="">
+                                      <option value="">Auto / stock</option>
+                                      {inventoryUnits.map((unit) => (
+                                        <option key={unit.code} value={unit.code}>{unit.name}{unit.symbol ? ` (${unit.symbol})` : ""}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {groupKind === "replacements" ? (
+                              <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                <div className="mb-3">
+                                  <div className="text-sm font-black text-[var(--ui-text)]">Ingrediente original que deja de descontarse</div>
+                                  <p className="ui-caption">El cambio consume el producto nuevo y marca este ingrediente de la receta base como reemplazado.</p>
+                                </div>
+
+                                {recipeIngredients.length === 0 ? (
+                                  <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 text-sm font-semibold text-[var(--ui-muted)]">
+                                    Este producto base no tiene receta activa. Configura receta antes de crear cambios/reemplazos.
+                                  </div>
+                                ) : (
+                                  <label className="space-y-2">
+                                    <span className="ui-label">Reemplaza a</span>
+                                    <select name="replacement_target_ingredient_product_id" className="ui-input" required>
+                                      <option value="">Selecciona ingrediente de receta</option>
+                                      {recipeIngredients.map((ingredient) => {
+                                        const product = ingredient.product;
+                                        if (!product) return null;
+
+                                        return (
+                                          <option key={ingredient.id} value={ingredient.ingredient_product_id}>
+                                            {product.name ?? "Ingrediente"} · {formatQuantityAdmin(ingredient.quantity)} {product.stock_unit_code || product.unit || "unidad"}
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                  </label>
+                                )}
+                              </div>
+                            ) : null}
                           </div>
                         )}
                       </form>
@@ -2708,6 +3021,7 @@ export default async function MenuItemDetailPage({
         </div>
       ) : null}
 
+    </div>
     </div>
   );
 }
