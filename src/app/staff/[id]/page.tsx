@@ -1325,6 +1325,12 @@ export default async function StaffDetailPage({
   }, {} as Record<string, EmployeeInventoryLocationAssignmentRow>);
 
   const attendanceLabel = attendance?.current_status === "check_in" ? "En turno" : attendance?.current_status === "check_out" ? "Fuera de turno" : "Sin registros";
+  const primarySiteName =
+    siteRows.find((site) => site.id === emp.site_id)?.name ??
+    siteRows.find((site) => site.id === emp.site_id)?.code ??
+    "Sin sede principal";
+  const activeSiteCount = siteLinks.filter((link) => link.is_active !== false).length;
+  const roleName = roleRows.find((role) => role.code === emp.role)?.name ?? emp.role ?? "Sin rol";
 
   const docsResult = restResults[0] as { data?: unknown[] | null } | undefined;
   const eligibilityResult = restResults[1] as { data?: unknown } | undefined;
@@ -1425,48 +1431,33 @@ export default async function StaffDetailPage({
         </div>
       ) : null}
 
-      <StaffPhotoPanel
-        employeeId={emp.id}
-        employeeName={emp.full_name}
-        photoUrl={emp.photo_url}
-        canEditPhoto={canEditPhoto}
-        uploadPhotoAction={uploadStaffPhoto}
-      />
+      <div className="ui-panel ui-panel--accent-brand space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="ui-h3">{emp.full_name ?? "Trabajador sin nombre"}</h2>
+            <p className="ui-body-muted mt-1">
+              {roleName} · {primarySiteName}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className={`ui-chip ${emp.is_active ? "ui-chip--success" : ""}`}>
+              {emp.is_active ? "Activo" : "Inactivo"}
+            </span>
+            <span className="ui-chip">{activeSiteCount} sedes activas</span>
+          </div>
+        </div>
 
-      <StaffDocumentsPanel
-        employeeId={emp.id}
-        employeeName={emp.full_name}
-        documents={staffDocsNormalized}
-        eligibility={eligibility}
-        documentTypeNamesById={documentTypeNamesById}
-        documentTypes={documentTypesForSelect}
-        uploadDocumentAction={uploadStaffDocument}
-        canUploadDocuments={canEditDocuments}
-        canEditDocuments={canEditDocuments}
-        updateDocumentAction={updateStaffDocument}
-      />
-
-      <StaffPermissionsPanel
-        employeeId={emp.id}
-        availablePermissions={availablePermissions}
-        employeePermissions={employeePermissions}
-        canManagePermissions={canManagePermissions}
-        grantPermissionAction={grantEmployeePermission}
-        removePermissionAction={removeEmployeePermission}
-      />
-
-      <div className="ui-panel space-y-6">
-        <form action={updateEmployee} className="grid gap-4 sm:grid-cols-2">
+        <form action={updateEmployee} className="grid gap-4 lg:grid-cols-12">
           <input type="hidden" name="id" value={emp.id} />
-          <label className="space-y-2 sm:col-span-2">
+          <label className="space-y-2 lg:col-span-5">
             <span className="ui-label">Nombre completo</span>
             <input name="full_name" className="ui-input" defaultValue={emp.full_name ?? ""} required />
           </label>
-          <label className="space-y-2">
+          <label className="space-y-2 lg:col-span-3">
             <span className="ui-label">Alias</span>
             <input name="alias" className="ui-input" defaultValue={emp.alias ?? ""} />
           </label>
-          <label className="space-y-2">
+          <label className="space-y-2 lg:col-span-4">
             <span className="ui-label">Rol</span>
             <select name="role" className="ui-input" defaultValue={emp.role ?? ""} required>
               <option value="">Selecciona un rol</option>
@@ -1477,7 +1468,7 @@ export default async function StaffDetailPage({
               ))}
             </select>
           </label>
-          <label className="space-y-2">
+          <label className="space-y-2 lg:col-span-5">
             <span className="ui-label">Sede principal</span>
             <select name="site_id" className="ui-input" defaultValue={emp.site_id ?? ""} required>
               <option value="">Selecciona una sede</option>
@@ -1488,23 +1479,58 @@ export default async function StaffDetailPage({
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
+          <label className="flex items-center gap-2 text-sm text-[var(--ui-text)] lg:col-span-2 lg:pt-8">
             <input type="checkbox" name="is_active" defaultChecked={Boolean(emp.is_active)} />
             Activo
           </label>
-          <div className="flex items-center gap-2 sm:col-span-2">
+          <div className="flex flex-wrap items-end justify-end gap-2 lg:col-span-5 lg:pt-6">
             <button type="submit" className="ui-btn ui-btn--brand">
               Guardar cambios
             </button>
           </div>
         </form>
-        <form action={deleteEmployee} className="flex items-center gap-2">
-          <input type="hidden" name="id" value={emp.id} />
-          <button type="submit" className="ui-btn ui-btn--danger">
-            Eliminar
-          </button>
-        </form>
+
+        <div className="flex justify-end border-t border-[var(--ui-border)] pt-4">
+          <form action={deleteEmployee}>
+            <input type="hidden" name="id" value={emp.id} />
+            <button type="submit" className="ui-btn ui-btn--danger">
+              Eliminar trabajador
+            </button>
+          </form>
+        </div>
       </div>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+        <StaffPhotoPanel
+          employeeId={emp.id}
+          employeeName={emp.full_name}
+          photoUrl={emp.photo_url}
+          canEditPhoto={canEditPhoto}
+          uploadPhotoAction={uploadStaffPhoto}
+        />
+
+        <StaffDocumentsPanel
+          employeeId={emp.id}
+          employeeName={emp.full_name}
+          documents={staffDocsNormalized}
+          eligibility={eligibility}
+          documentTypeNamesById={documentTypeNamesById}
+          documentTypes={documentTypesForSelect}
+          uploadDocumentAction={uploadStaffDocument}
+          canUploadDocuments={canEditDocuments}
+          canEditDocuments={canEditDocuments}
+          updateDocumentAction={updateStaffDocument}
+        />
+      </div>
+
+      <StaffPermissionsPanel
+        employeeId={emp.id}
+        availablePermissions={availablePermissions}
+        employeePermissions={employeePermissions}
+        canManagePermissions={canManagePermissions}
+        grantPermissionAction={grantEmployeePermission}
+        removePermissionAction={removeEmployeePermission}
+      />
 
       <div className="ui-panel space-y-4">
         <div className="ui-h3">Sedes asignadas</div>
@@ -1531,7 +1557,8 @@ export default async function StaffDetailPage({
         {siteLinks.length === 0 ? (
           <div className="ui-empty">Este trabajador no tiene sedes asignadas.</div>
         ) : (
-          <Table>
+          <div className="max-h-[420px] overflow-auto">
+            <Table>
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Sede</TableHeaderCell>
@@ -1585,7 +1612,8 @@ export default async function StaffDetailPage({
                 );
               })}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         )}
       </div>
 
@@ -1597,7 +1625,8 @@ export default async function StaffDetailPage({
         {siteLinks.length === 0 ? (
           <div className="ui-empty">Primero asigna al menos una sede al trabajador.</div>
         ) : (
-          <Table>
+          <div className="max-h-[520px] overflow-auto">
+            <Table>
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Sede</TableHeaderCell>
@@ -1672,7 +1701,8 @@ export default async function StaffDetailPage({
                 );
               })}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         )}
       </div>
 
@@ -1718,7 +1748,8 @@ export default async function StaffDetailPage({
         {siteLinks.length === 0 ? (
           <div className="ui-empty">Primero asigna al menos una sede al trabajador.</div>
         ) : (
-          <Table>
+          <div className="max-h-[520px] overflow-auto">
+            <Table>
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Sede</TableHeaderCell>
@@ -1774,7 +1805,8 @@ export default async function StaffDetailPage({
                 );
               })}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         )}
       </div>
 
@@ -1790,7 +1822,8 @@ export default async function StaffDetailPage({
         {attendanceRows.length === 0 ? (
           <div className="ui-empty">No hay registros de asistencia para este trabajador.</div>
         ) : (
-          <Table>
+          <div className="max-h-[360px] overflow-auto">
+            <Table>
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Fecha</TableHeaderCell>
@@ -1818,7 +1851,8 @@ export default async function StaffDetailPage({
                 );
               })}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         )}
       </div>
 
@@ -1877,7 +1911,8 @@ export default async function StaffDetailPage({
         {shiftRows.length === 0 ? (
           <div className="ui-empty">No hay turnos programados para este trabajador.</div>
         ) : (
-          <Table>
+          <div className="max-h-[560px] overflow-auto">
+            <Table>
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Fecha</TableHeaderCell>
@@ -1979,7 +2014,8 @@ export default async function StaffDetailPage({
                 );
               })}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         )}
       </div>
     </div>

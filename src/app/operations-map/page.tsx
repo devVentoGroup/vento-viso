@@ -376,6 +376,41 @@ async function updateSiteOperation(formData: FormData) {
   redirect("/operations-map?ok=" + encodeURIComponent("Mapa operativo actualizado.") + visibilityQuery);
 }
 
+async function createArea(formData: FormData) {
+  "use server";
+
+  const siteId = asText(formData.get("site_id"));
+  const name = asText(formData.get("name"));
+  const code = asText(formData.get("code"));
+  const kind = asText(formData.get("kind"));
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: "/operations-map",
+    permissionCode: "staff.permissions.manage",
+  });
+
+  if (!siteId || !name || !code || !kind) {
+    redirect(backToMap("?error=" + encodeURIComponent("Completa sede, area, codigo y tipo.")));
+  }
+
+  const supabase = createAdminClient();
+  const { error } = await supabase.from("areas").insert({
+    site_id: siteId,
+    name,
+    code,
+    kind,
+    is_active: true,
+  });
+
+  if (error) {
+    redirect(backToMap("?error=" + encodeURIComponent(error.message)));
+  }
+
+  revalidatePath("/operations-map");
+  redirect(backToMap("?ok=" + encodeURIComponent("Area creada.")));
+}
+
 async function updateArea(formData: FormData) {
   "use server";
 
@@ -465,6 +500,53 @@ async function deleteArea(formData: FormData) {
 
   revalidatePath("/operations-map");
   redirect(backToMap("?ok=" + encodeURIComponent("Area eliminada definitivamente.")));
+}
+
+async function createLocation(formData: FormData) {
+  "use server";
+
+  const siteId = asText(formData.get("site_id"));
+  const areaId = asText(formData.get("area_id")) || null;
+  const code = asText(formData.get("code"));
+  const zoneRaw = asText(formData.get("zone"));
+  const description = asText(formData.get("description"));
+  const locationType = normalizeLocationType(asText(formData.get("location_type")));
+
+  await requireAppAccess({
+    appId: "viso",
+    returnTo: "/operations-map",
+    permissionCode: "staff.permissions.manage",
+  });
+
+  if (!siteId || !code) {
+    redirect(backToMap("?error=" + encodeURIComponent("Completa sede y codigo del LOC.")));
+  }
+
+  const supabase = createAdminClient();
+
+  if (areaId) {
+    const { data: area } = await supabase.from("areas").select("id,site_id").eq("id", areaId).maybeSingle();
+    if (!area || area.site_id !== siteId) {
+      redirect(backToMap("?error=" + encodeURIComponent("El area no pertenece a la sede.")));
+    }
+  }
+
+  const { error } = await supabase.from("inventory_locations").insert({
+    site_id: siteId,
+    area_id: areaId,
+    code,
+    zone: zoneRaw || code,
+    description: description || null,
+    location_type: locationType,
+    is_active: true,
+  });
+
+  if (error) {
+    redirect(backToMap("?error=" + encodeURIComponent(error.message)));
+  }
+
+  revalidatePath("/operations-map");
+  redirect(backToMap("?ok=" + encodeURIComponent("LOC creado.")));
 }
 
 async function updateLocation(formData: FormData) {
@@ -850,6 +932,75 @@ export default async function OperationsMapPage({
                       </label>
                       <button type="submit" className="ui-btn ui-btn--brand justify-center">
                         Guardar
+                      </button>
+                    </div>
+                  </form>
+
+                  <form action={createArea} className="rounded-xl border border-[var(--ui-border)] bg-white p-4">
+                    <input type="hidden" name="site_id" value={site.id} />
+                    <div className="ui-label">Nueva área</div>
+                    <div className="mt-3 grid gap-3">
+                      <label className="grid gap-1">
+                        <span className="ui-caption">Área</span>
+                        <input name="name" className="ui-input" />
+                      </label>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="grid gap-1">
+                          <span className="ui-caption">Código</span>
+                          <input name="code" className="ui-input" />
+                        </label>
+                        <label className="grid gap-1">
+                          <span className="ui-caption">Tipo</span>
+                          <input name="kind" className="ui-input" />
+                        </label>
+                      </div>
+                      <button type="submit" className="ui-btn ui-btn--ghost justify-center">
+                        Crear área
+                      </button>
+                    </div>
+                  </form>
+
+                  <form action={createLocation} className="rounded-xl border border-[var(--ui-border)] bg-white p-4">
+                    <input type="hidden" name="site_id" value={site.id} />
+                    <div className="ui-label">Nuevo LOC</div>
+                    <div className="mt-3 grid gap-3">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="grid gap-1">
+                          <span className="ui-caption">LOC</span>
+                          <input name="code" className="ui-input" />
+                        </label>
+                        <label className="grid gap-1">
+                          <span className="ui-caption">Tipo</span>
+                          <select name="location_type" defaultValue="storage" className="ui-input">
+                            <option value="storage">Almacenamiento</option>
+                            <option value="production">Producción</option>
+                            <option value="picking">Operación</option>
+                            <option value="receiving">Recepción</option>
+                            <option value="staging">Alistamiento</option>
+                          </select>
+                        </label>
+                        <label className="grid gap-1">
+                          <span className="ui-caption">Área</span>
+                          <select name="area_id" defaultValue="" className="ui-input">
+                            <option value="">Sin área</option>
+                            {siteAreas.map((area) => (
+                              <option key={area.id} value={area.id}>
+                                {area.name ?? area.kind ?? area.code ?? area.id}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="grid gap-1">
+                          <span className="ui-caption">Zona</span>
+                          <input name="zone" className="ui-input" />
+                        </label>
+                      </div>
+                      <label className="grid gap-1">
+                        <span className="ui-caption">Descripción</span>
+                        <input name="description" className="ui-input" />
+                      </label>
+                      <button type="submit" className="ui-btn ui-btn--ghost justify-center">
+                        Crear LOC
                       </button>
                     </div>
                   </form>
