@@ -263,13 +263,14 @@ async function countRows(
 async function countNonZeroStock(
   supabase: ReturnType<typeof createAdminClient>,
   table: string,
-  locationId: string
+  locationId: string,
+  qtyColumn: string
 ) {
   const { count, error } = await supabase
     .from(table)
     .select("product_id", { count: "exact", head: true })
     .eq("location_id", locationId)
-    .neq("current_qty", 0);
+    .neq(qtyColumn, 0);
   if (error) return 1;
   return count ?? 0;
 }
@@ -288,8 +289,8 @@ async function locDeleteBlockers(supabase: ReturnType<typeof createAdminClient>,
     countRows(supabase, "recipe_site_uses", "source_location_id", locationId),
     countRows(supabase, "recipe_site_uses", "destination_location_id", locationId),
     countRows(supabase, "restock_request_item_picks", "source_location_id", locationId),
-    countNonZeroStock(supabase, "inventory_stock_by_location", locationId),
-    countNonZeroStock(supabase, "inventory_stock_by_uom_profile", locationId),
+    countNonZeroStock(supabase, "inventory_stock_by_location", locationId, "current_qty"),
+    countNonZeroStock(supabase, "inventory_stock_by_uom_profile", locationId, "base_qty"),
   ]);
 
   return checks.reduce((total, value) => total + value, 0);
