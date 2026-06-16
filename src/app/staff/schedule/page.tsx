@@ -443,7 +443,11 @@ async function saveShiftAction(formData: FormData) {
     : rawShiftBlocks.length > 0
       ? rawShiftBlocks
       : [{ startTime, endTime }];
-  const firstShiftBlock = resolvedShiftBlocks[0] ?? { startTime: "", endTime: "" };
+  const orderedShiftBlocks = [...resolvedShiftBlocks].sort((first, second) => {
+    const startCompare = first.startTime.localeCompare(second.startTime, "es");
+    return startCompare !== 0 ? startCompare : first.endTime.localeCompare(second.endTime, "es");
+  });
+  const firstShiftBlock = orderedShiftBlocks[0] ?? { startTime: "", endTime: "" };
   const resolvedStartTime = firstShiftBlock.startTime;
   const resolvedEndTime = firstShiftBlock.endTime;
   const showEndAsClose = asText(formData.get("show_end_as_close")) === "1";
@@ -462,7 +466,7 @@ async function saveShiftAction(formData: FormData) {
   });
   const supabase = createAdminClient();
 
-  if (requestedEmployeeIds.length === 0 || !siteId || !shiftDate || resolvedShiftBlocks.length === 0) {
+  if (requestedEmployeeIds.length === 0 || !siteId || !shiftDate || orderedShiftBlocks.length === 0) {
     redirect(`${returnTo}&error=${encodeURIComponent("Completa trabajador, fecha y horario.")}`);
   }
 
@@ -470,25 +474,25 @@ async function saveShiftAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un trabajador por turno.")}`);
   }
 
-  if (shiftId && resolvedShiftBlocks.length !== 1) {
+  if (shiftId && orderedShiftBlocks.length !== 1) {
     redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un bloque horario por turno.")}`);
   }
 
-  const incompleteBlocks = resolvedShiftBlocks.some((block) => !block.startTime || !block.endTime);
+  const incompleteBlocks = orderedShiftBlocks.some((block) => !block.startTime || !block.endTime);
   if (incompleteBlocks) {
     redirect(`${returnTo}&error=${encodeURIComponent("Completa inicio y fin de cada bloque horario.")}`);
   }
 
   if (shiftKind !== "descanso") {
-    const invalidBlocks = resolvedShiftBlocks.filter((block) => block.endTime <= block.startTime);
+    const invalidBlocks = orderedShiftBlocks.filter((block) => block.endTime <= block.startTime);
     if (invalidBlocks.length > 0) {
       redirect(`${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio en todos los bloques.")}`);
     }
 
-    for (let i = 0; i < resolvedShiftBlocks.length; i += 1) {
-      for (let j = i + 1; j < resolvedShiftBlocks.length; j += 1) {
-        const first = resolvedShiftBlocks[i];
-        const second = resolvedShiftBlocks[j];
+    for (let i = 0; i < orderedShiftBlocks.length; i += 1) {
+      for (let j = i + 1; j < orderedShiftBlocks.length; j += 1) {
+        const first = orderedShiftBlocks[i];
+        const second = orderedShiftBlocks[j];
         if (!first || !second) continue;
         if (first.startTime < second.endTime && second.startTime < first.endTime) {
           redirect(
@@ -518,7 +522,7 @@ async function saveShiftAction(formData: FormData) {
     }
     const overlaps = (sameDayShifts ?? []).filter(
       (s: { employee_id: string; start_time: string; end_time: string }) =>
-        resolvedShiftBlocks.some(
+        orderedShiftBlocks.some(
           (block) => block.startTime < s.end_time && s.start_time < block.endTime,
         ),
     );
@@ -554,19 +558,20 @@ async function saveShiftAction(formData: FormData) {
     shift_date: shiftDate,
     shift_kind: shiftKind,
     break_minutes: shiftKind === "descanso" ? 0 : Math.max(0, asNumber(formData.get("break_minutes"), 0)),
-    show_end_as_close: shiftKind === "descanso" ? false : showEndAsClose,
     status: asText(formData.get("status")) || "scheduled",
     notes: asText(formData.get("notes")) || null,
     published_at: null,
     published_by: null,
   };
+  const closeBlockIndex = shiftKind === "descanso" || !showEndAsClose ? -1 : orderedShiftBlocks.length - 1;
 
   const insertPayload = requestedEmployeeIds.flatMap((id) =>
-    resolvedShiftBlocks.map((block) => ({
+    orderedShiftBlocks.map((block, index) => ({
       ...basePayload,
       employee_id: id,
       start_time: block.startTime,
       end_time: block.endTime,
+      show_end_as_close: index === closeBlockIndex,
     })),
   );
 
@@ -578,6 +583,7 @@ async function saveShiftAction(formData: FormData) {
           employee_id: requestedEmployeeIds[0],
           start_time: resolvedStartTime,
           end_time: resolvedEndTime,
+          show_end_as_close: shiftKind === "descanso" ? false : showEndAsClose,
         })
         .eq("id", shiftId)
     : supabase.from("employee_shifts").insert(insertPayload);
@@ -2294,32 +2300,18 @@ export default async function StaffSchedulePage({
                       defaultChecked={Boolean(selectedShift.show_end_as_close)}
                       className="rounded border-[var(--ui-border)]"
                     />
-                    Mostrar la salida como &quot;Cierre&quot; al empleado
+                    Mostrar la salida de este bloque como &quot;Cierre&quot; al empleado
                   </label>
 
                   <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                     <input
                       type="checkbox"
-                      name="rest_shift"
+                      name="full_day_rest"
                       value="1"
                       defaultChecked={selectedShift.shift_kind === "descanso"}
                       className="rounded border-[var(--ui-border)]"
                     />
-                    Marcar como turno de descanso (no laboral)
-                  </label>
-                  <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                    <input
-                      type="checkbox"
-                      name="full_day_rest"
-                      value="1"
-                      defaultChecked={
-                        selectedShift.shift_kind === "descanso" &&
-                        selectedShift.start_time.slice(0, 5) === FULL_DAY_REST_START_TIME &&
-                        selectedShift.end_time.slice(0, 5) === FULL_DAY_REST_END_TIME
-                      }
-                      className="rounded border-[var(--ui-border)]"
-                    />
-                    Marcar el día completo como descanso
+                    Marcar este día como descanso
                   </label>
 
                   <div className="flex items-end md:col-span-1">
@@ -2373,14 +2365,14 @@ export default async function StaffSchedulePage({
                   />
                 </label>
 
-                <label className="flex flex-col gap-1">
+                <label className="flex flex-col gap-1" data-quick-shift-time-control>
                   <span className="ui-label">Inicio bloque 1</span>
-                  <input name="block_start_time" type="time" className="ui-input" required defaultValue="06:00" />
+                  <input name="block_start_time" type="time" className="ui-input" required defaultValue="06:00" data-quick-shift-time-input />
                 </label>
 
-                <label className="flex flex-col gap-1">
+                <label className="flex flex-col gap-1" data-quick-shift-time-control>
                   <span className="ui-label">Fin bloque 1</span>
-                  <input name="block_end_time" type="time" className="ui-input" required defaultValue="14:00" />
+                  <input name="block_end_time" type="time" className="ui-input" required defaultValue="14:00" data-quick-shift-time-input />
                 </label>
 
                 <div
@@ -2396,11 +2388,11 @@ export default async function StaffSchedulePage({
                   <div className="grid gap-3 md:grid-cols-2">
                     <label className="flex flex-col gap-1">
                       <span className="ui-label">Inicio bloque 2</span>
-                      <input name="block_start_time" type="time" className="ui-input" />
+                      <input name="block_start_time" type="time" className="ui-input" data-quick-shift-time-input />
                     </label>
                     <label className="flex flex-col gap-1">
                       <span className="ui-label">Fin bloque 2</span>
-                      <input name="block_end_time" type="time" className="ui-input" />
+                      <input name="block_end_time" type="time" className="ui-input" data-quick-shift-time-input />
                     </label>
                   </div>
                 </div>
@@ -2418,16 +2410,16 @@ export default async function StaffSchedulePage({
                   <div className="grid gap-3 md:grid-cols-2">
                     <label className="flex flex-col gap-1">
                       <span className="ui-label">Inicio bloque 3</span>
-                      <input name="block_start_time" type="time" className="ui-input" />
+                      <input name="block_start_time" type="time" className="ui-input" data-quick-shift-time-input />
                     </label>
                     <label className="flex flex-col gap-1">
                       <span className="ui-label">Fin bloque 3</span>
-                      <input name="block_end_time" type="time" className="ui-input" />
+                      <input name="block_end_time" type="time" className="ui-input" data-quick-shift-time-input />
                     </label>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 md:col-span-6">
+                <div className="flex flex-wrap items-center gap-2 md:col-span-6" data-quick-shift-add-row>
                   <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" data-add-shift-block>
                     + Agregar otro bloque
                   </button>
@@ -2436,34 +2428,31 @@ export default async function StaffSchedulePage({
                   </span>
                 </div>
 
-                <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]" data-quick-shift-close-row>
                   <input
                     type="checkbox"
                     name="show_end_as_close"
                     value="1"
                     className="rounded border-[var(--ui-border)]"
+                    data-quick-shift-close-input
                   />
-                  Mostrar la salida como &quot;Cierre&quot; al empleado
+                  Mostrar la salida del último bloque como &quot;Cierre&quot; al empleado
                 </label>
 
-                <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                  <input
-                    type="checkbox"
-                    name="rest_shift"
-                    value="1"
-                    className="rounded border-[var(--ui-border)]"
-                  />
-                  Marcar como turno de descanso (no laboral)
-                </label>
-                <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]" data-quick-shift-rest-row>
                   <input
                     type="checkbox"
                     name="full_day_rest"
                     value="1"
                     className="rounded border-[var(--ui-border)]"
+                    data-full-day-rest-toggle
                   />
-                  Marcar el día completo como descanso
+                  Marcar este día como descanso
                 </label>
+
+                <p className="hidden text-xs text-[var(--ui-muted)] md:col-span-6" data-quick-shift-rest-help>
+                  Se guardará un único registro de descanso para todo el día. No se crearán bloques horarios laborales.
+                </p>
 
                 <div className="flex items-end">
                   <button type="submit" className="ui-btn ui-btn--brand w-full">
@@ -2480,14 +2469,49 @@ export default async function StaffSchedulePage({
                       });
                     }
 
+                    function isRestDay(form) {
+                      var restToggle = form.querySelector("[data-full-day-rest-toggle]");
+                      return Boolean(restToggle && restToggle.checked);
+                    }
+
+                    function setElementHidden(element, hidden) {
+                      if (!element) return;
+                      element.classList.toggle("hidden", hidden);
+                      element.style.display = hidden ? "none" : "";
+                    }
+
                     function refreshBlockControls(form) {
+                      var restDay = isRestDay(form);
                       var optionalBlocks = Array.from(form.querySelectorAll('[data-quick-shift-block="optional"]'));
                       var addButton = form.querySelector("[data-add-shift-block]");
+                      var closeInput = form.querySelector("[data-quick-shift-close-input]");
                       var hiddenBlocks = optionalBlocks.filter(function (block) {
                         return block.classList.contains("hidden");
                       });
+
+                      if (restDay) {
+                        optionalBlocks.forEach(function (block) {
+                          clearBlock(block);
+                          block.classList.add("hidden");
+                        });
+                        if (closeInput) closeInput.checked = false;
+                      }
+
+                      form.querySelectorAll("[data-quick-shift-time-control]").forEach(function (element) {
+                        setElementHidden(element, restDay);
+                      });
+                      form.querySelectorAll("[data-quick-shift-time-input]").forEach(function (input) {
+                        input.disabled = restDay;
+                      });
+                      form.querySelectorAll("[data-quick-shift-add-row], [data-quick-shift-close-row]").forEach(function (element) {
+                        setElementHidden(element, restDay);
+                      });
+                      form.querySelectorAll("[data-quick-shift-rest-help]").forEach(function (element) {
+                        setElementHidden(element, !restDay);
+                      });
+
                       if (addButton) {
-                        addButton.disabled = hiddenBlocks.length === 0;
+                        addButton.disabled = restDay || hiddenBlocks.length === 0;
                       }
                     }
 
@@ -2513,6 +2537,12 @@ export default async function StaffSchedulePage({
                           if (!block) return;
                           clearBlock(block);
                           block.classList.add("hidden");
+                          refreshBlockControls(form);
+                        });
+                      });
+
+                      form.querySelectorAll("[data-full-day-rest-toggle]").forEach(function (input) {
+                        input.addEventListener("change", function () {
                           refreshBlockControls(form);
                         });
                       });
