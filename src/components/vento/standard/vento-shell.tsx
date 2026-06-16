@@ -6,6 +6,7 @@ type SiteRow = {
   id: string;
   name: string | null;
   site_type: string | null;
+  operational_visibility?: string | null;
 };
 
 type EmployeeSiteRow = {
@@ -179,8 +180,7 @@ const APP_SWITCHER_ITEMS: Omit<AppSwitcherItem, "access">[] = [
 ];
 
 function isOperationalSite(site: SiteRow): boolean {
-  const name = String(site.name ?? "").trim().toLowerCase();
-  return name !== "app review (demo)";
+  return String(site.operational_visibility ?? "operational") === "operational";
 }
 
 function normalizeIconName(value: string | null | undefined): IconName | undefined {
@@ -387,7 +387,7 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
     if (siteIds.length) {
       const { data: siteRows } = await supabase
         .from("sites")
-        .select("id,name,site_type")
+        .select("id,name,site_type,operational_visibility")
         .in("id", siteIds)
         .order("name", { ascending: true });
 
