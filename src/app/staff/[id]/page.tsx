@@ -209,6 +209,67 @@ function asBool(value: FormDataEntryValue | null) {
   return value === "on" || value === "true";
 }
 
+async function syncEmployeePrimarySite(
+  supabase: ReturnType<typeof createAdminClient>,
+  employeeId: string,
+  preferredSiteId?: string | null,
+) {
+  const { data: activeLinks, error: linksError } = await supabase
+    .from("employee_sites")
+    .select("site_id,is_primary,is_active")
+    .eq("employee_id", employeeId)
+    .eq("is_active", true);
+
+  if (linksError) throw linksError;
+
+  const links = (activeLinks ?? []) as Pick<EmployeeSiteRow, "site_id" | "is_primary" | "is_active">[];
+  const preferred =
+    preferredSiteId && links.some((link) => link.site_id === preferredSiteId)
+      ? preferredSiteId
+      : null;
+  const currentPrimary = links.find((link) => link.is_primary)?.site_id ?? null;
+  const nextPrimarySiteId = preferred ?? currentPrimary ?? links[0]?.site_id ?? null;
+
+  if (nextPrimarySiteId) {
+    const { error: clearError } = await supabase
+      .from("employee_sites")
+      .update({ is_primary: false })
+      .eq("employee_id", employeeId)
+      .neq("site_id", nextPrimarySiteId);
+
+    if (clearError) throw clearError;
+
+    const { error: primaryError } = await supabase
+      .from("employee_sites")
+      .update({ is_primary: true, is_active: true })
+      .eq("employee_id", employeeId)
+      .eq("site_id", nextPrimarySiteId);
+
+    if (primaryError) throw primaryError;
+  }
+
+  const { error: employeeError } = await supabase
+    .from("employees")
+    .update({
+      site_id: nextPrimarySiteId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", employeeId);
+
+  if (employeeError) throw employeeError;
+
+  const { error: settingsError } = await supabase.from("employee_settings").upsert(
+    {
+      employee_id: employeeId,
+      selected_site_id: nextPrimarySiteId,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "employee_id" },
+  );
+
+  if (settingsError) throw settingsError;
+}
+
 function safeDecode(value: string | null | undefined) {
   if (!value) return "";
   try {
@@ -438,6 +499,27 @@ async function updateEmployee(formData: FormData) {
     redirect(`/staff/${id}?error=${encodeURIComponent(error.message)}`);
   }
 
+  const { error: siteLinkError } = await supabase.from("employee_sites").upsert(
+    {
+      employee_id: id,
+      site_id: siteId,
+      is_primary: true,
+      is_active: true,
+    },
+    { onConflict: "employee_id,site_id" },
+  );
+
+  if (siteLinkError) {
+    redirect(`/staff/${id}?error=${encodeURIComponent(siteLinkError.message)}`);
+  }
+
+  try {
+    await syncEmployeePrimarySite(supabase, id, siteId);
+  } catch (syncError) {
+    const message = syncError instanceof Error ? syncError.message : "No se pudo sincronizar la sede principal.";
+    redirect(`/staff/${id}?error=${encodeURIComponent(message)}`);
+  }
+
   revalidatePath(`/staff/${id}`);
   revalidatePath("/staff");
   redirect("/staff?ok=" + encodeURIComponent("Trabajador actualizado."));
@@ -488,15 +570,25 @@ async function addEmployeeSite(formData: FormData) {
       .eq("employee_id", employeeId);
   }
 
-  const { error } = await supabase.from("employee_sites").insert({
-    employee_id: employeeId,
-    site_id: siteId,
-    is_primary: makePrimary,
-    is_active: true,
-  });
+  const { error } = await supabase.from("employee_sites").upsert(
+    {
+      employee_id: employeeId,
+      site_id: siteId,
+      is_primary: makePrimary,
+      is_active: true,
+    },
+    { onConflict: "employee_id,site_id" },
+  );
 
   if (error) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  try {
+    await syncEmployeePrimarySite(supabase, employeeId, makePrimary ? siteId : null);
+  } catch (syncError) {
+    const message = syncError instanceof Error ? syncError.message : "No se pudo sincronizar la sede principal.";
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(message)}`);
   }
 
   revalidatePath(`/staff/${employeeId}`);
@@ -534,6 +626,13 @@ async function setPrimarySite(formData: FormData) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
   }
 
+  try {
+    await syncEmployeePrimarySite(supabase, employeeId, siteId);
+  } catch (syncError) {
+    const message = syncError instanceof Error ? syncError.message : "No se pudo sincronizar la sede principal.";
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(message)}`);
+  }
+
   revalidatePath(`/staff/${employeeId}`);
   redirect(`/staff/${employeeId}?ok=primary_set`);
 }
@@ -561,6 +660,13 @@ async function toggleEmployeeSite(formData: FormData) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
   }
 
+  try {
+    await syncEmployeePrimarySite(supabase, employeeId, nextActive ? siteId : null);
+  } catch (syncError) {
+    const message = syncError instanceof Error ? syncError.message : "No se pudo sincronizar la sede principal.";
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(message)}`);
+  }
+
   revalidatePath(`/staff/${employeeId}`);
   redirect(`/staff/${employeeId}?ok=site_updated`);
 }
@@ -585,6 +691,13 @@ async function removeEmployeeSite(formData: FormData) {
 
   if (error) {
     redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  try {
+    await syncEmployeePrimarySite(supabase, employeeId, null);
+  } catch (syncError) {
+    const message = syncError instanceof Error ? syncError.message : "No se pudo sincronizar la sede principal.";
+    redirect(`/staff/${employeeId}?error=${encodeURIComponent(message)}`);
   }
 
   revalidatePath(`/staff/${employeeId}`);
