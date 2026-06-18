@@ -71,7 +71,7 @@ export default async function StaffPage({
   const supabase = createAdminClient();
   const resolvedSearchParams = (await searchParams) ?? {};
   const siteFilter = typeof resolvedSearchParams.site === "string" ? resolvedSearchParams.site : "all";
-  const statusFilter = typeof resolvedSearchParams.status === "string" ? resolvedSearchParams.status : "all";
+  const statusFilter = typeof resolvedSearchParams.status === "string" ? resolvedSearchParams.status : "active";
   const roleFilter = typeof resolvedSearchParams.role === "string" ? resolvedSearchParams.role : "all";
 
   const [{ data, error: employeesError }, { data: sitesData }] = await Promise.all([
@@ -105,6 +105,8 @@ export default async function StaffPage({
   const sites = ((sitesData ?? []) as SiteLite[]).sort((a, b) => (a.name ?? a.code ?? "").localeCompare(b.name ?? b.code ?? "", "es"));
   const roleOptions = Array.from(new Set(employees.map((employee) => employee.role).filter((role): role is string => Boolean(role)))).sort((a, b) => a.localeCompare(b, "es"));
   const employeeIds = employees.map((employee) => employee.id);
+  const activeEmployeeCount = employees.filter((employee) => employee.is_active === true).length;
+  const inactiveEmployeeCount = employees.length - activeEmployeeCount;
 
   let linksByEmployee = new Map<string, EmployeeSiteLink[]>();
   let attendanceByEmployee = new Map<string, AttendanceStatusRow>();
@@ -185,6 +187,7 @@ export default async function StaffPage({
       />
 
       <form method="get" className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--ui-border)] bg-white/80 px-4 py-3">
+        <input type="hidden" name="status" value={statusFilter} />
         <label className="min-w-[180px] flex-1 text-sm text-[var(--ui-muted)]">
           <span className="mb-1 block text-xs font-medium uppercase tracking-[0.16em] text-[var(--ui-muted)]/80">Sede</span>
           <select name="site" defaultValue={siteFilter} className="ui-input">
@@ -194,14 +197,6 @@ export default async function StaffPage({
                 {site.name ?? site.code ?? site.id}
               </option>
             ))}
-          </select>
-        </label>
-        <label className="min-w-[160px] flex-1 text-sm text-[var(--ui-muted)]">
-          <span className="mb-1 block text-xs font-medium uppercase tracking-[0.16em] text-[var(--ui-muted)]/80">Estado</span>
-          <select name="status" defaultValue={statusFilter} className="ui-input">
-            <option value="all">Todos</option>
-            <option value="active">Activos</option>
-            <option value="inactive">Inactivos</option>
           </select>
         </label>
         <label className="min-w-[180px] flex-1 text-sm text-[var(--ui-muted)]">
@@ -224,6 +219,27 @@ export default async function StaffPage({
           </Link>
         </div>
       </form>
+
+      <div className="flex flex-wrap gap-2">
+        {[
+          { value: "active", label: "Activos", count: activeEmployeeCount },
+          { value: "inactive", label: "Inactivos", count: inactiveEmployeeCount },
+          { value: "all", label: "Todos", count: employees.length },
+        ].map((option) => {
+          const active = statusFilter === option.value;
+          const href = `/staff?site=${encodeURIComponent(siteFilter)}&role=${encodeURIComponent(roleFilter)}&status=${option.value}`;
+          return (
+            <Link
+              key={option.value}
+              href={href}
+              className={`ui-chip px-4 py-2 text-sm ${active ? "ui-chip--brand" : ""}`}
+            >
+              {option.label}
+              <span className="ml-2 text-xs opacity-70">{option.count}</span>
+            </Link>
+          );
+        })}
+      </div>
 
       <div className="ui-panel ui-panel--accent-brand">
         {filteredEmployees.length === 0 ? (
