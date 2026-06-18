@@ -142,7 +142,7 @@ export function AttendanceReportPanel({
       const payload = (await response.json()) as ReportSummaryResponse;
       setSummary(payload);
     } catch (fetchError) {
-      console.error("[VISO] attendance report summary error:", fetchError);
+      console.error("[VISO] error al cargar resumen del reporte de asistencia:", fetchError);
       setSummary(null);
       setError("No se pudo cargar el resumen de asistencia.");
     } finally {
@@ -313,7 +313,7 @@ export function AttendanceReportPanel({
                     <div>
                       <div className="font-medium">{employee.employeeName}</div>
                       <div className="text-sm text-[var(--ui-muted)]">
-                        Tardanzas: {employee.lateCount} · No show: {employee.noShowCount} · Abiertos: {employee.openCount}
+                        Tardanzas: {employee.lateCount} · Inasistencias: {employee.noShowCount} · Abiertos: {employee.openCount}
                       </div>
                     </div>
                     <span className="ui-chip">{employee.incidentCount}</span>
@@ -336,7 +336,7 @@ export function AttendanceReportPanel({
                     <div>
                       <div className="font-medium">{site.siteName}</div>
                       <div className="text-sm text-[var(--ui-muted)]">
-                        Tardanzas: {site.lateCount} · No show: {site.noShowCount} · Abiertos: {site.openCount}
+                        Tardanzas: {site.lateCount} · Inasistencias: {site.noShowCount} · Abiertos: {site.openCount}
                       </div>
                     </div>
                     <span className="ui-chip">{site.incidentCount}</span>

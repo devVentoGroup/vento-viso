@@ -314,6 +314,21 @@ function isRestShiftStatus(status: string | null | undefined): boolean {
   return REST_SHIFT_STATUSES.has(normalizeShiftStatus(status))
 }
 
+function isRestShiftLike(shift: Pick<ScheduledShiftRow, "status" | "notes">): boolean {
+  if (isRestShiftStatus(shift.status)) return true
+
+  const notes = normalizeShiftStatus(shift.notes)
+  if (!notes) return false
+
+  return (
+    notes.includes("descanso") ||
+    notes.includes("dia_descanso") ||
+    notes.includes("libre") ||
+    notes.includes("rest_day") ||
+    notes.includes("day_off")
+  )
+}
+
 function isAttendanceIncident(row: ConsolidatedShiftRecord): boolean {
   if (row.isRestDay) return false
   return row.isLate || row.isNoShow || row.isOpen || row.isAutoClose || row.hasDepartureEvent
@@ -585,11 +600,11 @@ function buildAttendanceSessions(
         overlapRanges.length === 0
           ? "-"
           : overlapRanges
-              .map(
-                (item) =>
-                  `${formatTime(new Date(item.startMs).toISOString(), timeZone)}-${formatTime(new Date(item.endMs).toISOString(), timeZone)}`,
-              )
-              .join(" | ")
+            .map(
+              (item) =>
+                `${formatTime(new Date(item.startMs).toISOString(), timeZone)}-${formatTime(new Date(item.endMs).toISOString(), timeZone)}`,
+            )
+            .join(" | ")
 
       const departure =
         departureEvents.find((row) => {
@@ -721,7 +736,7 @@ function buildConsolidatedShiftRecords(
     .map((shift) => {
       const employeeInfo = unwrapRelation(shift.employees)
       const siteInfo = unwrapRelation(shift.sites)
-      const isRestDay = isRestShiftStatus(shift.status)
+      const isRestDay = isRestShiftLike(shift)
       const scheduledStartAt = zonedLocalToUtc(shift.shift_date, shift.start_time, timeZone)
       const scheduledEndAt = zonedLocalToUtc(shift.shift_date, shift.end_time, timeZone)
       const scheduledStartMs = new Date(scheduledStartAt).getTime()
@@ -1046,14 +1061,14 @@ function buildIncidentRows(
     }
     if (row.isNoShow) {
       incidents.push({
-        category: "No show",
+        category: "Inasistencia",
         shiftDate: row.shiftDate,
         siteName: row.siteName,
         employeeName: row.employeeName,
         scheduledRange,
         actualRange,
         status: row.attendanceStatus,
-        detail: "No se registró check-in para el turno publicado.",
+        detail: "No se registró entrada para el turno programado.",
       })
     }
     if (row.isOpen) {
@@ -1141,8 +1156,8 @@ function buildWorkbook(
   scopeLabel: string,
 ) {
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = "ANIMA"
-  workbook.lastModifiedBy = "ANIMA"
+  workbook.creator = "VISO"
+  workbook.lastModifiedBy = "VISO"
   workbook.created = new Date()
   workbook.modified = new Date()
 
@@ -1186,7 +1201,7 @@ function buildWorkbook(
     ["Turnos asistidos", summary.attendedShifts],
     ["Descansos", summary.restDayCount],
     ["Tardanzas", summary.lateCount],
-    ["No show", summary.noShowCount],
+    ["Inasistencias", summary.noShowCount],
     ["Turnos abiertos", summary.openCount],
     ["Cierres faltantes", summary.missingCloseCount],
     ["Cierres automáticos", summary.autoCloseCount],
@@ -1225,7 +1240,7 @@ function buildWorkbook(
     "Asistidos",
     "Descansos",
     "Tardanzas",
-    "No show",
+    "Inasistencias",
     "Abiertos",
     "Autocierres",
     "Salidas sede",
@@ -1283,7 +1298,7 @@ function buildWorkbook(
     "Asistidos",
     "Descansos",
     "Tardanzas",
-    "No show",
+    "Inasistencias",
     "Abiertos",
     "Autocierres",
     "Horas prog.",
