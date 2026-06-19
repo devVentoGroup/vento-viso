@@ -133,7 +133,7 @@ function UploadDocumentForm({
 
     const formData = new FormData(form);
     formData.set("employee_id", employeeId);
-    formData.set("file_name", file.name || sanitizeDocumentFileName(file.name));
+    formData.set("file_name", sanitizeDocumentFileName(file.name));
     formData.set("file_size_bytes", String(file.size));
     formData.set("file_mime", mime);
 
@@ -269,12 +269,16 @@ export function StaffDocumentsPanel({
   const editingDoc = editingDocId ? documents.find((d) => d.id === editingDocId) : null;
 
   useEffect(() => {
-    setShowUpload(false);
-    setEditingDocId(null);
+    const timeoutId = window.setTimeout(() => {
+      setShowUpload(false);
+      setEditingDocId(null);
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [documentsResetKey]);
 
   return (

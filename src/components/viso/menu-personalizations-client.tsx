@@ -28,6 +28,7 @@ type CatalogItemOptionRow = {
   name: string;
   description: string | null;
   price_delta_amount: number | string;
+  image_url: string | null;
   product_id: string | null;
   effect_type: string;
   is_default: boolean;
@@ -140,6 +141,21 @@ type VisualVariantRow = {
   sort_order: number | null;
 };
 
+type CatalogOptionVisualAssetRow = {
+  id: string;
+  site_id: string | null;
+  asset_key: string;
+  display_name: string;
+  image_url: string;
+  linked_product_id: string | null;
+  linked_ingredient_product_id: string | null;
+  option_code: string | null;
+  normalized_option_name: string | null;
+  scope: string;
+  is_active: boolean;
+  metadata: JsonRecord | null;
+};
+
 type SharedTemplateDraft = {
   name: string;
   description: string;
@@ -162,6 +178,7 @@ type PersonalizationSnapshot = {
   consumptionProducts: OperationalProductRow[];
   inventoryUnits: InventoryUnitRow[];
   commercialCatalogItems: CommercialCatalogItemOptionRow[];
+  visualAssets: CatalogOptionVisualAssetRow[];
 };
 
 type MutationResponse = {
@@ -222,6 +239,9 @@ const personalizationTypeCards: PersonalizationTypeCard[] = [
     maxSelect: "10",
   },
 ];
+
+const MENU_IMAGE_UPLOAD_ENDPOINT = "/api/viso/upload-commercial-menu-image";
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 function readGroupMetadata(value: JsonRecord | null | undefined) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -379,6 +399,34 @@ function getOptionIngredientProductId(option: CatalogItemOptionRow) {
   return typeof ingredientProductId === "string" && ingredientProductId.trim() ? ingredientProductId.trim() : null;
 }
 
+function normalizeOptionName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/^sin\s+/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function findVisualAssetForOption(option: CatalogItemOptionRow, assets: CatalogOptionVisualAssetRow[]) {
+  const ingredientProductId = getOptionIngredientProductId(option);
+  const normalizedName = normalizeOptionName(option.name);
+
+  return (
+    assets.find((asset) => asset.id === getMetadataText(option.metadata, "visual_asset_id")) ||
+    assets.find((asset) => option.product_id && asset.linked_product_id === option.product_id) ||
+    assets.find((asset) => ingredientProductId && asset.linked_ingredient_product_id === ingredientProductId) ||
+    assets.find((asset) => asset.option_code && asset.option_code === option.code) ||
+    assets.find((asset) => asset.normalized_option_name && asset.normalized_option_name === normalizedName) ||
+    null
+  );
+}
+
+function getOptionImageUrl(option: CatalogItemOptionRow, assets: CatalogOptionVisualAssetRow[]) {
+  return option.image_url || findVisualAssetForOption(option, assets)?.image_url || null;
+}
+
 function getOptionDisplayName(option: CatalogItemOptionRow, linkedCatalogItemsById: Map<string, CommercialCatalogItemOptionRow>) {
   const linkedItemId = getLinkedCatalogItemId(option);
   const linkedItem = linkedItemId ? linkedCatalogItemsById.get(linkedItemId) : null;
@@ -416,6 +464,7 @@ export function MenuPersonalizationsClient({
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [openDetailsKey, setOpenDetailsKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [uploadingOptionId, setUploadingOptionId] = useState<string | null>(null);
 
   const currentDisplayGroup = getCurrentDisplayGroup(snapshot.currentItem);
   const visualVariants = snapshot.visualVariants ?? [];
@@ -658,6 +707,50 @@ export function MenuPersonalizationsClient({
       },
       "Opción actualizada.",
       { pendingKey: detailsKey, closeDetailsKey: detailsKey },
+    );
+  }
+
+  async function handleOptionImageUpload(file: File | null, option: CatalogItemOptionRow, group: CatalogItemOptionGroupRow) {
+    if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setNotice({ type: "error", message: "La imagen no puede superar 5 MB." });
+      return;
+    }
+
+    setUploadingOptionId(option.id);
+    setNotice(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("kind", "option-asset");
+      formData.append("ownerId", option.product_id || getOptionIngredientProductId(option) || option.id);
+
+      const response = await fetch(MENU_IMAGE_UPLOAD_ENDPOINT, { method: "POST", body: formData });
+      const data = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
+      if (!response.ok || !data?.url) {
+        throw new Error(data?.error || "No se pudo subir la imagen.");
+      }
+
+      await mutate(
+        "update_option_visual_asset",
+        { groupId: group.id, optionId: option.id, imageUrl: data.url },
+        "Imagen comercial guardada.",
+        { pendingKey: `visual-option:${option.id}` },
+      );
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "No se pudo subir la imagen." });
+    } finally {
+      setUploadingOptionId((current) => (current === option.id ? null : current));
+    }
+  }
+
+  function handleRemoveOptionImage(option: CatalogItemOptionRow, group: CatalogItemOptionGroupRow) {
+    void mutate(
+      "update_option_visual_asset",
+      { groupId: group.id, optionId: option.id, imageUrl: null },
+      "Imagen comercial quitada.",
+      { pendingKey: `visual-option:${option.id}` },
     );
   }
 
@@ -969,12 +1062,23 @@ export function MenuPersonalizationsClient({
                           const optionMeta = getOptionDisplayCategory(option, commercialCatalogItemsById);
                           const optionPrice = Number(option.price_delta_amount ?? 0);
                           const hasOperationalRules = consumptionRules.length > 0 || recipeEffects.length > 0;
+                          const optionImageUrl = getOptionImageUrl(option, snapshot.visualAssets);
                           const optionEditKey = `edit-option:${option.id}`;
                           const optionInventoryKey = `inventory-option:${option.id}`;
 
                           return (
                             <div key={option.id} className="px-5 py-4">
-                              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_150px_auto] lg:items-center">
+                              <div className="grid gap-3 lg:grid-cols-[56px_minmax(0,1fr)_150px_auto] lg:items-center">
+                                <div className="overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
+                                  {optionImageUrl ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={optionImageUrl} alt={optionName} className="aspect-square w-full object-cover" />
+                                  ) : (
+                                    <div className="flex aspect-square w-full items-center justify-center text-[10px] font-black text-[var(--ui-muted)]">
+                                      IMG
+                                    </div>
+                                  )}
+                                </div>
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <div className="truncate text-base font-black text-[var(--ui-text)]">{optionName}</div>
@@ -1019,6 +1123,43 @@ export function MenuPersonalizationsClient({
                                         {pendingKey === optionEditKey ? "Guardando..." : "Guardar opción"}
                                       </button>
                                     </form>
+                                  </details>
+
+                                  <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                    <summary className="cursor-pointer list-none text-sm font-black text-[var(--ui-text)]">Imagen</summary>
+                                    <div className="mt-4 w-full min-w-[280px] space-y-3">
+                                      <div className="overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-white">
+                                        {optionImageUrl ? (
+                                          // eslint-disable-next-line @next/next/no-img-element
+                                          <img src={optionImageUrl} alt={optionName} className="aspect-video w-full object-cover" />
+                                        ) : (
+                                          <div className="flex aspect-video w-full items-center justify-center bg-white text-sm font-black text-[var(--ui-muted)]">
+                                            Sin imagen comercial
+                                          </div>
+                                        )}
+                                      </div>
+                                      <label className="block space-y-2">
+                                        <span className="ui-label">{optionImageUrl ? "Reemplazar imagen" : "Subir imagen"}</span>
+                                        <input
+                                          type="file"
+                                          accept="image/jpeg,image/png,image/webp"
+                                          className="ui-input"
+                                          disabled={uploadingOptionId === option.id || pendingKey === `visual-option:${option.id}`}
+                                          onChange={(event) => void handleOptionImageUpload(event.target.files?.[0] ?? null, option, group)}
+                                        />
+                                      </label>
+                                      <p className="ui-caption">Se optimiza a WebP y se reutiliza para opciones con el mismo insumo o codigo.</p>
+                                      {optionImageUrl ? (
+                                        <button
+                                          type="button"
+                                          className="ui-btn ui-btn--ghost w-full"
+                                          disabled={pendingKey === `visual-option:${option.id}`}
+                                          onClick={() => handleRemoveOptionImage(option, group)}
+                                        >
+                                          Quitar imagen
+                                        </button>
+                                      ) : null}
+                                    </div>
                                   </details>
 
                                   <details

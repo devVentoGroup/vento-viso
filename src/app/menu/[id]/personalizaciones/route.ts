@@ -52,6 +52,21 @@ type VisualVariantRow = {
   sort_order: number | null;
 };
 
+type CatalogOptionVisualAssetRow = {
+  id: string;
+  site_id: string | null;
+  asset_key: string;
+  display_name: string;
+  image_url: string;
+  linked_product_id: string | null;
+  linked_ingredient_product_id: string | null;
+  option_code: string | null;
+  normalized_option_name: string | null;
+  scope: string;
+  is_active: boolean;
+  metadata: JsonRecord | null;
+};
+
 function readString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -108,6 +123,25 @@ function slugify(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function normalizeOptionName(value: string) {
+  return slugify(value).replace(/^sin-/, "");
+}
+
+function getOptionAssetScope(kind: SimpleGroupKind) {
+  switch (kind) {
+    case "extras":
+      return "extra";
+    case "replacements":
+      return "replacement";
+    case "removals":
+      return "removal";
+    case "recommendations":
+      return "recommendation";
+    default:
+      return "generic";
+  }
 }
 
 function asCatalogCode(value: unknown, fallback: string) {
@@ -267,7 +301,7 @@ async function fetchSnapshot(supabase: ReturnType<typeof createAdminClient>, ite
     ? await supabase
       .schema("pass")
       .from("catalog_item_options")
-      .select("id,option_group_id,code,name,description,price_delta_amount,product_id,effect_type,is_default,is_active,sort_order,metadata")
+      .select("id,option_group_id,code,name,description,price_delta_amount,product_id,effect_type,is_default,is_active,sort_order,metadata,image_url")
       .in("option_group_id", optionGroupIds)
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true })
@@ -283,6 +317,7 @@ async function fetchSnapshot(supabase: ReturnType<typeof createAdminClient>, ite
     { data: consumptionProductsRaw },
     { data: inventoryUnitsRaw },
     { data: commercialCatalogItemsRaw },
+    { data: visualAssetsRaw },
   ] = await Promise.all([
     optionIds.length > 0
       ? supabase
@@ -328,6 +363,12 @@ async function fetchSnapshot(supabase: ReturnType<typeof createAdminClient>, ite
       .eq("is_active", true)
       .neq("id", itemId)
       .order("name", { ascending: true }),
+    supabase
+      .schema("pass")
+      .from("catalog_option_visual_assets")
+      .select("id,site_id,asset_key,display_name,image_url,linked_product_id,linked_ingredient_product_id,option_code,normalized_option_name,scope,is_active,metadata")
+      .or(`site_id.is.null,site_id.eq.${currentItem.site_id}`)
+      .order("display_name", { ascending: true }),
   ]);
 
   const consumptionProducts = consumptionProductsRaw ?? [];
@@ -409,6 +450,7 @@ async function fetchSnapshot(supabase: ReturnType<typeof createAdminClient>, ite
     consumptionProducts,
     inventoryUnits: inventoryUnitsRaw ?? [],
     commercialCatalogItems: (commercialCatalogItemsRaw ?? []).filter((item) => item.is_active !== false),
+    visualAssets: ((visualAssetsRaw ?? []) as CatalogOptionVisualAssetRow[]).filter((asset) => asset.is_active !== false),
   };
 }
 
@@ -771,6 +813,117 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
       if (error) return jsonError(error.message);
       return jsonOk(supabase, itemId, "Opción actualizada.");
+    }
+
+    if (action === "update_option_visual_asset") {
+      const groupId = readString(payload.groupId);
+      const optionId = readString(payload.optionId);
+      const imageUrl = readOptionalText(payload.imageUrl);
+      if (!groupId || !optionId) return jsonError("Opción inválida.");
+
+      const { data: group, error: groupError } = await supabase
+        .schema("pass")
+        .from("catalog_item_option_groups")
+        .select("id,catalog_item_id,code,name,metadata")
+        .eq("id", groupId)
+        .eq("catalog_item_id", itemId)
+        .maybeSingle();
+      if (groupError || !group) return jsonError(groupError?.message || "El grupo de opciones no pertenece a este item.");
+
+      const { data: option, error: optionError } = await supabase
+        .schema("pass")
+        .from("catalog_item_options")
+        .select("id,code,name,product_id,metadata")
+        .eq("id", optionId)
+        .eq("option_group_id", groupId)
+        .maybeSingle();
+      if (optionError || !option) return jsonError(optionError?.message || "Opción no encontrada.");
+
+      const item = await getCatalogItemSnapshot(supabase, itemId);
+      const groupKind = getSimpleGroupKind(group);
+      const metadata = readGroupMetadata(option.metadata);
+      const ingredientProductId = readString(metadata.ingredient_product_id);
+      const normalizedName = normalizeOptionName(option.name);
+      const assetKey = [
+        item.site_id,
+        option.product_id || ingredientProductId || option.code || normalizedName,
+      ].filter(Boolean).join(":");
+
+      if (!imageUrl) {
+        const { error: optionUpdateError } = await supabase
+          .schema("pass")
+          .from("catalog_item_options")
+          .update({ image_url: null })
+          .eq("id", optionId)
+          .eq("option_group_id", groupId);
+        if (optionUpdateError) return jsonError(optionUpdateError.message);
+
+        const { error: assetError } = await supabase
+          .schema("pass")
+          .from("catalog_option_visual_assets")
+          .update({ is_active: false })
+          .eq("site_id", item.site_id)
+          .eq("asset_key", assetKey);
+        if (assetError) return jsonError(assetError.message);
+
+        return jsonOk(supabase, itemId, "Imagen comercial quitada.");
+      }
+
+      const { data: existingAsset, error: existingAssetError } = await supabase
+        .schema("pass")
+        .from("catalog_option_visual_assets")
+        .select("id")
+        .eq("site_id", item.site_id)
+        .eq("asset_key", assetKey)
+        .maybeSingle();
+      if (existingAssetError) return jsonError(existingAssetError.message);
+
+      const assetPayload = {
+        site_id: item.site_id,
+        asset_key: assetKey,
+        display_name: option.name,
+        image_url: imageUrl,
+        linked_product_id: option.product_id || null,
+        linked_ingredient_product_id: ingredientProductId || null,
+        option_code: option.code,
+        normalized_option_name: normalizedName || null,
+        scope: getOptionAssetScope(groupKind),
+        is_active: true,
+        metadata: { configured_from: "viso_menu_personalizations", source_option_id: option.id },
+      };
+
+      const { data: asset, error: assetError } = existingAsset?.id
+        ? await supabase
+          .schema("pass")
+          .from("catalog_option_visual_assets")
+          .update(assetPayload)
+          .eq("id", existingAsset.id)
+          .select("id")
+          .single()
+        : await supabase
+          .schema("pass")
+          .from("catalog_option_visual_assets")
+          .insert(assetPayload)
+          .select("id")
+          .single();
+      if (assetError || !asset?.id) return jsonError(assetError?.message || "No se pudo guardar la imagen comercial.");
+
+      const { error: optionUpdateError } = await supabase
+        .schema("pass")
+        .from("catalog_item_options")
+        .update({
+          image_url: imageUrl,
+          metadata: {
+            ...metadata,
+            visual_asset_id: asset.id,
+            visual_asset_image_url: imageUrl,
+          },
+        })
+        .eq("id", optionId)
+        .eq("option_group_id", groupId);
+      if (optionUpdateError) return jsonError(optionUpdateError.message);
+
+      return jsonOk(supabase, itemId, "Imagen comercial guardada.");
     }
 
     if (action === "disable_option") {

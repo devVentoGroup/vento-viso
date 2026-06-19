@@ -118,7 +118,7 @@ type MenuItemFormProps = {
   secondaryActions?: ReactNode;
 };
 
-const PRODUCT_UPLOAD_ENDPOINT = "/api/viso/upload-product-image";
+const PRODUCT_UPLOAD_ENDPOINT = "/api/viso/upload-commercial-menu-image";
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 function getPreviewTitle(name: string) {
@@ -626,6 +626,8 @@ export function MenuItemForm({
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("kind", "catalog-item");
+      formData.append("ownerId", initial.id || initial.code || name || "pending");
       const response = await fetch(PRODUCT_UPLOAD_ENDPOINT, {
         method: "POST",
         body: formData,
@@ -1361,31 +1363,39 @@ export function MenuItemForm({
         <div>
           <div className="ui-h3">Imagen comercial</div>
           <p className="ui-caption">
-            La metadata técnica del ítem se genera automáticamente desde la sede, colección, categoría y producto base.
+            Foto visible en Pass. Se guarda como imagen comercial separada del producto operacional.
           </p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Imagen comercial URL</span>
-            <input
-              name="image_url"
-              className="ui-input"
-              value={imageUrl}
-              onChange={(event) => setImageUrl(event.target.value)}
-              placeholder="https://..."
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="ui-label">Subir imagen comercial</span>
-            <input
-              type="file"
-              accept="image/*"
-              className="ui-input"
-              onChange={(event) => handleUpload(event.target.files?.[0] ?? null)}
-            />
-          </label>
-          <div className="flex items-center text-sm">
-            {uploadStatus === "uploading" ? "Subiendo imagen..." : uploadMessage}
+        <input type="hidden" name="image_url" value={imageUrl} />
+        <div className="grid gap-4 sm:grid-cols-[220px_minmax(0,1fr)]">
+          <div className="overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-white">
+            {imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={imageUrl} alt={getPreviewTitle(name)} className="aspect-square w-full object-cover" />
+            ) : (
+              <div className="flex aspect-square w-full items-center justify-center bg-[var(--ui-surface-2)] px-4 text-center text-sm font-black text-[var(--ui-muted)]">
+                Sin imagen
+              </div>
+            )}
+          </div>
+          <div className="space-y-3">
+            <label className="block space-y-2">
+              <span className="ui-label">{imageUrl ? "Reemplazar imagen" : "Subir imagen comercial"}</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="ui-input"
+                onChange={(event) => handleUpload(event.target.files?.[0] ?? null)}
+              />
+            </label>
+            <div className="text-sm font-semibold text-[var(--ui-muted)]">
+              {uploadStatus === "uploading" ? "Subiendo imagen..." : uploadMessage || "JPG, PNG o WebP. Máximo 5 MB."}
+            </div>
+            {imageUrl ? (
+              <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setImageUrl("")}>
+                Quitar imagen
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

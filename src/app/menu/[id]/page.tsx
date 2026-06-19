@@ -108,6 +108,7 @@ type CatalogItemOptionRow = {
   name: string;
   description: string | null;
   price_delta_amount: number | string;
+  image_url: string | null;
   product_id: string | null;
   effect_type: string;
   is_default: boolean;
@@ -123,6 +124,21 @@ type CommercialCatalogItemOptionRow = {
   image_url: string | null;
   category_label: string | null;
   is_active: boolean | null;
+};
+
+type CatalogOptionVisualAssetRow = {
+  id: string;
+  site_id: string | null;
+  asset_key: string;
+  display_name: string;
+  image_url: string;
+  linked_product_id: string | null;
+  linked_ingredient_product_id: string | null;
+  option_code: string | null;
+  normalized_option_name: string | null;
+  scope: string;
+  is_active: boolean;
+  metadata: Record<string, unknown> | null;
 };
 
 type CatalogItemOptionConsumptionRuleRow = {
@@ -2259,6 +2275,13 @@ export default async function MenuItemDetailPage({
     .neq("id", row.id)
     .order("name", { ascending: true });
 
+  const { data: visualAssetsRaw } = await supabase
+    .schema("pass")
+    .from("catalog_option_visual_assets")
+    .select("id,site_id,asset_key,display_name,image_url,linked_product_id,linked_ingredient_product_id,option_code,normalized_option_name,scope,is_active,metadata")
+    .or(`site_id.is.null,site_id.eq.${row.site_id}`)
+    .order("display_name", { ascending: true });
+
   const { data: visualVariantsRaw } = currentDisplayGroup
     ? await supabase
       .schema("pass")
@@ -2313,7 +2336,7 @@ export default async function MenuItemDetailPage({
     ? await supabase
       .schema("pass")
       .from("catalog_item_options")
-      .select("id,option_group_id,code,name,description,price_delta_amount,product_id,effect_type,is_default,is_active,sort_order,metadata")
+      .select("id,option_group_id,code,name,description,price_delta_amount,image_url,product_id,effect_type,is_default,is_active,sort_order,metadata")
       .in("option_group_id", optionGroupIds)
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true })
@@ -2407,6 +2430,9 @@ export default async function MenuItemDetailPage({
   const commercialCatalogItems = ((commercialCatalogItemsRaw ?? []) as CommercialCatalogItemOptionRow[])
     .filter((item) => item.is_active !== false)
     .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "es-CO"));
+  const visualAssets = ((visualAssetsRaw ?? []) as CatalogOptionVisualAssetRow[])
+    .filter((asset) => asset.is_active !== false)
+    .sort((a, b) => String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""), "es-CO"));
   const commercialCatalogItemsById = new Map(commercialCatalogItems.map((item) => [item.id, item]));
 
   const productsMap = new Map<
@@ -2805,6 +2831,7 @@ export default async function MenuItemDetailPage({
           consumptionProducts,
           inventoryUnits,
           commercialCatalogItems,
+          visualAssets,
         }}
       />
 
