@@ -96,6 +96,7 @@ type VisualVariantRow = {
   price_amount: number | string | null;
   is_active: boolean;
   metadata: Record<string, unknown> | null;
+  sort_order: number | null;
 };
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -2262,7 +2263,7 @@ export default async function MenuItemDetailPage({
     ? await supabase
       .schema("pass")
       .from("catalog_items")
-      .select("id,code,name,price_amount,is_active,metadata")
+      .select("id,code,name,price_amount,is_active,metadata,sort_order")
       .eq("site_id", row.site_id)
       .eq("is_active", true)
       .eq("metadata->>display_group", currentDisplayGroup)
@@ -2493,6 +2494,7 @@ export default async function MenuItemDetailPage({
       price_amount: row.price_amount,
       is_active: row.is_active,
       metadata: row.metadata,
+      sort_order: row.sort_order,
     }]).sort((a, b) => {
       const variantA = typeof a.metadata?.variant_label === "string" ? a.metadata.variant_label : a.name;
       const variantB = typeof b.metadata?.variant_label === "string" ? b.metadata.variant_label : b.name;
@@ -2500,26 +2502,19 @@ export default async function MenuItemDetailPage({
     });
   const sharedTemplateGroups = (sharedTemplateGroupsRaw ?? []) as SharedCustomizationTemplateGroupRow[];
   const sharedTemplateAssignments = (sharedTemplateAssignmentsRaw ?? []) as SharedCustomizationTemplateAssignmentRow[];
-  const sharedTemplateGroupsByTemplate = new Map<string, SharedCustomizationTemplateGroupRow[]>();
-  const sharedTemplateAssignmentsByTemplate = new Map<string, SharedCustomizationTemplateAssignmentRow[]>();
-
-  for (const templateGroup of sharedTemplateGroups) {
-    const current = sharedTemplateGroupsByTemplate.get(templateGroup.template_id) ?? [];
-    current.push(templateGroup);
-    sharedTemplateGroupsByTemplate.set(templateGroup.template_id, current);
-  }
-
-  for (const assignment of sharedTemplateAssignments) {
-    const current = sharedTemplateAssignmentsByTemplate.get(assignment.template_id) ?? [];
-    current.push(assignment);
-    sharedTemplateAssignmentsByTemplate.set(assignment.template_id, current);
-  }
-
+  const relevantSharedTemplateIds = new Set([
+    ...sharedTemplateGroups
+      .filter((entry) => optionGroupIds.includes(entry.option_group_id))
+      .map((entry) => entry.template_id),
+    ...sharedTemplateAssignments
+      .filter((entry) => visualVariants.some((variant) => variant.id === entry.catalog_item_id))
+      .map((entry) => entry.template_id),
+  ]);
+  const visibleSharedTemplates = sharedTemplates.filter((template) => relevantSharedTemplateIds.has(template.id));
+  const visibleSharedTemplateGroups = sharedTemplateGroups.filter((entry) => relevantSharedTemplateIds.has(entry.template_id));
+  const visibleSharedTemplateAssignments = sharedTemplateAssignments.filter((entry) => relevantSharedTemplateIds.has(entry.template_id));
   const hasVisibleRemovalsGroup = visibleOptionGroups.some((group) => getSimpleGroupKind(group) === "removals");
   const visibleOptionGroupIds = new Set(visibleOptionGroups.map((group) => group.id));
-  const activeOptionCount = ((optionOptionsRaw ?? []) as CatalogItemOptionRow[]).filter(
-    (option) => option.is_active && visibleOptionGroupIds.has(option.option_group_id),
-  ).length;
   const passModalEnabled = Boolean(presentation?.opens_detail_modal) || visibleOptionGroups.length > 0;
   const personalizationTypeCards: {
     kind: SimpleGroupKind;
@@ -2786,179 +2781,22 @@ export default async function MenuItemDetailPage({
           </form>
         </div>
       </div>
-
-      <div id="personalizacion-compartida" className="ui-panel space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="ui-h3">Personalización compartida</div>
-            <p className="ui-caption">
-              Usa una plantilla para que varias variantes compartan los mismos grupos, como Presentación y Toppings, sin duplicar opciones ni reglas de inventario.
-            </p>
-          </div>
-          {currentDisplayGroup ? (
-            <span className="ui-chip ui-chip--brand">{currentDisplayGroup}</span>
-          ) : (
-            <span className="ui-chip">Sin agrupación visual</span>
-          )}
-        </div>
-
-        {!currentDisplayGroup ? (
-          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 text-sm font-semibold text-[var(--ui-muted)]">
-            Define una agrupación visual en el producto para administrar variantes compartidas desde aquí.
-          </div>
-        ) : null}
-
-        {visibleOptionGroups.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 text-sm font-semibold text-[var(--ui-muted)]">
-            Este producto todavía no tiene grupos propios para convertir en plantilla compartida.
-          </div>
-        ) : null}
-
-        {currentDisplayGroup && visibleOptionGroups.length > 0 ? (
-          <form action={createSharedCustomizationTemplate} className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-            <input type="hidden" name="catalog_item_id" value={row.id} />
-            <div className="grid gap-4 lg:grid-cols-3">
-              <label className="space-y-2">
-                <span className="ui-label">Nueva plantilla</span>
-                <input name="name" className="ui-input" defaultValue={`${currentDisplayGroup} base`} required />
-              </label>
-              <label className="space-y-2">
-                <span className="ui-label">Código</span>
-                <input name="code" className="ui-input" placeholder="helado-base" />
-              </label>
-              <label className="space-y-2">
-                <span className="ui-label">Descripción</span>
-                <input name="description" className="ui-input" placeholder="Presentación y toppings compartidos" />
-              </label>
-            </div>
-
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-                <div className="ui-label">Grupos que comparte</div>
-                <div className="mt-3 space-y-2">
-                  {visibleOptionGroups.map((group) => (
-                    <label key={group.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                      <input type="checkbox" name="option_group_id" value={group.id} defaultChecked />
-                      <span>
-                        {getSimpleGroupDisplayName(group)}
-                        <span className="ui-caption block">{getSimpleGroupLabel(getSimpleGroupKind(group))}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-                <div className="ui-label">Variantes que la usan</div>
-                <div className="mt-3 space-y-2">
-                  {visualVariants.map((variant) => {
-                    const variantLabel = typeof variant.metadata?.variant_label === "string" && variant.metadata.variant_label.trim()
-                      ? variant.metadata.variant_label.trim()
-                      : variant.name;
-                    return (
-                      <label key={variant.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                        <input type="checkbox" name="variant_item_id" value={variant.id} defaultChecked />
-                        <span>
-                          {variantLabel}
-                          <span className="ui-caption block">{variant.id === row.id ? "Producto actual" : variant.name}</span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 flex justify-end">
-              <button type="submit" className="ui-btn ui-btn--brand">Crear plantilla compartida</button>
-            </div>
-          </form>
-        ) : null}
-
-        {sharedTemplates.length > 0 ? (
-          <div className="space-y-4">
-            {sharedTemplates.map((template) => {
-              const templateGroups = sharedTemplateGroupsByTemplate.get(template.id) ?? [];
-              const templateAssignments = sharedTemplateAssignmentsByTemplate.get(template.id) ?? [];
-              const activeGroupIds = new Set(templateGroups.filter((entry) => entry.is_active).map((entry) => entry.option_group_id));
-              const activeVariantIds = new Set(templateAssignments.filter((entry) => entry.is_active).map((entry) => entry.catalog_item_id));
-
-              return (
-                <form key={template.id} action={updateSharedCustomizationTemplate} className="rounded-3xl border border-[var(--ui-border)] bg-white p-4">
-                  <input type="hidden" name="catalog_item_id" value={row.id} />
-                  <input type="hidden" name="template_id" value={template.id} />
-                  {visibleOptionGroups.map((group) => (
-                    <input key={`managed-group-${group.id}`} type="hidden" name="managed_option_group_id" value={group.id} />
-                  ))}
-                  {visualVariants.map((variant) => (
-                    <input key={`managed-variant-${variant.id}`} type="hidden" name="managed_variant_item_id" value={variant.id} />
-                  ))}
-
-                  <div className="grid gap-4 lg:grid-cols-3">
-                    <label className="space-y-2">
-                      <span className="ui-label">Plantilla</span>
-                      <input name="name" className="ui-input" defaultValue={template.name} required />
-                    </label>
-                    <label className="space-y-2 lg:col-span-2">
-                      <span className="ui-label">Descripción</span>
-                      <input name="description" className="ui-input" defaultValue={template.description ?? ""} />
-                    </label>
-                  </div>
-
-                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                      <div className="ui-label">Grupos compartidos</div>
-                      <div className="mt-3 space-y-2">
-                        {visibleOptionGroups.map((group) => (
-                          <label key={group.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                            <input type="checkbox" name="option_group_id" value={group.id} defaultChecked={activeGroupIds.has(group.id)} />
-                            <span>
-                              {getSimpleGroupDisplayName(group)}
-                              <span className="ui-caption block">{getSimpleGroupLabel(getSimpleGroupKind(group))}</span>
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                      <div className="ui-label">Aplicar a variantes</div>
-                      <div className="mt-3 space-y-2">
-                        {visualVariants.map((variant) => {
-                          const variantLabel = typeof variant.metadata?.variant_label === "string" && variant.metadata.variant_label.trim()
-                            ? variant.metadata.variant_label.trim()
-                            : variant.name;
-                          return (
-                            <label key={variant.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                              <input type="checkbox" name="variant_item_id" value={variant.id} defaultChecked={activeVariantIds.has(variant.id)} />
-                              <span>
-                                {variantLabel}
-                                <span className="ui-caption block">{variant.id === row.id ? "Producto actual" : variant.name}</span>
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                    <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                      <input type="checkbox" name="is_active" defaultChecked={template.is_active} />
-                      Plantilla activa
-                    </label>
-                    <button type="submit" className="ui-btn ui-btn--brand">Guardar plantilla</button>
-                  </div>
-                </form>
-              );
-            })}
-          </div>
-        ) : null}
       </div>
 
       <MenuPersonalizationsClient
         itemId={row.id}
         initialSnapshot={{
+          currentItem: {
+            id: row.id,
+            site_id: row.site_id,
+            product_id: row.product_id,
+            name: row.name,
+            metadata,
+          },
+          visualVariants,
+          sharedTemplates: visibleSharedTemplates,
+          sharedTemplateGroups: visibleSharedTemplateGroups,
+          sharedTemplateAssignments: visibleSharedTemplateAssignments,
           optionGroups,
           options: (optionOptionsRaw ?? []) as CatalogItemOptionRow[],
           consumptionRules: (consumptionRulesRaw ?? []) as CatalogItemOptionConsumptionRuleRow[],
@@ -2970,7 +2808,6 @@ export default async function MenuItemDetailPage({
         }}
       />
 
-    </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -98,7 +98,62 @@ type CommercialCatalogItemOptionRow = {
   is_active: boolean | null;
 };
 
+type CurrentCatalogItemSnapshot = {
+  id: string;
+  site_id: string;
+  product_id: string | null;
+  name: string;
+  metadata: JsonRecord | null;
+};
+
+type SharedCustomizationTemplateRow = {
+  id: string;
+  site_id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  metadata: JsonRecord | null;
+};
+
+type SharedCustomizationTemplateGroupRow = {
+  template_id: string;
+  option_group_id: string;
+  sort_order: number;
+  is_active: boolean;
+};
+
+type SharedCustomizationTemplateAssignmentRow = {
+  catalog_item_id: string;
+  template_id: string;
+  sort_order: number;
+  is_active: boolean;
+};
+
+type VisualVariantRow = {
+  id: string;
+  name: string;
+  code: string;
+  price_amount: number | string | null;
+  is_active: boolean;
+  metadata: JsonRecord | null;
+  sort_order: number | null;
+};
+
+type SharedTemplateDraft = {
+  name: string;
+  description: string;
+  groupIds: string[];
+  variantIds: string[];
+  isActive: boolean;
+};
+
 type PersonalizationSnapshot = {
+  currentItem: CurrentCatalogItemSnapshot;
+  visualVariants: VisualVariantRow[];
+  sharedTemplates: SharedCustomizationTemplateRow[];
+  sharedTemplateGroups: SharedCustomizationTemplateGroupRow[];
+  sharedTemplateAssignments: SharedCustomizationTemplateAssignmentRow[];
   optionGroups: CatalogItemOptionGroupRow[];
   options: CatalogItemOptionRow[];
   consumptionRules: CatalogItemOptionConsumptionRuleRow[];
@@ -170,6 +225,35 @@ const personalizationTypeCards: PersonalizationTypeCard[] = [
 
 function readGroupMetadata(value: JsonRecord | null | undefined) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function getMetadataText(metadata: JsonRecord | null | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getCurrentDisplayGroup(item: CurrentCatalogItemSnapshot | null | undefined) {
+  return getMetadataText(item?.metadata, "display_group");
+}
+
+function getVariantLabel(item: VisualVariantRow) {
+  return getMetadataText(item.metadata, "variant_label") || item.name;
+}
+
+function toggleStringValue(values: string[], value: string) {
+  return values.includes(value)
+    ? values.filter((item) => item !== value)
+    : [...values, value];
+}
+
+function getDefaultSharedTemplateDraft(displayGroup: string, groups: CatalogItemOptionGroupRow[], variants: VisualVariantRow[]): SharedTemplateDraft {
+  return {
+    name: displayGroup ? `${displayGroup} base` : "",
+    description: "",
+    groupIds: groups.map((group) => group.id),
+    variantIds: variants.map((variant) => variant.id),
+    isActive: true,
+  };
 }
 
 function getSimpleGroupKind(group: CatalogItemOptionGroupRow): SimpleGroupKind {
@@ -333,6 +417,21 @@ export function MenuPersonalizationsClient({
   const [openDetailsKey, setOpenDetailsKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
+  const currentDisplayGroup = getCurrentDisplayGroup(snapshot.currentItem);
+  const visualVariants = snapshot.visualVariants ?? [];
+  const sharedTemplates = snapshot.sharedTemplates ?? [];
+  const sharedTemplateGroups = snapshot.sharedTemplateGroups ?? [];
+  const sharedTemplateAssignments = snapshot.sharedTemplateAssignments ?? [];
+
+  const [newSharedTemplateDraft, setNewSharedTemplateDraft] = useState<SharedTemplateDraft>(() =>
+    getDefaultSharedTemplateDraft(
+      getCurrentDisplayGroup(initialSnapshot.currentItem),
+      initialSnapshot.optionGroups.filter((group) => group.is_active),
+      initialSnapshot.visualVariants ?? [],
+    ),
+  );
+  const [sharedTemplateDrafts, setSharedTemplateDrafts] = useState<Record<string, SharedTemplateDraft>>({});
+
   const visibleOptionGroups = useMemo(() => snapshot.optionGroups.filter((group) => group.is_active), [snapshot.optionGroups]);
   const visibleOptionGroupIds = useMemo(() => new Set(visibleOptionGroups.map((group) => group.id)), [visibleOptionGroups]);
   const activeOptionCount = snapshot.options.filter((option) => option.is_active && visibleOptionGroupIds.has(option.option_group_id)).length;
@@ -370,6 +469,65 @@ export function MenuPersonalizationsClient({
 
   const consumptionProductById = useMemo(() => new Map(snapshot.consumptionProducts.map((product) => [product.id, product])), [snapshot.consumptionProducts]);
   const commercialCatalogItemsById = useMemo(() => new Map(snapshot.commercialCatalogItems.map((item) => [item.id, item])), [snapshot.commercialCatalogItems]);
+
+  const sharedTemplateGroupsByTemplate = useMemo(() => {
+    const map = new Map<string, SharedCustomizationTemplateGroupRow[]>();
+    for (const entry of sharedTemplateGroups) {
+      const current = map.get(entry.template_id) ?? [];
+      current.push(entry);
+      map.set(entry.template_id, current);
+    }
+    return map;
+  }, [sharedTemplateGroups]);
+
+  const sharedTemplateAssignmentsByTemplate = useMemo(() => {
+    const map = new Map<string, SharedCustomizationTemplateAssignmentRow[]>();
+    for (const entry of sharedTemplateAssignments) {
+      const current = map.get(entry.template_id) ?? [];
+      current.push(entry);
+      map.set(entry.template_id, current);
+    }
+    return map;
+  }, [sharedTemplateAssignments]);
+
+  useEffect(() => {
+    setNewSharedTemplateDraft((current) => {
+      const defaultName = currentDisplayGroup ? `${currentDisplayGroup} base` : "";
+      const allGroupIds = visibleOptionGroups.map((group) => group.id);
+      const allVariantIds = visualVariants.map((variant) => variant.id);
+      const currentGroupIds = current.groupIds.filter((id) => allGroupIds.includes(id));
+      const currentVariantIds = current.variantIds.filter((id) => allVariantIds.includes(id));
+
+      return {
+        name: current.name || defaultName,
+        description: current.description,
+        groupIds: currentGroupIds.length > 0
+          ? Array.from(new Set([...currentGroupIds, ...allGroupIds]))
+          : allGroupIds,
+        variantIds: currentVariantIds.length > 0 ? currentVariantIds : allVariantIds,
+        isActive: true,
+      };
+    });
+  }, [currentDisplayGroup, visibleOptionGroups, visualVariants]);
+
+  useEffect(() => {
+    const nextDrafts: Record<string, SharedTemplateDraft> = {};
+
+    for (const template of sharedTemplates) {
+      const templateGroups = sharedTemplateGroupsByTemplate.get(template.id) ?? [];
+      const templateAssignments = sharedTemplateAssignmentsByTemplate.get(template.id) ?? [];
+
+      nextDrafts[template.id] = {
+        name: template.name,
+        description: template.description ?? "",
+        groupIds: templateGroups.filter((entry) => entry.is_active).map((entry) => entry.option_group_id),
+        variantIds: templateAssignments.filter((entry) => entry.is_active).map((entry) => entry.catalog_item_id),
+        isActive: template.is_active,
+      };
+    }
+
+    setSharedTemplateDrafts(nextDrafts);
+  }, [sharedTemplates, sharedTemplateGroupsByTemplate, sharedTemplateAssignmentsByTemplate]);
 
   async function mutate(
     action: string,
@@ -534,6 +692,61 @@ export function MenuPersonalizationsClient({
       },
       "Efecto de receta creado.",
       { pendingKey: detailsKey, closeDetailsKey: detailsKey, resetForm: form },
+    );
+  }
+
+  function updateNewSharedTemplateDraft(patch: Partial<SharedTemplateDraft>) {
+    setNewSharedTemplateDraft((current) => ({ ...current, ...patch }));
+  }
+
+  function updateSharedTemplateDraft(templateId: string, patch: Partial<SharedTemplateDraft>) {
+    setSharedTemplateDrafts((current) => ({
+      ...current,
+      [templateId]: {
+        ...(current[templateId] ?? {
+          name: "",
+          description: "",
+          groupIds: [],
+          variantIds: [],
+          isActive: true,
+        }),
+        ...patch,
+      },
+    }));
+  }
+
+  function handleCreateSharedTemplate() {
+    void mutate(
+      "create_shared_template",
+      {
+        name: newSharedTemplateDraft.name,
+        description: newSharedTemplateDraft.description,
+        groupIds: newSharedTemplateDraft.groupIds,
+        variantIds: newSharedTemplateDraft.variantIds,
+      },
+      "Plantilla compartida creada.",
+      { pendingKey: "create-shared-template" },
+    );
+  }
+
+  function handleUpdateSharedTemplate(template: SharedCustomizationTemplateRow) {
+    const draft = sharedTemplateDrafts[template.id];
+    if (!draft) return;
+
+    void mutate(
+      "update_shared_template",
+      {
+        templateId: template.id,
+        name: draft.name,
+        description: draft.description,
+        groupIds: draft.groupIds,
+        variantIds: draft.variantIds,
+        managedGroupIds: visibleOptionGroups.map((group) => group.id),
+        managedVariantIds: visualVariants.map((variant) => variant.id),
+        isActive: draft.isActive,
+      },
+      "Plantilla compartida actualizada.",
+      { pendingKey: `update-shared-template:${template.id}` },
     );
   }
 
@@ -1058,6 +1271,230 @@ export function MenuPersonalizationsClient({
             })}
           </div>
         )}
+      </div>
+
+      <div id="personalizacion-compartida" className="ui-panel space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="ui-h3">Personalización compartida</div>
+            <p className="ui-caption">
+              Usa una plantilla para que varias variantes compartan los mismos grupos sin duplicar opciones ni reglas de inventario.
+            </p>
+          </div>
+          {currentDisplayGroup ? (
+            <span className="ui-chip ui-chip--brand">{currentDisplayGroup}</span>
+          ) : (
+            <span className="ui-chip">Sin agrupación visual</span>
+          )}
+        </div>
+
+        {!currentDisplayGroup ? (
+          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 text-sm font-semibold text-[var(--ui-muted)]">
+            Define una agrupación visual en el producto para administrar variantes compartidas desde aquí.
+          </div>
+        ) : null}
+
+        {currentDisplayGroup && visibleOptionGroups.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 text-sm font-semibold text-[var(--ui-muted)]">
+            Crea primero una personalización. Después aparecerá aquí para compartirla con las variantes.
+          </div>
+        ) : null}
+
+        {currentDisplayGroup && visibleOptionGroups.length > 0 ? (
+          <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <label className="space-y-2">
+                <span className="ui-label">Nombre de la plantilla</span>
+                <input
+                  className="ui-input"
+                  value={newSharedTemplateDraft.name}
+                  onChange={(event) => updateNewSharedTemplateDraft({ name: event.target.value })}
+                  placeholder={`${currentDisplayGroup} base`}
+                  required
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className="ui-label">Descripción</span>
+                <input
+                  className="ui-input"
+                  value={newSharedTemplateDraft.description}
+                  onChange={(event) => updateNewSharedTemplateDraft({ description: event.target.value })}
+                  placeholder="Presentación y toppings compartidos"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                <div className="ui-label">Grupos que comparte</div>
+                <div className="mt-3 space-y-2">
+                  {visibleOptionGroups.map((group) => (
+                    <label key={group.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                      <input
+                        type="checkbox"
+                        checked={newSharedTemplateDraft.groupIds.includes(group.id)}
+                        onChange={() => updateNewSharedTemplateDraft({
+                          groupIds: toggleStringValue(newSharedTemplateDraft.groupIds, group.id),
+                        })}
+                      />
+                      <span>
+                        {getSimpleGroupDisplayName(group)}
+                        <span className="ui-caption block">{getSimpleGroupLabel(getSimpleGroupKind(group))}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                <div className="ui-label">Variantes que la usan</div>
+                <div className="mt-3 space-y-2">
+                  {visualVariants.length === 0 ? (
+                    <div className="text-sm font-semibold text-[var(--ui-muted)]">No hay variantes activas para esta agrupación.</div>
+                  ) : null}
+                  {visualVariants.map((variant) => (
+                    <label key={variant.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                      <input
+                        type="checkbox"
+                        checked={newSharedTemplateDraft.variantIds.includes(variant.id)}
+                        onChange={() => updateNewSharedTemplateDraft({
+                          variantIds: toggleStringValue(newSharedTemplateDraft.variantIds, variant.id),
+                        })}
+                      />
+                      <span>
+                        {getVariantLabel(variant)}
+                        <span className="ui-caption block">{variant.id === itemId ? "Producto actual" : variant.name}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                className="ui-btn ui-btn--brand"
+                disabled={
+                  pendingKey === "create-shared-template" ||
+                  !newSharedTemplateDraft.name.trim() ||
+                  newSharedTemplateDraft.groupIds.length === 0
+                }
+                onClick={handleCreateSharedTemplate}
+              >
+                {pendingKey === "create-shared-template" ? "Guardando..." : "Guardar plantilla compartida"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {sharedTemplates.length > 0 ? (
+          <div className="space-y-4">
+            {sharedTemplates.map((template) => {
+              const draft = sharedTemplateDrafts[template.id] ?? {
+                name: template.name,
+                description: template.description ?? "",
+                groupIds: [],
+                variantIds: [],
+                isActive: template.is_active,
+              };
+
+              return (
+                <div key={template.id} className="rounded-3xl border border-[var(--ui-border)] bg-white p-4">
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="ui-label">Plantilla</span>
+                      <input
+                        className="ui-input"
+                        value={draft.name}
+                        onChange={(event) => updateSharedTemplateDraft(template.id, { name: event.target.value })}
+                        required
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="ui-label">Descripción</span>
+                      <input
+                        className="ui-input"
+                        value={draft.description}
+                        onChange={(event) => updateSharedTemplateDraft(template.id, { description: event.target.value })}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                      <div className="ui-label">Grupos compartidos</div>
+                      <div className="mt-3 space-y-2">
+                        {visibleOptionGroups.map((group) => (
+                          <label key={group.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                            <input
+                              type="checkbox"
+                              checked={draft.groupIds.includes(group.id)}
+                              onChange={() => updateSharedTemplateDraft(template.id, {
+                                groupIds: toggleStringValue(draft.groupIds, group.id),
+                              })}
+                            />
+                            <span>
+                              {getSimpleGroupDisplayName(group)}
+                              <span className="ui-caption block">{getSimpleGroupLabel(getSimpleGroupKind(group))}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                      <div className="ui-label">Aplicar a variantes</div>
+                      <div className="mt-3 space-y-2">
+                        {visualVariants.map((variant) => (
+                          <label key={variant.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                            <input
+                              type="checkbox"
+                              checked={draft.variantIds.includes(variant.id)}
+                              onChange={() => updateSharedTemplateDraft(template.id, {
+                                variantIds: toggleStringValue(draft.variantIds, variant.id),
+                              })}
+                            />
+                            <span>
+                              {getVariantLabel(variant)}
+                              <span className="ui-caption block">{variant.id === itemId ? "Producto actual" : variant.name}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                      <input
+                        type="checkbox"
+                        checked={draft.isActive}
+                        onChange={(event) => updateSharedTemplateDraft(template.id, { isActive: event.target.checked })}
+                      />
+                      Plantilla activa
+                    </label>
+
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn--brand"
+                      disabled={
+                        pendingKey === `update-shared-template:${template.id}` ||
+                        !draft.name.trim() ||
+                        draft.groupIds.length === 0
+                      }
+                      onClick={() => handleUpdateSharedTemplate(template)}
+                    >
+                      {pendingKey === `update-shared-template:${template.id}` ? "Guardando..." : "Guardar plantilla"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
 
       {snapshot.recipeIngredients.length > 0 && !hasVisibleRemovalsGroup ? (
