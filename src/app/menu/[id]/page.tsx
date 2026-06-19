@@ -65,6 +65,41 @@ type CatalogItemOptionGroupRow = {
   metadata: Record<string, unknown> | null;
 };
 
+type SharedCustomizationTemplateRow = {
+  id: string;
+  site_id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  metadata: Record<string, unknown> | null;
+};
+
+type SharedCustomizationTemplateGroupRow = {
+  template_id: string;
+  option_group_id: string;
+  sort_order: number;
+  is_active: boolean;
+};
+
+type SharedCustomizationTemplateAssignmentRow = {
+  catalog_item_id: string;
+  template_id: string;
+  sort_order: number;
+  is_active: boolean;
+};
+
+type VisualVariantRow = {
+  id: string;
+  name: string;
+  code: string;
+  price_amount: number | string | null;
+  is_active: boolean;
+  metadata: Record<string, unknown> | null;
+};
+
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
 type CatalogItemOptionRow = {
   id: string;
   option_group_id: string;
@@ -1652,6 +1687,279 @@ async function disableRecipeEffect(formData: FormData) {
   redirect(`/menu/${itemId}?ok=${encodeURIComponent("Efecto de receta desactivado.")}`);
 }
 
+function readFormIds(formData: FormData, key: string) {
+  return formData
+    .getAll(key)
+    .map((value) => asText(value))
+    .filter(Boolean);
+}
+
+async function getCatalogItemSite(supabase: SupabaseServerClient, itemId: string) {
+  const { data, error } = await supabase
+    .schema("pass")
+    .from("catalog_items")
+    .select("id,site_id")
+    .eq("id", itemId)
+    .maybeSingle();
+
+  if (error || !data?.id) {
+    throw new Error(error?.message || "Producto comercial no encontrado.");
+  }
+
+  return data as { id: string; site_id: string };
+}
+
+async function validateOptionGroupsForItem(
+  supabase: SupabaseServerClient,
+  itemId: string,
+  groupIds: string[],
+) {
+  const uniqueIds = Array.from(new Set(groupIds));
+  if (uniqueIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .schema("pass")
+    .from("catalog_item_option_groups")
+    .select("id,sort_order")
+    .eq("catalog_item_id", itemId)
+    .eq("is_active", true)
+    .in("id", uniqueIds);
+
+  if (error) throw new Error(error.message);
+  if ((data ?? []).length !== uniqueIds.length) {
+    throw new Error("Uno de los grupos seleccionados no pertenece a este producto.");
+  }
+
+  return (data ?? []) as { id: string; sort_order: number | null }[];
+}
+
+async function validateCatalogItemsForSite(
+  supabase: SupabaseServerClient,
+  siteId: string,
+  itemIds: string[],
+) {
+  const uniqueIds = Array.from(new Set(itemIds));
+  if (uniqueIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .schema("pass")
+    .from("catalog_items")
+    .select("id,sort_order")
+    .eq("site_id", siteId)
+    .eq("is_active", true)
+    .in("id", uniqueIds);
+
+  if (error) throw new Error(error.message);
+  if ((data ?? []).length !== uniqueIds.length) {
+    throw new Error("Una de las variantes seleccionadas no pertenece a esta sede.");
+  }
+
+  return (data ?? []) as { id: string; sort_order: number | null }[];
+}
+
+async function createSharedCustomizationTemplate(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const name = asText(formData.get("name"));
+  const code = asCatalogCode(formData.get("code"), name);
+  const description = asText(formData.get("description")) || null;
+  const groupIds = readFormIds(formData, "option_group_id");
+  const variantIds = readFormIds(formData, "variant_item_id");
+
+  if (!itemId || !name || !code) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Falta el nombre de la plantilla compartida.")}`);
+  }
+
+  if (groupIds.length === 0) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent("Selecciona al menos un grupo para compartir.")}`);
+  }
+
+  try {
+    const item = await getCatalogItemSite(supabase, itemId);
+    const validGroups = await validateOptionGroupsForItem(supabase, itemId, groupIds);
+    const validVariants = await validateCatalogItemsForSite(supabase, item.site_id, variantIds.length > 0 ? variantIds : [itemId]);
+
+    const { data: template, error: templateError } = await supabase
+      .schema("pass")
+      .from("catalog_item_customization_templates")
+      .insert({
+        site_id: item.site_id,
+        code,
+        name,
+        description,
+        is_active: true,
+        metadata: {
+          configured_from: "viso_menu_product_page",
+          source_catalog_item_id: itemId,
+        },
+      })
+      .select("id")
+      .single();
+
+    if (templateError || !template?.id) {
+      throw new Error(templateError?.message || "No se pudo crear la plantilla.");
+    }
+
+    const templateId = template.id as string;
+
+    const { error: groupsError } = await supabase
+      .schema("pass")
+      .from("catalog_item_customization_template_groups")
+      .upsert(
+        validGroups.map((group) => ({
+          template_id: templateId,
+          option_group_id: group.id,
+          sort_order: Number(group.sort_order ?? 0),
+          is_active: true,
+          metadata: { configured_from: "viso_menu_product_page" },
+        })),
+        { onConflict: "template_id,option_group_id" },
+      );
+
+    if (groupsError) throw new Error(groupsError.message);
+
+    if (validVariants.length > 0) {
+      const { error: assignmentsError } = await supabase
+        .schema("pass")
+        .from("catalog_item_customization_template_assignments")
+        .upsert(
+          validVariants.map((variant) => ({
+            catalog_item_id: variant.id,
+            template_id: templateId,
+            sort_order: Number(variant.sort_order ?? 0),
+            is_active: true,
+            metadata: { configured_from: "viso_menu_product_page" },
+          })),
+          { onConflict: "catalog_item_id,template_id" },
+        );
+
+      if (assignmentsError) throw new Error(assignmentsError.message);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo crear la plantilla compartida.";
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Plantilla compartida creada.")}`);
+}
+
+async function updateSharedCustomizationTemplate(formData: FormData) {
+  "use server";
+  const supabase = await createClient();
+
+  const itemId = asText(formData.get("catalog_item_id"));
+  const templateId = asText(formData.get("template_id"));
+  const name = asText(formData.get("name"));
+  const description = asText(formData.get("description")) || null;
+  const selectedGroupIds = readFormIds(formData, "option_group_id");
+  const selectedVariantIds = readFormIds(formData, "variant_item_id");
+  const managedGroupIds = readFormIds(formData, "managed_option_group_id");
+  const managedVariantIds = readFormIds(formData, "managed_variant_item_id");
+
+  if (!itemId || !templateId || !name) {
+    redirect(`/menu/${itemId || ""}?error=${encodeURIComponent("Faltan datos para actualizar la plantilla.")}`);
+  }
+
+  if (selectedGroupIds.length === 0) {
+    redirect(`/menu/${itemId}?error=${encodeURIComponent("La plantilla debe compartir al menos un grupo.")}`);
+  }
+
+  try {
+    const item = await getCatalogItemSite(supabase, itemId);
+
+    const { data: template, error: templateError } = await supabase
+      .schema("pass")
+      .from("catalog_item_customization_templates")
+      .select("id,site_id")
+      .eq("id", templateId)
+      .maybeSingle();
+
+    if (templateError || !template?.id || template.site_id !== item.site_id) {
+      throw new Error(templateError?.message || "La plantilla no pertenece a esta sede.");
+    }
+
+    const validGroups = await validateOptionGroupsForItem(supabase, itemId, selectedGroupIds);
+    const validVariants = await validateCatalogItemsForSite(supabase, item.site_id, selectedVariantIds);
+
+    const { error: templateUpdateError } = await supabase
+      .schema("pass")
+      .from("catalog_item_customization_templates")
+      .update({ name, description, is_active: asBool(formData.get("is_active")) })
+      .eq("id", templateId)
+      .eq("site_id", item.site_id);
+
+    if (templateUpdateError) throw new Error(templateUpdateError.message);
+
+    const selectedGroupSet = new Set(validGroups.map((group) => group.id));
+    const selectedVariantSet = new Set(validVariants.map((variant) => variant.id));
+
+    const { error: groupsError } = await supabase
+      .schema("pass")
+      .from("catalog_item_customization_template_groups")
+      .upsert(
+        validGroups.map((group) => ({
+          template_id: templateId,
+          option_group_id: group.id,
+          sort_order: Number(group.sort_order ?? 0),
+          is_active: true,
+          metadata: { configured_from: "viso_menu_product_page" },
+        })),
+        { onConflict: "template_id,option_group_id" },
+      );
+
+    if (groupsError) throw new Error(groupsError.message);
+
+    const groupsToDisable = managedGroupIds.filter((groupId) => !selectedGroupSet.has(groupId));
+    if (groupsToDisable.length > 0) {
+      const { error: disableGroupsError } = await supabase
+        .schema("pass")
+        .from("catalog_item_customization_template_groups")
+        .update({ is_active: false })
+        .eq("template_id", templateId)
+        .in("option_group_id", groupsToDisable);
+
+      if (disableGroupsError) throw new Error(disableGroupsError.message);
+    }
+
+    const { error: assignmentsError } = await supabase
+      .schema("pass")
+      .from("catalog_item_customization_template_assignments")
+      .upsert(
+        validVariants.map((variant) => ({
+          catalog_item_id: variant.id,
+          template_id: templateId,
+          sort_order: Number(variant.sort_order ?? 0),
+          is_active: true,
+          metadata: { configured_from: "viso_menu_product_page" },
+        })),
+        { onConflict: "catalog_item_id,template_id" },
+      );
+
+    if (assignmentsError) throw new Error(assignmentsError.message);
+
+    const assignmentsToDisable = managedVariantIds.filter((variantId) => !selectedVariantSet.has(variantId));
+    if (assignmentsToDisable.length > 0) {
+      const { error: disableAssignmentsError } = await supabase
+        .schema("pass")
+        .from("catalog_item_customization_template_assignments")
+        .update({ is_active: false })
+        .eq("template_id", templateId)
+        .in("catalog_item_id", assignmentsToDisable);
+
+      if (disableAssignmentsError) throw new Error(disableAssignmentsError.message);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo actualizar la plantilla compartida.";
+    redirect(`/menu/${itemId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/menu/${itemId}`);
+  redirect(`/menu/${itemId}?ok=${encodeURIComponent("Plantilla compartida actualizada.")}`);
+}
+
 async function createRemovalOptionFromRecipe(formData: FormData) {
   "use server";
   const supabase = await createClient();
@@ -1934,6 +2242,7 @@ export default async function MenuItemDetailPage({
   const presentation = (presentationRaw ?? null) as CatalogItemPresentationRow | null;
   const sites = (sitesRaw ?? []) as SiteRow[];
   const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+  const currentDisplayGroup = typeof metadata.display_group === "string" ? metadata.display_group.trim() : "";
 
   const { data: sellOptionsRaw } = await supabase
     .schema("pass").from("sell_products_by_site")
@@ -1948,6 +2257,46 @@ export default async function MenuItemDetailPage({
     .eq("is_active", true)
     .neq("id", row.id)
     .order("name", { ascending: true });
+
+  const { data: visualVariantsRaw } = currentDisplayGroup
+    ? await supabase
+      .schema("pass")
+      .from("catalog_items")
+      .select("id,code,name,price_amount,is_active,metadata")
+      .eq("site_id", row.site_id)
+      .eq("is_active", true)
+      .eq("metadata->>display_group", currentDisplayGroup)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true })
+    : { data: [] as VisualVariantRow[] };
+
+  const { data: sharedTemplatesRaw } = await supabase
+    .schema("pass")
+    .from("catalog_item_customization_templates")
+    .select("id,site_id,code,name,description,is_active,metadata")
+    .eq("site_id", row.site_id)
+    .order("name", { ascending: true });
+
+  const sharedTemplates = (sharedTemplatesRaw ?? []) as SharedCustomizationTemplateRow[];
+  const sharedTemplateIds = sharedTemplates.map((template) => template.id);
+
+  const [
+    { data: sharedTemplateGroupsRaw },
+    { data: sharedTemplateAssignmentsRaw },
+  ] = sharedTemplateIds.length > 0
+    ? await Promise.all([
+      supabase
+        .schema("pass")
+        .from("catalog_item_customization_template_groups")
+        .select("template_id,option_group_id,sort_order,is_active")
+        .in("template_id", sharedTemplateIds),
+      supabase
+        .schema("pass")
+        .from("catalog_item_customization_template_assignments")
+        .select("catalog_item_id,template_id,sort_order,is_active")
+        .in("template_id", sharedTemplateIds),
+    ])
+    : [{ data: [] as SharedCustomizationTemplateGroupRow[] }, { data: [] as SharedCustomizationTemplateAssignmentRow[] }];
 
   const optionGroups = ((optionGroupsRaw ?? []) as CatalogItemOptionGroupRow[]).sort((a, b) => {
     if (Number(a.sort_order ?? 0) !== Number(b.sort_order ?? 0)) {
@@ -2134,6 +2483,38 @@ export default async function MenuItemDetailPage({
   const currentCategory = commercialCategories.find((category) => category.id === row.commercial_category_id) ?? null;
 
   const visibleOptionGroups = optionGroups.filter((group) => group.is_active);
+  const visualVariantsSource = ((visualVariantsRaw ?? []) as VisualVariantRow[]);
+  const visualVariants = (visualVariantsSource.length > 0
+    ? visualVariantsSource
+    : [{
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      price_amount: row.price_amount,
+      is_active: row.is_active,
+      metadata: row.metadata,
+    }]).sort((a, b) => {
+      const variantA = typeof a.metadata?.variant_label === "string" ? a.metadata.variant_label : a.name;
+      const variantB = typeof b.metadata?.variant_label === "string" ? b.metadata.variant_label : b.name;
+      return String(variantA || "").localeCompare(String(variantB || ""), "es-CO");
+    });
+  const sharedTemplateGroups = (sharedTemplateGroupsRaw ?? []) as SharedCustomizationTemplateGroupRow[];
+  const sharedTemplateAssignments = (sharedTemplateAssignmentsRaw ?? []) as SharedCustomizationTemplateAssignmentRow[];
+  const sharedTemplateGroupsByTemplate = new Map<string, SharedCustomizationTemplateGroupRow[]>();
+  const sharedTemplateAssignmentsByTemplate = new Map<string, SharedCustomizationTemplateAssignmentRow[]>();
+
+  for (const templateGroup of sharedTemplateGroups) {
+    const current = sharedTemplateGroupsByTemplate.get(templateGroup.template_id) ?? [];
+    current.push(templateGroup);
+    sharedTemplateGroupsByTemplate.set(templateGroup.template_id, current);
+  }
+
+  for (const assignment of sharedTemplateAssignments) {
+    const current = sharedTemplateAssignmentsByTemplate.get(assignment.template_id) ?? [];
+    current.push(assignment);
+    sharedTemplateAssignmentsByTemplate.set(assignment.template_id, current);
+  }
+
   const hasVisibleRemovalsGroup = visibleOptionGroups.some((group) => getSimpleGroupKind(group) === "removals");
   const visibleOptionGroupIds = new Set(visibleOptionGroups.map((group) => group.id));
   const activeOptionCount = ((optionOptionsRaw ?? []) as CatalogItemOptionRow[]).filter(
@@ -2204,6 +2585,7 @@ export default async function MenuItemDetailPage({
       <nav className="flex flex-wrap gap-2 rounded-3xl border border-[var(--ui-border)] bg-white p-2 shadow-[var(--ui-shadow-1)]">
         <a href="#producto-comercial" className="ui-btn ui-btn--ghost">Producto</a>
         <a href="#personalizaciones" className="ui-btn ui-btn--ghost">Personalizaciones</a>
+        <a href="#personalizacion-compartida" className="ui-btn ui-btn--ghost">Compartida</a>
         {recipeIngredients.length > 0 && !hasVisibleRemovalsGroup ? (
           <a href="#receta-inventario" className="ui-btn ui-btn--ghost">Receta / Inventario</a>
         ) : null}
@@ -2403,6 +2785,175 @@ export default async function MenuItemDetailPage({
             <button type="submit" className="ui-btn ui-btn--danger">Eliminar producto</button>
           </form>
         </div>
+      </div>
+
+      <div id="personalizacion-compartida" className="ui-panel space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="ui-h3">Personalización compartida</div>
+            <p className="ui-caption">
+              Usa una plantilla para que varias variantes compartan los mismos grupos, como Presentación y Toppings, sin duplicar opciones ni reglas de inventario.
+            </p>
+          </div>
+          {currentDisplayGroup ? (
+            <span className="ui-chip ui-chip--brand">{currentDisplayGroup}</span>
+          ) : (
+            <span className="ui-chip">Sin agrupación visual</span>
+          )}
+        </div>
+
+        {!currentDisplayGroup ? (
+          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 text-sm font-semibold text-[var(--ui-muted)]">
+            Define una agrupación visual en el producto para administrar variantes compartidas desde aquí.
+          </div>
+        ) : null}
+
+        {visibleOptionGroups.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 text-sm font-semibold text-[var(--ui-muted)]">
+            Este producto todavía no tiene grupos propios para convertir en plantilla compartida.
+          </div>
+        ) : null}
+
+        {currentDisplayGroup && visibleOptionGroups.length > 0 ? (
+          <form action={createSharedCustomizationTemplate} className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+            <input type="hidden" name="catalog_item_id" value={row.id} />
+            <div className="grid gap-4 lg:grid-cols-3">
+              <label className="space-y-2">
+                <span className="ui-label">Nueva plantilla</span>
+                <input name="name" className="ui-input" defaultValue={`${currentDisplayGroup} base`} required />
+              </label>
+              <label className="space-y-2">
+                <span className="ui-label">Código</span>
+                <input name="code" className="ui-input" placeholder="helado-base" />
+              </label>
+              <label className="space-y-2">
+                <span className="ui-label">Descripción</span>
+                <input name="description" className="ui-input" placeholder="Presentación y toppings compartidos" />
+              </label>
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                <div className="ui-label">Grupos que comparte</div>
+                <div className="mt-3 space-y-2">
+                  {visibleOptionGroups.map((group) => (
+                    <label key={group.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                      <input type="checkbox" name="option_group_id" value={group.id} defaultChecked />
+                      <span>
+                        {getSimpleGroupDisplayName(group)}
+                        <span className="ui-caption block">{getSimpleGroupLabel(getSimpleGroupKind(group))}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                <div className="ui-label">Variantes que la usan</div>
+                <div className="mt-3 space-y-2">
+                  {visualVariants.map((variant) => {
+                    const variantLabel = typeof variant.metadata?.variant_label === "string" && variant.metadata.variant_label.trim()
+                      ? variant.metadata.variant_label.trim()
+                      : variant.name;
+                    return (
+                      <label key={variant.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                        <input type="checkbox" name="variant_item_id" value={variant.id} defaultChecked />
+                        <span>
+                          {variantLabel}
+                          <span className="ui-caption block">{variant.id === row.id ? "Producto actual" : variant.name}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button type="submit" className="ui-btn ui-btn--brand">Crear plantilla compartida</button>
+            </div>
+          </form>
+        ) : null}
+
+        {sharedTemplates.length > 0 ? (
+          <div className="space-y-4">
+            {sharedTemplates.map((template) => {
+              const templateGroups = sharedTemplateGroupsByTemplate.get(template.id) ?? [];
+              const templateAssignments = sharedTemplateAssignmentsByTemplate.get(template.id) ?? [];
+              const activeGroupIds = new Set(templateGroups.filter((entry) => entry.is_active).map((entry) => entry.option_group_id));
+              const activeVariantIds = new Set(templateAssignments.filter((entry) => entry.is_active).map((entry) => entry.catalog_item_id));
+
+              return (
+                <form key={template.id} action={updateSharedCustomizationTemplate} className="rounded-3xl border border-[var(--ui-border)] bg-white p-4">
+                  <input type="hidden" name="catalog_item_id" value={row.id} />
+                  <input type="hidden" name="template_id" value={template.id} />
+                  {visibleOptionGroups.map((group) => (
+                    <input key={`managed-group-${group.id}`} type="hidden" name="managed_option_group_id" value={group.id} />
+                  ))}
+                  {visualVariants.map((variant) => (
+                    <input key={`managed-variant-${variant.id}`} type="hidden" name="managed_variant_item_id" value={variant.id} />
+                  ))}
+
+                  <div className="grid gap-4 lg:grid-cols-3">
+                    <label className="space-y-2">
+                      <span className="ui-label">Plantilla</span>
+                      <input name="name" className="ui-input" defaultValue={template.name} required />
+                    </label>
+                    <label className="space-y-2 lg:col-span-2">
+                      <span className="ui-label">Descripción</span>
+                      <input name="description" className="ui-input" defaultValue={template.description ?? ""} />
+                    </label>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                      <div className="ui-label">Grupos compartidos</div>
+                      <div className="mt-3 space-y-2">
+                        {visibleOptionGroups.map((group) => (
+                          <label key={group.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                            <input type="checkbox" name="option_group_id" value={group.id} defaultChecked={activeGroupIds.has(group.id)} />
+                            <span>
+                              {getSimpleGroupDisplayName(group)}
+                              <span className="ui-caption block">{getSimpleGroupLabel(getSimpleGroupKind(group))}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                      <div className="ui-label">Aplicar a variantes</div>
+                      <div className="mt-3 space-y-2">
+                        {visualVariants.map((variant) => {
+                          const variantLabel = typeof variant.metadata?.variant_label === "string" && variant.metadata.variant_label.trim()
+                            ? variant.metadata.variant_label.trim()
+                            : variant.name;
+                          return (
+                            <label key={variant.id} className="flex items-start gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                              <input type="checkbox" name="variant_item_id" value={variant.id} defaultChecked={activeVariantIds.has(variant.id)} />
+                              <span>
+                                {variantLabel}
+                                <span className="ui-caption block">{variant.id === row.id ? "Producto actual" : variant.name}</span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
+                      <input type="checkbox" name="is_active" defaultChecked={template.is_active} />
+                      Plantilla activa
+                    </label>
+                    <button type="submit" className="ui-btn ui-btn--brand">Guardar plantilla</button>
+                  </div>
+                </form>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
 
       <MenuPersonalizationsClient
