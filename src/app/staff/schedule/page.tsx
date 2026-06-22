@@ -422,6 +422,8 @@ async function saveShiftAction(formData: FormData) {
   const endTime = asText(formData.get("end_time"));
   const blockStartTimes = formData.getAll("block_start_time").map((value) => asText(value));
   const blockEndTimes = formData.getAll("block_end_time").map((value) => asText(value));
+  const blockNotes = formData.getAll("block_notes").map((value) => asText(value));
+  const shiftNotes = asText(formData.get("notes"));
   const explicitShiftKind = asText(formData.get("shift_kind"));
   const isRestShift = asText(formData.get("rest_shift")) === "1";
   const isFullDayRest = asText(formData.get("full_day_rest")) === "1";
@@ -430,6 +432,7 @@ async function saveShiftAction(formData: FormData) {
     .map((blockStart, index) => ({
       startTime: blockStart,
       endTime: blockEndTimes[index] ?? "",
+      notes: blockNotes[index] ?? "",
     }))
     .filter((block) => block.startTime || block.endTime);
   const firstRawShiftBlock = rawShiftBlocks[0] ?? { startTime: "", endTime: "" };
@@ -438,11 +441,12 @@ async function saveShiftAction(formData: FormData) {
         {
           startTime: isFullDayRest ? FULL_DAY_REST_START_TIME : startTime || firstRawShiftBlock.startTime,
           endTime: isFullDayRest ? FULL_DAY_REST_END_TIME : endTime || firstRawShiftBlock.endTime,
+          notes: shiftNotes || firstRawShiftBlock.notes,
         },
       ]
     : rawShiftBlocks.length > 0
       ? rawShiftBlocks
-      : [{ startTime, endTime }];
+      : [{ startTime, endTime, notes: shiftNotes }];
   const orderedShiftBlocks = [...resolvedShiftBlocks].sort((first, second) => {
     const startCompare = first.startTime.localeCompare(second.startTime, "es");
     return startCompare !== 0 ? startCompare : first.endTime.localeCompare(second.endTime, "es");
@@ -559,7 +563,7 @@ async function saveShiftAction(formData: FormData) {
     shift_kind: shiftKind,
     break_minutes: shiftKind === "descanso" ? 0 : Math.max(0, asNumber(formData.get("break_minutes"), 0)),
     status: asText(formData.get("status")) || "scheduled",
-    notes: asText(formData.get("notes")) || null,
+    notes: shiftNotes || orderedShiftBlocks[0]?.notes || null,
     published_at: null,
     published_by: null,
   };
@@ -571,6 +575,7 @@ async function saveShiftAction(formData: FormData) {
       employee_id: id,
       start_time: block.startTime,
       end_time: block.endTime,
+      notes: block.notes || null,
       show_end_as_close: index === closeBlockIndex,
     })),
   );
@@ -2337,7 +2342,6 @@ export default async function StaffSchedulePage({
                 <input type="hidden" name="return_to" value={returnToWithoutEdit} />
                 <input type="hidden" name="break_minutes" value="0" />
                 <input type="hidden" name="status" value="scheduled" />
-                <input type="hidden" name="notes" value="" />
                 <input type="hidden" name="keep_quick" value="1" />
 
                 <label className="flex flex-col gap-1 md:col-span-2">
@@ -2375,6 +2379,11 @@ export default async function StaffSchedulePage({
                   <input name="block_end_time" type="time" className="ui-input" required defaultValue="14:00" data-quick-shift-time-input />
                 </label>
 
+                <label className="flex flex-col gap-1 md:col-span-6">
+                  <span className="ui-label">Nota bloque 1</span>
+                  <input name="block_notes" className="ui-input" placeholder="Ej. Cajero, apoyo barra, cierre" maxLength={240} />
+                </label>
+
                 <div
                   className="hidden rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 md:col-span-6"
                   data-quick-shift-block="optional"
@@ -2393,6 +2402,10 @@ export default async function StaffSchedulePage({
                     <label className="flex flex-col gap-1">
                       <span className="ui-label">Fin bloque 2</span>
                       <input name="block_end_time" type="time" className="ui-input" data-quick-shift-time-input />
+                    </label>
+                    <label className="flex flex-col gap-1 md:col-span-2">
+                      <span className="ui-label">Nota bloque 2</span>
+                      <input name="block_notes" className="ui-input" placeholder="Opcional" maxLength={240} />
                     </label>
                   </div>
                 </div>
@@ -2415,6 +2428,10 @@ export default async function StaffSchedulePage({
                     <label className="flex flex-col gap-1">
                       <span className="ui-label">Fin bloque 3</span>
                       <input name="block_end_time" type="time" className="ui-input" data-quick-shift-time-input />
+                    </label>
+                    <label className="flex flex-col gap-1 md:col-span-2">
+                      <span className="ui-label">Nota bloque 3</span>
+                      <input name="block_notes" className="ui-input" placeholder="Opcional" maxLength={240} />
                     </label>
                   </div>
                 </div>
