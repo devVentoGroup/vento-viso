@@ -19,6 +19,7 @@ export function CommercialMenuImageField({
   const [imageUrl, setImageUrl] = useState(initialUrl ?? "");
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
+  const [imagePreviewFailed, setImagePreviewFailed] = useState(false);
 
   async function handleUpload(file: File | null) {
     if (!file) return;
@@ -49,6 +50,7 @@ export function CommercialMenuImageField({
       }
 
       setImageUrl(data.url);
+      setImagePreviewFailed(false);
       setUploadStatus("done");
       setUploadMessage("Imagen cargada. Guarda el producto para aplicar el cambio.");
     } catch (error) {
@@ -63,12 +65,17 @@ export function CommercialMenuImageField({
 
       <div className="grid gap-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 sm:grid-cols-[180px_minmax(0,1fr)]">
         <div className="overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-white">
-          {imageUrl ? (
+          {imageUrl && !imagePreviewFailed ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt={label} className="aspect-square w-full object-cover" />
+            <img
+              src={imageUrl}
+              alt={label}
+              className="aspect-square w-full object-cover"
+              onError={() => setImagePreviewFailed(true)}
+            />
           ) : (
             <div className="flex aspect-square w-full items-center justify-center bg-white px-4 text-center text-sm font-black text-[var(--ui-muted)]">
-              Sin imagen
+              {imageUrl ? "No se pudo cargar la imagen" : "Sin imagen"}
             </div>
           )}
         </div>
@@ -92,6 +99,7 @@ export function CommercialMenuImageField({
               value={imageUrl}
               onChange={(event) => {
                 setImageUrl(event.target.value);
+                setImagePreviewFailed(false);
                 setUploadStatus("idle");
                 setUploadMessage("");
               }}
@@ -109,12 +117,18 @@ export function CommercialMenuImageField({
               className="ui-btn ui-btn--ghost"
               onClick={() => {
                 setImageUrl("");
+                setImagePreviewFailed(false);
                 setUploadStatus("idle");
                 setUploadMessage("Imagen quitada. Guarda el producto para aplicar el cambio.");
               }}
             >
               Quitar imagen
             </button>
+          ) : null}
+          {imagePreviewFailed ? (
+            <div className="text-sm font-semibold text-[var(--ui-danger)]">
+              La URL se guardó, pero Storage no la está sirviendo para vista previa.
+            </div>
           ) : null}
         </div>
       </div>

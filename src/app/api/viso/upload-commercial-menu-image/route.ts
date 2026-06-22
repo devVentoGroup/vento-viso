@@ -77,13 +77,17 @@ export async function POST(req: Request) {
         smartSubsample: true,
       })
       .toBuffer();
+
+    await sharp(optimized).metadata();
   } catch {
     return NextResponse.json({ error: "No se pudo optimizar la imagen" }, { status: 400 });
   }
 
+  const uploadBody = new Blob([new Uint8Array(optimized)], { type: "image/webp" });
+
   const { error: uploadErr } = await supabase.storage
     .from(BUCKET)
-    .upload(path, optimized, {
+    .upload(path, uploadBody, {
       contentType: "image/webp",
       cacheControl: String(CACHE_SECONDS),
       upsert: false,

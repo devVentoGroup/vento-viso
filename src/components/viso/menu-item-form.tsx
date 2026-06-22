@@ -229,6 +229,7 @@ export function MenuItemForm({
   const [opensDetailModal, setOpensDetailModal] = useState(Boolean(initial.opens_detail_modal));
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
+  const [imagePreviewFailed, setImagePreviewFailed] = useState(false);
   const generatedFormId = useId().replace(/:/g, "");
   const resolvedFormId = formId || `menu-item-form-${generatedFormId}`;
   const productPickerRef = useRef<HTMLDivElement | null>(null);
@@ -506,6 +507,7 @@ export function MenuItemForm({
       }
       const nextUrl = payload && typeof payload === "object" && "url" in payload ? (payload.url as string) : "";
       setImageUrl(nextUrl || "");
+      setImagePreviewFailed(false);
       setUploadStatus("done");
       setUploadMessage("Imagen cargada.");
     } catch (error) {
@@ -1159,12 +1161,17 @@ export function MenuItemForm({
         <input type="hidden" name="image_url" value={imageUrl} />
         <div className="grid gap-4 sm:grid-cols-[220px_minmax(0,1fr)]">
           <div className="overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-white">
-            {imageUrl ? (
+            {imageUrl && !imagePreviewFailed ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageUrl} alt={getPreviewTitle(name)} className="aspect-square w-full object-cover" />
+              <img
+                src={imageUrl}
+                alt={getPreviewTitle(name)}
+                className="aspect-square w-full object-cover"
+                onError={() => setImagePreviewFailed(true)}
+              />
             ) : (
               <div className="flex aspect-square w-full items-center justify-center bg-[var(--ui-surface-2)] px-4 text-center text-sm font-black text-[var(--ui-muted)]">
-                Sin imagen
+                {imageUrl ? "No se pudo cargar la imagen" : "Sin imagen"}
               </div>
             )}
           </div>
@@ -1185,6 +1192,11 @@ export function MenuItemForm({
               <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setImageUrl("")}>
                 Quitar imagen
               </button>
+            ) : null}
+            {imagePreviewFailed ? (
+              <div className="text-sm font-semibold text-[var(--ui-danger)]">
+                La URL se guardó, pero Storage no la está sirviendo para vista previa.
+              </div>
             ) : null}
           </div>
         </div>
@@ -1211,12 +1223,17 @@ export function MenuItemForm({
 
         <div className="max-w-md overflow-hidden rounded-[28px] border border-[var(--ui-border)] bg-[#FFFDF7] shadow-[var(--ui-shadow-2)]">
           <div className="relative h-56 w-full bg-[var(--ui-surface-2)]">
-            {imageUrl ? (
+            {imageUrl && !imagePreviewFailed ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageUrl} alt={getPreviewTitle(name)} className="h-full w-full object-cover" />
+              <img
+                src={imageUrl}
+                alt={getPreviewTitle(name)}
+                className="h-full w-full object-cover"
+                onError={() => setImagePreviewFailed(true)}
+              />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-sm font-black text-[var(--ui-muted)]">
-                Sin imagen comercial
+                {imageUrl ? "No se pudo cargar la imagen" : "Sin imagen comercial"}
               </div>
             )}
             <div className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-black text-[var(--ui-text)] shadow">
