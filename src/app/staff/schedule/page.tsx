@@ -2396,77 +2396,7 @@ export default async function StaffSchedulePage({
                   <input name="block_notes" className="ui-input" placeholder="Ej. Cajero, apoyo barra, cierre" maxLength={240} />
                 </label>
 
-                <div
-                  className="hidden rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 md:col-span-6"
-                  data-quick-shift-block="optional"
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-[var(--ui-text)]">Bloque 2</div>
-                    <button type="button" className="text-xs font-semibold text-[var(--ui-danger)]" data-remove-shift-block>
-                      Quitar
-                    </button>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <label className="flex flex-col gap-1">
-                      <span className="ui-label">Día bloque 2</span>
-                      <input
-                        name="block_shift_date"
-                        type="date"
-                        className="ui-input"
-                        min={weekDays[0]?.iso ?? undefined}
-                        max={weekDays[6]?.iso ?? undefined}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="ui-label">Inicio bloque 2</span>
-                      <input name="block_start_time" type="time" className="ui-input" data-quick-shift-time-input />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="ui-label">Fin bloque 2</span>
-                      <input name="block_end_time" type="time" className="ui-input" data-quick-shift-time-input />
-                    </label>
-                    <label className="flex flex-col gap-1 md:col-span-3">
-                      <span className="ui-label">Nota bloque 2</span>
-                      <input name="block_notes" className="ui-input" placeholder="Opcional" maxLength={240} />
-                    </label>
-                  </div>
-                </div>
-
-                <div
-                  className="hidden rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 md:col-span-6"
-                  data-quick-shift-block="optional"
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-[var(--ui-text)]">Bloque 3</div>
-                    <button type="button" className="text-xs font-semibold text-[var(--ui-danger)]" data-remove-shift-block>
-                      Quitar
-                    </button>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <label className="flex flex-col gap-1">
-                      <span className="ui-label">Día bloque 3</span>
-                      <input
-                        name="block_shift_date"
-                        type="date"
-                        className="ui-input"
-                        min={weekDays[0]?.iso ?? undefined}
-                        max={weekDays[6]?.iso ?? undefined}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="ui-label">Inicio bloque 3</span>
-                      <input name="block_start_time" type="time" className="ui-input" data-quick-shift-time-input />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="ui-label">Fin bloque 3</span>
-                      <input name="block_end_time" type="time" className="ui-input" data-quick-shift-time-input />
-                    </label>
-                    <label className="flex flex-col gap-1 md:col-span-3">
-                      <span className="ui-label">Nota bloque 3</span>
-                      <input name="block_notes" className="ui-input" placeholder="Opcional" maxLength={240} />
-                    </label>
-                  </div>
-                </div>
+                <div className="contents" data-quick-shift-extra-blocks />
 
                 <div className="flex flex-wrap items-center gap-2 md:col-span-6" data-quick-shift-add-row>
                   <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" data-add-shift-block>
@@ -2518,6 +2448,45 @@ export default async function StaffSchedulePage({
                       });
                     }
 
+                    function getBlockCount(form) {
+                      return 1 + form.querySelectorAll('[data-quick-shift-block="optional"]').length;
+                    }
+
+                    function createBlock(form) {
+                      var index = getBlockCount(form) + 1;
+                      var firstDateInput = form.querySelector('input[name="block_shift_date"]');
+                      var minDate = firstDateInput ? firstDateInput.getAttribute("min") || "" : "";
+                      var maxDate = firstDateInput ? firstDateInput.getAttribute("max") || "" : "";
+                      var inheritedDate = firstDateInput ? firstDateInput.value || "" : "";
+                      var block = document.createElement("div");
+                      block.className = "rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 md:col-span-6";
+                      block.setAttribute("data-quick-shift-block", "optional");
+                      block.innerHTML =
+                        '<div class="mb-2 flex items-center justify-between gap-2">' +
+                          '<div class="text-sm font-semibold text-[var(--ui-text)]">Bloque ' + index + '</div>' +
+                          '<button type="button" class="text-xs font-semibold text-[var(--ui-danger)]" data-remove-shift-block>Quitar</button>' +
+                        '</div>' +
+                        '<div class="grid gap-3 md:grid-cols-3">' +
+                          '<label class="flex flex-col gap-1">' +
+                            '<span class="ui-label">Día bloque ' + index + '</span>' +
+                            '<input name="block_shift_date" type="date" class="ui-input" value="' + inheritedDate + '" min="' + minDate + '" max="' + maxDate + '" />' +
+                          '</label>' +
+                          '<label class="flex flex-col gap-1">' +
+                            '<span class="ui-label">Inicio bloque ' + index + '</span>' +
+                            '<input name="block_start_time" type="time" class="ui-input" data-quick-shift-time-input />' +
+                          '</label>' +
+                          '<label class="flex flex-col gap-1">' +
+                            '<span class="ui-label">Fin bloque ' + index + '</span>' +
+                            '<input name="block_end_time" type="time" class="ui-input" data-quick-shift-time-input />' +
+                          '</label>' +
+                          '<label class="flex flex-col gap-1 md:col-span-3">' +
+                            '<span class="ui-label">Nota bloque ' + index + '</span>' +
+                            '<input name="block_notes" class="ui-input" placeholder="Opcional" maxLength="240" />' +
+                          '</label>' +
+                        '</div>';
+                      return block;
+                    }
+
                     function isRestDay(form) {
                       var restToggle = form.querySelector("[data-full-day-rest-toggle]");
                       return Boolean(restToggle && restToggle.checked);
@@ -2534,14 +2503,10 @@ export default async function StaffSchedulePage({
                       var optionalBlocks = Array.from(form.querySelectorAll('[data-quick-shift-block="optional"]'));
                       var addButton = form.querySelector("[data-add-shift-block]");
                       var closeInput = form.querySelector("[data-quick-shift-close-input]");
-                      var hiddenBlocks = optionalBlocks.filter(function (block) {
-                        return block.classList.contains("hidden");
-                      });
 
                       if (restDay) {
                         optionalBlocks.forEach(function (block) {
-                          clearBlock(block);
-                          block.classList.add("hidden");
+                          block.remove();
                         });
                         if (closeInput) closeInput.checked = false;
                       }
@@ -2561,7 +2526,7 @@ export default async function StaffSchedulePage({
 
                       if (addButton) {
                         addButton.disabled = restDay;
-                        addButton.setAttribute("aria-disabled", restDay || hiddenBlocks.length === 0 ? "true" : "false");
+                        addButton.setAttribute("aria-disabled", restDay ? "true" : "false");
                       }
                     }
 
@@ -2590,16 +2555,9 @@ export default async function StaffSchedulePage({
                         if (addButton) {
                           var form = addButton.closest("[data-quick-shift-form]");
                           if (!form || isRestDay(form)) return;
-                          var nextBlock = Array.from(form.querySelectorAll('[data-quick-shift-block="optional"]')).find(function (block) {
-                            return block.classList.contains("hidden");
-                          });
-                          if (!nextBlock) return;
-                          nextBlock.classList.remove("hidden");
-                          var firstDateInput = form.querySelector('input[name="block_shift_date"]');
-                          var nextDateInput = nextBlock.querySelector('input[name="block_shift_date"]');
-                          if (firstDateInput && nextDateInput && !nextDateInput.value) {
-                            nextDateInput.value = firstDateInput.value;
-                          }
+                          var container = form.querySelector("[data-quick-shift-extra-blocks]");
+                          if (!container) return;
+                          container.appendChild(createBlock(form));
                           refreshBlockControls(form);
                           return;
                         }
@@ -2609,8 +2567,7 @@ export default async function StaffSchedulePage({
                         var block = removeButton.closest('[data-quick-shift-block="optional"]');
                         var quickForm = removeButton.closest("[data-quick-shift-form]");
                         if (!block || !quickForm) return;
-                        clearBlock(block);
-                        block.classList.add("hidden");
+                        block.remove();
                         refreshBlockControls(quickForm);
                       });
                     }
