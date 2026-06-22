@@ -48,6 +48,7 @@ type ExistingCommercialItemRow = {
   product_id: string | null;
   name: string | null;
   is_active: boolean | null;
+  metadata: Record<string, unknown> | null;
 };
 
 type SiteRow = {
@@ -616,10 +617,12 @@ export default async function NewMenuItemPage({
     supabase
       .schema("pass")
       .from("catalog_items")
-      .select("id,site_id,product_id,name,is_active")
+      .select("id,site_id,product_id,name,is_active,metadata")
       .not("site_id", "is", null)
       .not("product_id", "is", null)
       .eq("is_active", true)
+      .eq("metadata->>source_app", "viso")
+      .eq("metadata->>source_module", "menu_comercial")
       .order("name", { ascending: true }),
   ]);
 
@@ -716,6 +719,35 @@ export default async function NewMenuItemPage({
     }))
     .filter((item) => item.site_id && item.product_id);
 
+  const existingProductIdsBySite = new Map<string, Set<string>>();
+
+  for (const item of existingCommercialItems) {
+    const current = existingProductIdsBySite.get(item.site_id) ?? new Set<string>();
+    current.add(item.product_id);
+    existingProductIdsBySite.set(item.site_id, current);
+  }
+
+  const commercialCoverage = commercialSites.map((site) => {
+    const sellableProducts = products.filter((product) => product.site_ids.includes(site.id));
+    const existingProductIds = existingProductIdsBySite.get(site.id) ?? new Set<string>();
+    const missingProducts = sellableProducts
+      .filter((product) => !existingProductIds.has(product.id))
+      .map((product) => ({
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+      }));
+
+    return {
+      site_id: site.id,
+      site_label: site.name ?? site.code ?? "Sin sede",
+      total_sellable: sellableProducts.length,
+      created_count: sellableProducts.length - missingProducts.length,
+      missing_count: missingProducts.length,
+      missing_products: missingProducts,
+    };
+  });
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -738,6 +770,7 @@ export default async function NewMenuItemPage({
         collections={collections}
         collectionCategoryLinks={collectionCategoryLinks}
         existingCommercialItems={existingCommercialItems}
+        commercialCoverage={commercialCoverage}
         initial={{
           code: "",
           name: "",

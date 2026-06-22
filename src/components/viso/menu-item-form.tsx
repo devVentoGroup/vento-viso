@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 type SiteOption = {
   id: string;
@@ -84,6 +84,19 @@ type ExistingCommercialItemOption = {
   is_active?: boolean | null;
 };
 
+type CommercialCoverageSite = {
+  site_id: string;
+  site_label: string;
+  total_sellable: number;
+  created_count: number;
+  missing_count: number;
+  missing_products: Array<{
+    id: string;
+    name: string | null;
+    sku: string | null;
+  }>;
+};
+
 type MenuItemFormValues = {
   id?: string;
   code: string;
@@ -121,6 +134,7 @@ type MenuItemFormProps = {
   collections?: CommercialCollectionOption[];
   collectionCategoryLinks?: CollectionCategoryLinkOption[];
   existingCommercialItems?: ExistingCommercialItemOption[];
+  commercialCoverage?: CommercialCoverageSite[];
   initial: MenuItemFormValues;
   action: (formData: FormData) => void | Promise<void>;
   formId?: string;
@@ -279,6 +293,7 @@ export function MenuItemForm({
   collections = [],
   collectionCategoryLinks,
   existingCommercialItems = [],
+  commercialCoverage = [],
   initial,
   action,
   formId,
@@ -361,10 +376,10 @@ export function MenuItemForm({
     return map;
   }, [existingCommercialItems, initial.product_id, initial.site_id, mode]);
 
-  const isProductAlreadyCreatedForSite = (targetProductId: string, targetSiteId: string) => {
+  const isProductAlreadyCreatedForSite = useCallback((targetProductId: string, targetSiteId: string) => {
     if (!targetProductId || !targetSiteId) return false;
     return existingCommercialProductIdsBySite.get(targetSiteId)?.has(targetProductId) ?? false;
-  };
+  }, [existingCommercialProductIdsBySite]);
 
   const eligibleProducts = useMemo(() => {
     return products.filter((product) => {
@@ -377,19 +392,23 @@ export function MenuItemForm({
 
   const availableProducts = useMemo(() => {
     return eligibleProducts.filter((product) => !isProductAlreadyCreatedForSite(product.id, siteId));
-  }, [eligibleProducts, existingCommercialProductIdsBySite, siteId]);
+  }, [eligibleProducts, isProductAlreadyCreatedForSite, siteId]);
 
   const alreadyCreatedProducts = useMemo(() => {
     return eligibleProducts.filter((product) => isProductAlreadyCreatedForSite(product.id, siteId));
-  }, [eligibleProducts, existingCommercialProductIdsBySite, siteId]);
+  }, [eligibleProducts, isProductAlreadyCreatedForSite, siteId]);
 
   const visibleProducts = useMemo(() => {
     return showExistingProducts ? eligibleProducts : availableProducts;
   }, [availableProducts, eligibleProducts, showExistingProducts]);
 
+  const selectedSiteCoverage = useMemo(() => {
+    return commercialCoverage.find((site) => site.site_id === siteId) ?? null;
+  }, [commercialCoverage, siteId]);
+
   const selectedProductAlreadyCreated = useMemo(() => {
     return isProductAlreadyCreatedForSite(productId, siteId);
-  }, [existingCommercialProductIdsBySite, productId, siteId]);
+  }, [isProductAlreadyCreatedForSite, productId, siteId]);
 
   const selectedProduct = useMemo(() => {
     return eligibleProducts.find((product) => product.id === productId) ?? null;
@@ -748,6 +767,120 @@ export function MenuItemForm({
           </select>
         </label>
       </div>
+
+      {mode === "create" && commercialCoverage.length > 0 ? (
+        <div className="ui-panel space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="ui-h3">Mapa de creación comercial</div>
+              <p className="ui-caption">
+                Cobertura por satélite: productos operativos vendibles contra items comerciales activos.
+              </p>
+            </div>
+            {selectedSiteCoverage ? (
+              <span className={`ui-chip ${selectedSiteCoverage.missing_count === 0 ? "ui-chip--success" : "ui-chip--warn"}`}>
+                {selectedSiteCoverage.missing_count === 0
+                  ? "Sede completa"
+                  : `${selectedSiteCoverage.missing_count} faltantes`}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {commercialCoverage.map((site) => {
+              const isCurrentSite = site.site_id === siteId;
+              const completion =
+                site.total_sellable > 0
+                  ? Math.round((site.created_count / site.total_sellable) * 100)
+                  : 0;
+
+              return (
+                <button
+                  key={site.site_id}
+                  type="button"
+                  className={`rounded-2xl border p-4 text-left transition ${
+                    isCurrentSite
+                      ? "border-[var(--ui-brand)] bg-[var(--ui-brand-soft)]"
+                      : "border-[var(--ui-border)] bg-white hover:bg-[var(--ui-surface-2)]"
+                  }`}
+                  onClick={() => setSiteId(site.site_id)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black text-[var(--ui-text)]">
+                        {site.site_label}
+                      </div>
+                      <div className="ui-caption mt-1">
+                        {site.created_count} de {site.total_sellable} creados
+                      </div>
+                    </div>
+                    <span className={`ui-chip ${site.missing_count === 0 ? "ui-chip--success" : "ui-chip--warn"}`}>
+                      {completion}%
+                    </span>
+                  </div>
+
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--ui-surface-2)]">
+                    <div
+                      className="h-full rounded-full bg-[var(--ui-brand)]"
+                      style={{ width: `${Math.min(100, Math.max(0, completion))}%` }}
+                    />
+                  </div>
+
+                  <div className="mt-3 text-xs font-semibold text-[var(--ui-muted)]">
+                    {site.missing_count === 0
+                      ? "Todos los vendibles tienen item comercial."
+                      : `Faltan ${site.missing_count} productos por crear.`}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedSiteCoverage && selectedSiteCoverage.missing_products.length > 0 ? (
+            <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-black text-[var(--ui-text)]">
+                    Pendientes en {selectedSiteCoverage.site_label}
+                  </div>
+                  <p className="ui-caption">
+                    Estos son los productos que aparecen en el buscador de creación.
+                  </p>
+                </div>
+                <span className="ui-chip ui-chip--warn">
+                  {selectedSiteCoverage.missing_products.length} pendientes
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {selectedSiteCoverage.missing_products.slice(0, 12).map((product) => (
+                  <button
+                    key={product.id}
+                    type="button"
+                    className="rounded-xl border border-[var(--ui-border)] bg-white px-3 py-2 text-left transition hover:bg-[var(--ui-surface-2)]"
+                    onClick={() => {
+                      setProductId(product.id);
+                      setProductQuery("");
+                      setIsProductPickerOpen(false);
+                    }}
+                  >
+                    <div className="truncate text-xs font-black text-[var(--ui-text)]">
+                      {product.name?.trim() || product.sku?.trim() || "Producto sin nombre"}
+                    </div>
+                    {product.sku ? (
+                      <div className="ui-caption mt-0.5 truncate">SKU {product.sku}</div>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+              {selectedSiteCoverage.missing_products.length > 12 ? (
+                <p className="ui-caption mt-3">
+                  Mostrando 12 de {selectedSiteCoverage.missing_products.length}. Usa el buscador para afinar.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="ui-panel space-y-6">
         <div>
