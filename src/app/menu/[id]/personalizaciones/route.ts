@@ -148,6 +148,38 @@ function asCatalogCode(value: unknown, fallback: string) {
   return slugify(readString(value) || fallback);
 }
 
+async function getAvailableOptionCode(
+  supabase: ReturnType<typeof createAdminClient>,
+  groupId: string,
+  baseCode: string,
+) {
+  const normalizedBase = slugify(baseCode) || `opcion-${Date.now()}`;
+
+  const { data, error } = await supabase
+    .schema("pass")
+    .from("catalog_item_options")
+    .select("code")
+    .eq("option_group_id", groupId)
+    .ilike("code", `${normalizedBase}%`);
+
+  if (error) throw new Error(error.message);
+
+  const existingCodes = new Set(
+    ((data ?? []) as { code: string | null }[])
+      .map((row) => String(row.code ?? "").trim())
+      .filter(Boolean),
+  );
+
+  if (!existingCodes.has(normalizedBase)) return normalizedBase;
+
+  for (let index = 2; index <= 99; index += 1) {
+    const candidate = `${normalizedBase}-${index}`;
+    if (!existingCodes.has(candidate)) return candidate;
+  }
+
+  return `${normalizedBase}-${Date.now()}`;
+}
+
 function readGroupMetadata(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
 }
@@ -717,7 +749,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
       if (groupKind === "choice" && optionOperationalProductId) finalEffectType = "additive";
 
-      const optionCode = asCatalogCode(payload.code, finalName);
+      const optionCode = await getAvailableOptionCode(supabase, groupId, asCatalogCode(payload.code, finalName));
       if (!optionCode) return jsonError("No se pudo generar el código de la opción.");
 
       if ((groupKind === "extras" || groupKind === "replacements" || Boolean(optionOperationalProductId)) && (!optionOperationalProductId || optionQuantityPerOption <= 0)) {
@@ -749,7 +781,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
         .select("id")
         .single();
 
-      if (error || !createdOption?.id) return jsonError(error?.message || "No se pudo crear la opción.");
+      if (error || !createdOption?.id) {
+        return jsonError(error?.code === "23505" ? "Esa opción ya existe en esta personalización." : error?.message || "No se pudo crear la opción.");
+      }
 
       if (optionOperationalProductId) {
         const { error: ruleError } = await supabase.schema("pass").from("catalog_item_option_consumption_rules").insert({
