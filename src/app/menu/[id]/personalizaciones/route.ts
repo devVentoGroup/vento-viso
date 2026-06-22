@@ -669,7 +669,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       const groupKind = getSimpleGroupKind(group);
       const requiresLinkedProduct = groupKind === "recommendations" || Boolean(linkedCatalogItemId);
       const requiresOperationalConsumption = !linkedCatalogItemId && (groupKind === "extras" || groupKind === "replacements");
-      const hasPartialOperationalConsumption = Boolean(optionOperationalProductId) || optionQuantityPerOption > 0 || Boolean(optionStockUnitCode);
+      const hasPartialOperationalConsumption = Boolean(optionOperationalProductId) || Boolean(optionStockUnitCode);
 
       if (requiresLinkedProduct && !linkedCatalogItemId) return jsonError("Selecciona el producto comercial sugerido.");
       if (!requiresLinkedProduct && !name) return jsonError("Falta el nombre de la opción.");
@@ -712,7 +712,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
         linkedCatalogMetadata = {
           linked_catalog_item_id: linkedItem.id,
           linked_catalog_item_price_amount: finalPriceDeltaAmount,
-          linked_catalog_item_image_url: linkedItem.image_url || null,
         };
       }
 

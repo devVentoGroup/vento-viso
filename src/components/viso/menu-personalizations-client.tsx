@@ -1333,7 +1333,7 @@ export function MenuPersonalizationsClient({
                                   <span className="ui-label">Usar producto comercial existente</span>
                                   <select name="linked_catalog_item_id" className="ui-input" defaultValue="">
                                     <option value="">No usar producto comercial existente</option>
-                                    {snapshot.commercialCatalogItems.map((catalogItem) => (
+                                    {snapshot.commercialCatalogItems.filter((catalogItem) => catalogItem.product_id).map((catalogItem) => (
                                       <option key={catalogItem.id} value={catalogItem.id}>
                                         {catalogItem.name || "Producto sin nombre"} · {formatCopAdmin(catalogItem.price_amount)}
                                       </option>
@@ -1341,7 +1341,7 @@ export function MenuPersonalizationsClient({
                                   </select>
                                 </label>
                                 <p className="ui-caption mt-2">
-                                  Si eliges uno, Viso toma nombre, precio e imagen del producto comercial y usa su producto operativo para descontar inventario.
+                                  Si eliges uno, Viso queda vinculado a ese comercial: toma nombre e imagen en vivo y usa su producto operativo para descontar inventario. El precio adicional queda en 0 salvo que lo cambies.
                                 </p>
                               </div>
                               <div className="grid gap-3 lg:grid-cols-[1fr_160px_1fr_auto] lg:items-end">
