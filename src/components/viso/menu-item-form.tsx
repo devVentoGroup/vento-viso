@@ -76,6 +76,14 @@ type CollectionCategoryLinkOption = {
   is_active?: boolean | null;
 };
 
+type ExistingCommercialItemOption = {
+  id: string;
+  site_id: string;
+  product_id: string | null;
+  name: string | null;
+  is_active?: boolean | null;
+};
+
 type MenuItemFormValues = {
   id?: string;
   code: string;
@@ -112,6 +120,7 @@ type MenuItemFormProps = {
   categories: CommercialCategoryOption[];
   collections?: CommercialCollectionOption[];
   collectionCategoryLinks?: CollectionCategoryLinkOption[];
+  existingCommercialItems?: ExistingCommercialItemOption[];
   initial: MenuItemFormValues;
   action: (formData: FormData) => void | Promise<void>;
   formId?: string;
@@ -269,6 +278,7 @@ export function MenuItemForm({
   categories,
   collections = [],
   collectionCategoryLinks,
+  existingCommercialItems = [],
   initial,
   action,
   formId,
@@ -279,6 +289,7 @@ export function MenuItemForm({
   const [productId, setProductId] = useState(initial.product_id);
   const [productQuery, setProductQuery] = useState("");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
+  const [showExistingProducts, setShowExistingProducts] = useState(false);
   const [priceAmount, setPriceAmount] = useState(initial.price_amount);
   const [siteId, setSiteId] = useState(initial.site_id || sites[0]?.id || "");
   const [commercialCollectionId, setCommercialCollectionId] = useState(
@@ -327,7 +338,35 @@ export function MenuItemForm({
     return selected.name ?? selected.code ?? "Sin sede";
   }, [sites, siteId]);
 
-  const visibleProducts = useMemo(() => {
+  const existingCommercialProductIdsBySite = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+
+    for (const item of existingCommercialItems) {
+      if (item.is_active === false) continue;
+
+      const itemSiteId = String(item.site_id ?? "").trim();
+      const itemProductId = String(item.product_id ?? "").trim();
+
+      if (!itemSiteId || !itemProductId) continue;
+
+      const current = map.get(itemSiteId) ?? new Set<string>();
+      current.add(itemProductId);
+      map.set(itemSiteId, current);
+    }
+
+    if (mode === "edit" && initial.site_id && initial.product_id) {
+      map.get(initial.site_id)?.delete(initial.product_id);
+    }
+
+    return map;
+  }, [existingCommercialItems, initial.product_id, initial.site_id, mode]);
+
+  const isProductAlreadyCreatedForSite = (targetProductId: string, targetSiteId: string) => {
+    if (!targetProductId || !targetSiteId) return false;
+    return existingCommercialProductIdsBySite.get(targetSiteId)?.has(targetProductId) ?? false;
+  };
+
+  const eligibleProducts = useMemo(() => {
     return products.filter((product) => {
       if (product.is_active === false) return false;
       const siteIds = product.site_ids || [];
@@ -336,9 +375,25 @@ export function MenuItemForm({
     });
   }, [products, siteId]);
 
+  const availableProducts = useMemo(() => {
+    return eligibleProducts.filter((product) => !isProductAlreadyCreatedForSite(product.id, siteId));
+  }, [eligibleProducts, existingCommercialProductIdsBySite, siteId]);
+
+  const alreadyCreatedProducts = useMemo(() => {
+    return eligibleProducts.filter((product) => isProductAlreadyCreatedForSite(product.id, siteId));
+  }, [eligibleProducts, existingCommercialProductIdsBySite, siteId]);
+
+  const visibleProducts = useMemo(() => {
+    return showExistingProducts ? eligibleProducts : availableProducts;
+  }, [availableProducts, eligibleProducts, showExistingProducts]);
+
+  const selectedProductAlreadyCreated = useMemo(() => {
+    return isProductAlreadyCreatedForSite(productId, siteId);
+  }, [existingCommercialProductIdsBySite, productId, siteId]);
+
   const selectedProduct = useMemo(() => {
-    return visibleProducts.find((product) => product.id === productId) ?? null;
-  }, [visibleProducts, productId]);
+    return eligibleProducts.find((product) => product.id === productId) ?? null;
+  }, [eligibleProducts, productId]);
 
   const matchingProducts = useMemo(() => {
     const query = normalizeSearchValue(productQuery);
@@ -350,6 +405,8 @@ export function MenuItemForm({
   const productResultsLimit = productQuery.trim() ? 30 : 12;
   const productResults = matchingProducts.slice(0, productResultsLimit);
   const hasMoreProductResults = matchingProducts.length > productResults.length;
+  const availableProductCount = availableProducts.length;
+  const alreadyCreatedProductCount = alreadyCreatedProducts.length;
 
   const visibleCollections = useMemo(() => {
     return collections.filter((collection) => {
@@ -439,12 +496,12 @@ export function MenuItemForm({
 
   useEffect(() => {
     if (!productId) return;
-    const stillValid = visibleProducts.some((product) => product.id === productId);
-    if (!stillValid) {
+    const stillValid = eligibleProducts.some((product) => product.id === productId);
+    if (!stillValid || selectedProductAlreadyCreated) {
       setProductId("");
       setProductQuery("");
     }
-  }, [productId, visibleProducts]);
+  }, [eligibleProducts, productId, selectedProductAlreadyCreated]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -518,6 +575,8 @@ export function MenuItemForm({
       setOpensDetailModal(true);
     }
   }, [hasOperationalOptions, opensDetailModal]);
+
+  const submitDisabled = mode === "create" && (!siteId || !productId || selectedProductAlreadyCreated);
 
   const updateOptionGroup = <K extends keyof MenuItemOptionGroupLine>(
     groupId: string,
@@ -769,8 +828,26 @@ export function MenuItemForm({
             ) : null}
           </label>
           <div className="space-y-2" ref={productPickerRef}>
-            <span className="ui-label">Producto operacional base</span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="ui-label">Producto operacional base</span>
+              {mode === "create" ? (
+                <span className="rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-[11px] font-bold text-[var(--ui-muted)]">
+                  {availableProductCount} disponibles · {alreadyCreatedProductCount} ya creados
+                </span>
+              ) : null}
+            </div>
             <input type="hidden" name="product_id" value={productId} />
+
+            {mode === "create" && alreadyCreatedProductCount > 0 ? (
+              <label className="flex items-center gap-2 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--ui-muted)]">
+                <input
+                  type="checkbox"
+                  checked={showExistingProducts}
+                  onChange={(event) => setShowExistingProducts(event.target.checked)}
+                />
+                Mostrar productos ya creados en esta sede
+              </label>
+            ) : null}
 
             <div className="relative">
               <input
@@ -816,6 +893,7 @@ export function MenuItemForm({
                     productResults.map((product) => {
                       const isSelected = product.id === productId;
                       const optionPrice = getProductPriceForSite(product, siteId);
+                      const alreadyCreated = isProductAlreadyCreatedForSite(product.id, siteId);
 
                       return (
                         <button
@@ -823,22 +901,37 @@ export function MenuItemForm({
                           type="button"
                           role="option"
                           aria-selected={isSelected}
-                          className={`block w-full border-b border-[var(--ui-border)] px-3 py-3 text-left last:border-b-0 transition hover:bg-[var(--ui-surface-2)] ${
-                            isSelected ? "bg-[var(--ui-surface-2)]" : "bg-white"
+                          aria-disabled={alreadyCreated}
+                          disabled={alreadyCreated}
+                          className={`block w-full border-b border-[var(--ui-border)] px-3 py-3 text-left last:border-b-0 transition ${
+                            alreadyCreated
+                              ? "cursor-not-allowed bg-slate-50 opacity-70"
+                              : isSelected
+                                ? "bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-2)]"
+                                : "bg-white hover:bg-[var(--ui-surface-2)]"
                           }`}
                           onClick={() => {
+                            if (alreadyCreated) return;
                             setProductId(product.id);
                             setProductQuery("");
                             setIsProductPickerOpen(false);
                           }}
                         >
-                          <span className="block truncate text-sm font-black text-[var(--ui-text)]">
-                            {getProductDisplayName(product)}
+                          <span className="flex items-center gap-2">
+                            <span className="block min-w-0 flex-1 truncate text-sm font-black text-[var(--ui-text)]">
+                              {getProductDisplayName(product)}
+                            </span>
+                            {alreadyCreated ? (
+                              <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.04em] text-amber-800">
+                                Ya creado
+                              </span>
+                            ) : null}
                           </span>
                           <span className="mt-0.5 block truncate text-xs font-semibold text-[var(--ui-muted)]">
                             {[
                               product.sku ? `SKU ${product.sku}` : null,
                               optionPrice != null ? `Precio base ${asCop(String(optionPrice))}` : null,
+                              alreadyCreated ? "Edita el item existente para esta sede" : null,
                             ]
                               .filter(Boolean)
                               .join(" · ") || "Producto habilitado para esta sede"}
@@ -848,7 +941,9 @@ export function MenuItemForm({
                     })
                   ) : (
                     <div className="px-3 py-4 text-sm font-semibold text-[var(--ui-muted)]">
-                      No hay productos que coincidan con la búsqueda.
+                      {availableProductCount === 0 && alreadyCreatedProductCount > 0 && !showExistingProducts
+                        ? "Todos los productos habilitados para esta sede ya tienen item comercial."
+                        : "No hay productos que coincidan con la búsqueda."}
                     </div>
                   )}
 
@@ -896,9 +991,21 @@ export function MenuItemForm({
               </p>
             )}
 
-            {siteId && visibleProducts.length === 0 ? (
+            {siteId && eligibleProducts.length === 0 ? (
               <p className="ui-caption">
                 No hay productos operacionales habilitados para crear ítems comerciales en esta sede.
+              </p>
+            ) : null}
+
+            {siteId && eligibleProducts.length > 0 && availableProductCount === 0 ? (
+              <p className="ui-caption">
+                Todos los productos operacionales habilitados para esta sede ya tienen item comercial. Activa “Mostrar productos ya creados” para auditarlos.
+              </p>
+            ) : null}
+
+            {selectedProductAlreadyCreated ? (
+              <p className="ui-caption">
+                Este producto ya tiene item comercial en la sede seleccionada. Cambia el producto o edita el item existente.
               </p>
             ) : null}
             {selectedProduct && suggestedPrice != null ? (
@@ -1487,7 +1594,7 @@ export function MenuItemForm({
           {secondaryActions}
         </div>
 
-        <button type="submit" form={resolvedFormId} className="ui-btn ui-btn--brand">
+        <button type="submit" form={resolvedFormId} className="ui-btn ui-btn--brand" disabled={submitDisabled}>
           {mode === "create" ? "Crear item" : "Guardar cambios"}
         </button>
       </div>
