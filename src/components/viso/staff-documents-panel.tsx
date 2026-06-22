@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 
 export type DocRow = {
@@ -36,7 +37,7 @@ type StaffDocumentsPanelProps = {
   eligibility: EligibilityRow | null;
   documentTypeNamesById: Record<string, string>;
   documentTypes: DocumentTypeOption[];
-  uploadDocumentAction: (formData: FormData) => Promise<void>;
+  uploadDocumentAction: (formData: FormData) => Promise<{ ok: boolean; error?: string }>;
   canUploadDocuments?: boolean;
   canEditDocuments?: boolean;
   updateDocumentAction?: (formData: FormData) => Promise<void>;
@@ -87,10 +88,11 @@ function UploadDocumentForm({
 }: {
   employeeId: string;
   documentTypes: DocumentTypeOption[];
-  uploadDocumentAction: (formData: FormData) => Promise<void>;
+  uploadDocumentAction: (formData: FormData) => Promise<{ ok: boolean; error?: string }>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onCancel: () => void;
 }) {
+  const router = useRouter();
   const [selectedTypeId, setSelectedTypeId] = useState<string>("");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -129,17 +131,31 @@ function UploadDocumentForm({
       return;
     }
 
-    setIsUploading(true);
-
     const formData = new FormData(form);
     formData.set("employee_id", employeeId);
     formData.set("file_name", sanitizeDocumentFileName(file.name));
     formData.set("file_size_bytes", String(file.size));
     formData.set("file_mime", mime);
 
-    await uploadDocumentAction(formData);
+    setIsUploading(true);
 
-    setIsUploading(false);
+    try {
+      const result = await uploadDocumentAction(formData);
+
+      if (!result.ok) {
+        setUploadError(result.error || "No se pudo subir el documento.");
+        return;
+      }
+
+      form.reset();
+      router.refresh();
+      onCancel();
+    } catch (error) {
+      console.error("[VISO] error al subir documento de trabajador:", error);
+      setUploadError("No se pudo subir el documento. Revisa la conexión e intenta de nuevo.");
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   return (

@@ -725,7 +725,7 @@ async function uploadStaffDocument(formData: FormData) {
   const mime = normalizePdfMime(asText(formData.get("file_mime")) || "application/pdf");
 
   if (!employeeId || !documentTypeId) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Faltan empleado o tipo de documento.")}`);
+    return { ok: false, error: "Faltan empleado o tipo de documento." };
   }
 
   await requireAppAccess({
@@ -737,12 +737,12 @@ async function uploadStaffDocument(formData: FormData) {
   const supabase = createAdminClient();
   let storagePath = "";
 
-  const failAndCleanup = async (message: string): Promise<never> => {
+  const failAndCleanup = async (message: string) => {
     if (storagePath && isSafeStaffDocumentPath(storagePath, employeeId)) {
       await supabase.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
     }
 
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent(message)}`);
+    return { ok: false, error: message };
   };
 
   const uploadedFile = file instanceof File ? file : null;
@@ -753,23 +753,23 @@ async function uploadStaffDocument(formData: FormData) {
   const validFile = uploadedFile;
 
   if (!fileName.toLowerCase().endsWith(".pdf")) {
-    await failAndCleanup("Solo se permiten archivos PDF.");
+    return await failAndCleanup("Solo se permiten archivos PDF.");
   }
 
   if (!mime) {
-    await failAndCleanup("Solo se permiten archivos PDF.");
+    return await failAndCleanup("Solo se permiten archivos PDF.");
   }
 
   if (fileSizeBytes <= 0) {
-    await failAndCleanup("El archivo está vacío o no tiene tamaño válido.");
+    return await failAndCleanup("El archivo está vacío o no tiene tamaño válido.");
   }
 
   if (fileSizeBytes > STAFF_DOCUMENT_MAX_BYTES) {
-    await failAndCleanup("El PDF supera el límite permitido de 20 MB.");
+    return await failAndCleanup("El PDF supera el límite permitido de 20 MB.");
   }
 
   if (validFile.size !== fileSizeBytes) {
-    await failAndCleanup("El tamaño del archivo no coincide.");
+    return await failAndCleanup("El tamaño del archivo no coincide.");
   }
 
   const { data: docType } = await supabase
@@ -787,7 +787,7 @@ async function uploadStaffDocument(formData: FormData) {
 
   if (docType.requires_expiry) {
     if (!issueDate) {
-      await failAndCleanup("Indica la fecha de expedición.");
+      return await failAndCleanup("Indica la fecha de expedición.");
     }
 
     let expiry: string | null = expiryDate || null;
@@ -799,7 +799,7 @@ async function uploadStaffDocument(formData: FormData) {
     }
 
     if (!expiry) {
-      await failAndCleanup("Indica la fecha de vencimiento.");
+      return await failAndCleanup("Indica la fecha de vencimiento.");
     }
 
     issueDateValue = issueDate;
@@ -809,7 +809,7 @@ async function uploadStaffDocument(formData: FormData) {
   storagePath = `${STAFF_DOCUMENT_STORAGE_PREFIX}/${employeeId}/${Date.now()}_${crypto.randomUUID()}_${fileName}`;
 
   if (!isSafeStaffDocumentPath(storagePath, employeeId)) {
-    await failAndCleanup("Ruta de archivo inválida.");
+    return await failAndCleanup("Ruta de archivo inválida.");
   }
 
   const { error: uploadError } = await supabase.storage
@@ -821,7 +821,7 @@ async function uploadStaffDocument(formData: FormData) {
     });
 
   if (uploadError) {
-    await failAndCleanup("Error al subir el archivo: " + uploadError.message);
+    return await failAndCleanup("Error al subir el archivo: " + uploadError.message);
   }
 
   const insertPayload = {
@@ -845,11 +845,11 @@ async function uploadStaffDocument(formData: FormData) {
 
   if (insertError) {
     await supabase.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Error al registrar el documento: " + insertError.message)}`);
+    return { ok: false, error: "Error al registrar el documento: " + insertError.message };
   }
 
   revalidatePath(`/staff/${employeeId}`);
-  redirect(`/staff/${employeeId}?ok=document_uploaded`);
+  return { ok: true };
 }
 
 async function updateStaffDocument(formData: FormData) {

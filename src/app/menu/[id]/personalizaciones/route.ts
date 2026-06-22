@@ -358,7 +358,7 @@ async function fetchSnapshot(supabase: ReturnType<typeof createAdminClient>, ite
     supabase
       .schema("pass")
       .from("catalog_items")
-      .select("id,name,price_amount,image_url,category_label,is_active")
+      .select("id,name,product_id,description,price_amount,image_url,category_label,is_active")
       .eq("site_id", currentItem.site_id)
       .eq("is_active", true)
       .neq("id", itemId)
@@ -650,8 +650,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       const name = readString(payload.name);
       const description = readOptionalText(payload.description);
       const linkedCatalogItemId = readOptionalText(payload.linkedCatalogItemId);
-      const optionOperationalProductId = readString(payload.optionProductId);
-      const optionQuantityPerOption = Math.max(0, readNumber(payload.optionQuantityPerOption, 0));
+      let optionOperationalProductId = readString(payload.optionProductId);
+      let optionQuantityPerOption = Math.max(0, readNumber(payload.optionQuantityPerOption, 0));
       const optionStockUnitCode = readOptionalText(payload.optionStockUnitCode);
       const replacementTargetIngredientProductId = readString(payload.replacementTargetIngredientProductId);
 
@@ -667,8 +667,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       if (groupError || !group) return jsonError(groupError?.message || "El grupo no pertenece a este producto.");
 
       const groupKind = getSimpleGroupKind(group);
-      const requiresLinkedProduct = groupKind === "recommendations";
-      const requiresOperationalConsumption = groupKind === "extras" || groupKind === "replacements";
+      const requiresLinkedProduct = groupKind === "recommendations" || Boolean(linkedCatalogItemId);
+      const requiresOperationalConsumption = !linkedCatalogItemId && (groupKind === "extras" || groupKind === "replacements");
       const hasPartialOperationalConsumption = Boolean(optionOperationalProductId) || optionQuantityPerOption > 0 || Boolean(optionStockUnitCode);
 
       if (requiresLinkedProduct && !linkedCatalogItemId) return jsonError("Selecciona el producto comercial sugerido.");
@@ -690,7 +690,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       if (linkedCatalogItemId) {
         const [{ data: currentItem }, { data: linkedItem, error: linkedError }] = await Promise.all([
           supabase.schema("pass").from("catalog_items").select("id,site_id").eq("id", itemId).maybeSingle(),
-          supabase.schema("pass").from("catalog_items").select("id,site_id,name,description,price_amount,is_active").eq("id", linkedCatalogItemId).maybeSingle(),
+          supabase.schema("pass").from("catalog_items").select("id,site_id,product_id,name,description,price_amount,image_url,is_active").eq("id", linkedCatalogItemId).maybeSingle(),
         ]);
 
         if (linkedError || !currentItem || !linkedItem || linkedItem.site_id !== currentItem.site_id || linkedItem.is_active === false) {
@@ -700,12 +700,30 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
         const linkedPrice = Number(linkedItem.price_amount ?? 0);
         finalName = linkedItem.name || name;
         finalDescription = description || linkedItem.description || null;
-        finalPriceDeltaAmount = Number.isFinite(linkedPrice) ? Math.max(0, linkedPrice) : 0;
-        linkedCatalogMetadata = { linked_catalog_item_id: linkedItem.id, linked_catalog_item_price_amount: finalPriceDeltaAmount };
+        if (groupKind === "recommendations") {
+          finalPriceDeltaAmount = Number.isFinite(linkedPrice) ? Math.max(0, linkedPrice) : 0;
+        }
+        if (!optionOperationalProductId && linkedItem.product_id) {
+          optionOperationalProductId = linkedItem.product_id;
+        }
+        if (optionOperationalProductId && optionQuantityPerOption <= 0) {
+          optionQuantityPerOption = 1;
+        }
+        linkedCatalogMetadata = {
+          linked_catalog_item_id: linkedItem.id,
+          linked_catalog_item_price_amount: finalPriceDeltaAmount,
+          linked_catalog_item_image_url: linkedItem.image_url || null,
+        };
       }
+
+      if (groupKind === "choice" && optionOperationalProductId) finalEffectType = "additive";
 
       const optionCode = asCatalogCode(payload.code, finalName);
       if (!optionCode) return jsonError("No se pudo generar el código de la opción.");
+
+      if ((groupKind === "extras" || groupKind === "replacements" || Boolean(optionOperationalProductId)) && (!optionOperationalProductId || optionQuantityPerOption <= 0)) {
+        return jsonError("La opción necesita producto operacional y cantidad de consumo mayor a 0.");
+      }
 
       const { data: createdOption, error } = await supabase
         .schema("pass")

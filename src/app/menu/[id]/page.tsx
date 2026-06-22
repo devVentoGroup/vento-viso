@@ -121,6 +121,8 @@ type CatalogItemOptionRow = {
 type CommercialCatalogItemOptionRow = {
   id: string;
   name: string | null;
+  product_id: string | null;
+  description: string | null;
   price_amount: number | string | null;
   image_url: string | null;
   category_label: string | null;
@@ -2270,7 +2272,7 @@ export default async function MenuItemDetailPage({
   const { data: commercialCatalogItemsRaw } = await supabase
     .schema("pass")
     .from("catalog_items")
-    .select("id,name,price_amount,image_url,category_label,is_active")
+    .select("id,name,product_id,description,price_amount,image_url,category_label,is_active")
     .eq("site_id", row.site_id)
     .eq("is_active", true)
     .neq("id", row.id)

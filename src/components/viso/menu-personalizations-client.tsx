@@ -93,6 +93,8 @@ type InventoryUnitRow = {
 type CommercialCatalogItemOptionRow = {
   id: string;
   name: string | null;
+  product_id: string | null;
+  description: string | null;
   price_amount: number | string | null;
   image_url: string | null;
   category_label: string | null;
@@ -425,6 +427,15 @@ function findVisualAssetForOption(option: CatalogItemOptionRow, assets: CatalogO
 
 function getOptionImageUrl(option: CatalogItemOptionRow, assets: CatalogOptionVisualAssetRow[]) {
   return option.image_url || findVisualAssetForOption(option, assets)?.image_url || null;
+}
+
+function getLinkedCatalogItemImageUrl(
+  option: CatalogItemOptionRow,
+  linkedCatalogItemsById: Map<string, CommercialCatalogItemOptionRow>,
+) {
+  const linkedItemId = getLinkedCatalogItemId(option);
+  const linkedItem = linkedItemId ? linkedCatalogItemsById.get(linkedItemId) : null;
+  return linkedItem?.image_url || null;
 }
 
 function getOptionDisplayName(option: CatalogItemOptionRow, linkedCatalogItemsById: Map<string, CommercialCatalogItemOptionRow>) {
@@ -1062,7 +1073,9 @@ export function MenuPersonalizationsClient({
                           const optionMeta = getOptionDisplayCategory(option, commercialCatalogItemsById);
                           const optionPrice = Number(option.price_delta_amount ?? 0);
                           const hasOperationalRules = consumptionRules.length > 0 || recipeEffects.length > 0;
-                          const optionImageUrl = getOptionImageUrl(option, snapshot.visualAssets);
+                          const optionImageUrl =
+                            getOptionImageUrl(option, snapshot.visualAssets) ||
+                            getLinkedCatalogItemImageUrl(option, commercialCatalogItemsById);
                           const optionEditKey = `edit-option:${option.id}`;
                           const optionInventoryKey = `inventory-option:${option.id}`;
 
@@ -1315,10 +1328,26 @@ export function MenuPersonalizationsClient({
                             </div>
                           ) : (
                             <div className="space-y-4">
+                              <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+                                <label className="space-y-2">
+                                  <span className="ui-label">Usar producto comercial existente</span>
+                                  <select name="linked_catalog_item_id" className="ui-input" defaultValue="">
+                                    <option value="">No usar producto comercial existente</option>
+                                    {snapshot.commercialCatalogItems.map((catalogItem) => (
+                                      <option key={catalogItem.id} value={catalogItem.id}>
+                                        {catalogItem.name || "Producto sin nombre"} · {formatCopAdmin(catalogItem.price_amount)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <p className="ui-caption mt-2">
+                                  Si eliges uno, Viso toma nombre, precio e imagen del producto comercial y usa su producto operativo para descontar inventario.
+                                </p>
+                              </div>
                               <div className="grid gap-3 lg:grid-cols-[1fr_160px_1fr_auto] lg:items-end">
                                 <label className="space-y-2">
                                   <span className="ui-label">Opción visible</span>
-                                  <input name="name" className="ui-input" placeholder="Ej. Vaso, cono, Oreo, leche de almendra" required />
+                                  <input name="name" className="ui-input" placeholder="Déjalo vacío si usas un producto comercial" />
                                 </label>
                                 <label className="space-y-2">
                                   <span className="ui-label">Precio adicional</span>
@@ -1352,7 +1381,7 @@ export function MenuPersonalizationsClient({
                                   <div className="grid gap-3 lg:grid-cols-[1fr_120px_150px]">
                                     <label className="space-y-2">
                                       <span className="ui-label">Producto operacional</span>
-                                      <select name="option_product_id" className="ui-input" required={groupKind === "extras" || groupKind === "replacements"}>
+                                      <select name="option_product_id" className="ui-input">
                                         <option value="">Selecciona insumo</option>
                                         {snapshot.consumptionProducts.map((product) => (
                                           <option key={product.id} value={product.id}>{(product.name ?? "Sin nombre") + (product.sku ? ` · ${product.sku}` : "")}</option>
@@ -1361,7 +1390,7 @@ export function MenuPersonalizationsClient({
                                     </label>
                                     <label className="space-y-2">
                                       <span className="ui-label">Cantidad</span>
-                                      <input name="option_quantity_per_option" type="number" min="0.0001" step="0.0001" className="ui-input" required={groupKind === "extras" || groupKind === "replacements"} />
+                                      <input name="option_quantity_per_option" type="number" min="0.0001" step="0.0001" className="ui-input" defaultValue="1" />
                                     </label>
                                     <label className="space-y-2">
                                       <span className="ui-label">Unidad</span>
