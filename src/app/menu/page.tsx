@@ -1,9 +1,7 @@
-﻿import { revalidatePath } from "next/cache";
+﻿import { CommercialMenuOrganizer } from "@/components/viso/commercial-menu-organizer";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
-import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -41,12 +39,6 @@ type CollectionCategoryLinkRow = {
   is_active: boolean | null;
 };
 
-type MenuItemMoveRow = {
-  id: string;
-  name: string;
-  sort_order: number | null;
-};
-
 function safeDecode(value: string | null | undefined) {
   if (!value) return "";
   try {
@@ -54,24 +46,6 @@ function safeDecode(value: string | null | undefined) {
   } catch {
     return value;
   }
-}
-
-function formatCop(value: number) {
-  return new Intl.NumberFormat("es-CO", {
-    style: "currency",
-    currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(value || 0);
-}
-
-function readNumericMeta(metadata: Record<string, unknown> | null | undefined, key: string) {
-  const raw = metadata?.[key];
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-  if (typeof raw === "string") {
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
 }
 
 function hasTextValue(value: unknown) {
@@ -98,99 +72,6 @@ function isVisoCommercialMenuItem(row: MenuItemRow) {
     row.metadata?.source_app === "viso" &&
     row.metadata?.source_module === "menu_comercial"
   );
-}
-
-async function moveMenuItem(formData: FormData) {
-  "use server";
-
-  const supabase = createAdminClient();
-
-  const itemId = String(formData.get("item_id") ?? "").trim();
-  const direction = String(formData.get("direction") ?? "").trim();
-
-  if (!itemId || !["up", "down"].includes(direction)) {
-    redirect("/menu?error=" + encodeURIComponent("Movimiento inválido."));
-  }
-
-  const { data: current, error: currentError } = await supabase
-    .schema("pass")
-    .from("catalog_items")
-    .select("id,site_id,commercial_collection_id,commercial_category_id")
-    .eq("id", itemId)
-    .maybeSingle();
-
-  if (currentError || !current) {
-    redirect(
-      "/menu?error=" +
-      encodeURIComponent(currentError?.message || "No se encontro el item comercial."),
-    );
-  }
-
-  if (!current.commercial_category_id) {
-    redirect("/menu?error=" + encodeURIComponent("El item no tiene categoría comercial."));
-  }
-
-  let groupQuery = supabase
-    .schema("pass")
-    .from("catalog_items")
-    .select("id,name,sort_order")
-    .eq("site_id", current.site_id)
-    .eq("commercial_category_id", current.commercial_category_id)
-    .not("product_id", "is", null)
-    .gt("price_amount", 0)
-    .eq("metadata->>source_app", "viso")
-    .eq("metadata->>source_module", "menu_comercial")
-    .order("sort_order", { ascending: true })
-    .order("name", { ascending: true });
-
-  groupQuery = current.commercial_collection_id
-    ? groupQuery.eq("commercial_collection_id", current.commercial_collection_id)
-    : groupQuery.is("commercial_collection_id", null);
-
-  const { data: groupRaw, error: groupError } = await groupQuery;
-
-  if (groupError) {
-    redirect("/menu?error=" + encodeURIComponent(groupError.message));
-  }
-
-  const group = ((groupRaw ?? []) as MenuItemMoveRow[]).sort((a, b) => {
-    const aOrder = sortNumber(a.sort_order);
-    const bOrder = sortNumber(b.sort_order);
-
-    if (aOrder !== bOrder) return aOrder - bOrder;
-    return a.name.localeCompare(b.name, "es-CO");
-  });
-
-  const currentIndex = group.findIndex((item) => item.id === itemId);
-  const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-
-  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= group.length) {
-    redirect("/menu?ok=" + encodeURIComponent("Orden sin cambios."));
-  }
-
-  const reordered = [...group];
-  const moving = reordered[currentIndex];
-  reordered[currentIndex] = reordered[targetIndex];
-  reordered[targetIndex] = moving;
-
-  const updates = await Promise.all(
-    reordered.map((item, index) =>
-      supabase
-        .schema("pass")
-        .from("catalog_items")
-        .update({ sort_order: index * 10 })
-        .eq("id", item.id),
-    ),
-  );
-
-  const failed = updates.find((result) => result.error);
-
-  if (failed?.error) {
-    redirect("/menu?error=" + encodeURIComponent(failed.error.message));
-  }
-
-  revalidatePath("/menu");
-  redirect("/menu?ok=" + encodeURIComponent("Orden de productos actualizado."));
 }
 
 export default async function MenuPage({
@@ -415,150 +296,8 @@ export default async function MenuPage({
       <div className="ui-panel">
         {menuError ? (
           <div className="ui-empty">Corrige el error de consulta para ver los ítems comerciales.</div>
-        ) : rows.length === 0 ? (
-          <div className="ui-empty">No hay items comerciales configurados.</div>
         ) : (
-          <div className="space-y-8">
-            {organizedMenu.map((siteGroup) => (
-              <section key={siteGroup.siteId} className="space-y-5">
-                <div>
-                  <h2 className="text-lg font-semibold text-[var(--ui-text)]">
-                    {siteGroup.siteLabel}
-                  </h2>
-                  <p className="ui-caption">
-                    Organizacion comercial por coleccion, categoria y producto.
-                  </p>
-                </div>
-
-                {siteGroup.collections.map((collectionGroup) => (
-                  <div
-                    key={collectionGroup.collectionId}
-                    className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4"
-                  >
-                    <div className="mb-4">
-                      <h3 className="text-base font-semibold text-[var(--ui-text)]">
-                        {collectionGroup.label}
-                      </h3>
-                      {collectionGroup.subtitle ? (
-                        <p className="ui-caption">{collectionGroup.subtitle}</p>
-                      ) : null}
-                    </div>
-
-                    <div className="space-y-6">
-                      {collectionGroup.categories.map((categoryGroup) => (
-                        <div
-                          key={categoryGroup.categoryId}
-                          className="rounded-2xl border border-[var(--ui-border)] bg-white p-4"
-                        >
-                          <div className="mb-3 flex items-center justify-between gap-3">
-                            <div>
-                              <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--ui-muted)]">
-                                {categoryGroup.label}
-                              </h4>
-                              <p className="ui-caption">
-                                {categoryGroup.rows.length} {categoryGroup.rows.length === 1 ? "producto" : "productos"}
-                              </p>
-                            </div>
-                          </div>
-
-                          <Table>
-                            <TableHead>
-                              <TableRow>
-                                <TableHeaderCell>Orden</TableHeaderCell>
-                                <TableHeaderCell>Item</TableHeaderCell>
-                                <TableHeaderCell>Precio</TableHeaderCell>
-                                <TableHeaderCell>Costo receta</TableHeaderCell>
-                                <TableHeaderCell>Margen</TableHeaderCell>
-                                <TableHeaderCell>Estado</TableHeaderCell>
-                                <TableHeaderCell></TableHeaderCell>
-                              </TableRow>
-                            </TableHead>
-                            <TableBody>
-                              {categoryGroup.rows.map((row, index) => {
-                                const recipeCost = readNumericMeta(row.metadata, "recipe_cost_amount");
-                                const marginAmount = readNumericMeta(row.metadata, "margin_amount");
-                                const marginPct = readNumericMeta(row.metadata, "margin_pct");
-
-                                return (
-                                  <TableRow key={row.id}>
-                                    <TableCell>
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-sm font-semibold text-[var(--ui-text)]">
-                                          {index + 1}
-                                        </span>
-
-                                        <div className="flex gap-1">
-                                          <form action={moveMenuItem}>
-                                            <input type="hidden" name="item_id" value={row.id} />
-                                            <input type="hidden" name="direction" value="up" />
-                                            <button
-                                              type="submit"
-                                              className="ui-btn ui-btn--ghost ui-btn--sm"
-                                              disabled={index === 0}
-                                            >
-                                              Subir
-                                            </button>
-                                          </form>
-
-                                          <form action={moveMenuItem}>
-                                            <input type="hidden" name="item_id" value={row.id} />
-                                            <input type="hidden" name="direction" value="down" />
-                                            <button
-                                              type="submit"
-                                              className="ui-btn ui-btn--ghost ui-btn--sm"
-                                              disabled={index === categoryGroup.rows.length - 1}
-                                            >
-                                              Bajar
-                                            </button>
-                                          </form>
-                                        </div>
-                                      </div>
-                                    </TableCell>
-
-                                    <TableCell>
-                                      <div className="font-semibold">{row.name}</div>
-                                      <div className="ui-caption">{row.code}</div>
-                                      {row.is_featured ? <div className="ui-caption">Destacado</div> : null}
-                                    </TableCell>
-
-                                    <TableCell>{formatCop(row.price_amount)}</TableCell>
-                                    <TableCell>{recipeCost == null ? "-" : formatCop(recipeCost)}</TableCell>
-
-                                    <TableCell>
-                                      {marginAmount == null ? "-" : (
-                                        <div>
-                                          <div>{formatCop(marginAmount)}</div>
-                                          {marginPct == null ? null : (
-                                            <div className="ui-caption">{marginPct.toFixed(2)}%</div>
-                                          )}
-                                        </div>
-                                      )}
-                                    </TableCell>
-
-                                    <TableCell>
-                                      <span className={`ui-chip ${row.is_active ? "ui-chip--success" : ""}`}>
-                                        {row.is_active ? "Activo" : "Inactivo"}
-                                      </span>
-                                    </TableCell>
-
-                                    <TableCell className="text-right">
-                                      <Link href={`/menu/${row.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
-                                        Editar
-                                      </Link>
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </section>
-            ))}
-          </div>
+          <CommercialMenuOrganizer initialMenu={organizedMenu} />
         )}
       </div>
     </div>

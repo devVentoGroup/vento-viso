@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
+import { CommercialMenuImageField } from "@/components/viso/commercial-menu-image-field";
 import { MenuPersonalizationsClient } from "@/components/viso/menu-personalizations-client";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -2710,10 +2711,10 @@ export default async function MenuItemDetailPage({
               <input name="sort_order" type="number" min="0" step="1" className="ui-input" defaultValue={String(row.sort_order ?? 0)} />
             </label>
 
-            <label className="space-y-2 lg:col-span-3">
-              <span className="ui-label">Imagen comercial URL</span>
-              <input name="image_url" className="ui-input" defaultValue={row.image_url ?? ""} placeholder="https://..." />
-            </label>
+            <CommercialMenuImageField
+              initialUrl={row.image_url}
+              ownerId={row.id}
+            />
 
             <label className="space-y-2">
               <span className="ui-label">Badges</span>
