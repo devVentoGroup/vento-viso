@@ -2442,6 +2442,8 @@ export default async function StaffSchedulePage({
               <Script id="viso-quick-shift-blocks" strategy="afterInteractive">
                 {`
                   (function () {
+                    var draftKey = "viso:quick-shift-draft:" + window.location.pathname + ":" + (new URLSearchParams(window.location.search).get("site_id") || "site");
+
                     function clearBlock(block) {
                       block.querySelectorAll("input").forEach(function (input) {
                         input.value = "";
@@ -2485,6 +2487,82 @@ export default async function StaffSchedulePage({
                           '</label>' +
                         '</div>';
                       return block;
+                    }
+
+                    function getBlockRows(form) {
+                      var dates = Array.from(form.querySelectorAll('input[name="block_shift_date"]'));
+                      var starts = Array.from(form.querySelectorAll('input[name="block_start_time"]'));
+                      var ends = Array.from(form.querySelectorAll('input[name="block_end_time"]'));
+                      var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
+                      return dates.map(function (dateInput, index) {
+                        return {
+                          date: dateInput.value || "",
+                          start: starts[index] ? starts[index].value || "" : "",
+                          end: ends[index] ? ends[index].value || "" : "",
+                          note: notes[index] ? notes[index].value || "" : "",
+                        };
+                      });
+                    }
+
+                    function writeRows(form, rows) {
+                      if (!Array.isArray(rows) || rows.length === 0) return;
+                      var container = form.querySelector("[data-quick-shift-extra-blocks]");
+                      form.querySelectorAll('[data-quick-shift-block="optional"]').forEach(function (block) {
+                        block.remove();
+                      });
+                      rows.slice(1).forEach(function () {
+                        if (container) container.appendChild(createBlock(form));
+                      });
+                      var dates = Array.from(form.querySelectorAll('input[name="block_shift_date"]'));
+                      var starts = Array.from(form.querySelectorAll('input[name="block_start_time"]'));
+                      var ends = Array.from(form.querySelectorAll('input[name="block_end_time"]'));
+                      var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
+                      rows.forEach(function (row, index) {
+                        if (dates[index]) dates[index].value = row.date || "";
+                        if (starts[index]) starts[index].value = row.start || "";
+                        if (ends[index]) ends[index].value = row.end || "";
+                        if (notes[index]) notes[index].value = row.note || "";
+                      });
+                    }
+
+                    function saveDraft(form) {
+                      try {
+                        var employee = form.querySelector('[name="employee_id"]');
+                        var closeInput = form.querySelector("[data-quick-shift-close-input]");
+                        var restInput = form.querySelector("[data-full-day-rest-toggle]");
+                        window.sessionStorage.setItem(draftKey, JSON.stringify({
+                          employeeId: employee ? employee.value || "" : "",
+                          showEndAsClose: Boolean(closeInput && closeInput.checked),
+                          fullDayRest: Boolean(restInput && restInput.checked),
+                          rows: getBlockRows(form),
+                        }));
+                      } catch (error) {
+                        // No bloquear el envío si el navegador no permite sessionStorage.
+                      }
+                    }
+
+                    function restoreDraft(form) {
+                      var params = new URLSearchParams(window.location.search);
+                      if (params.has("ok")) {
+                        try { window.sessionStorage.removeItem(draftKey); } catch (error) {}
+                        return;
+                      }
+                      if (!params.has("error")) return;
+                      try {
+                        var raw = window.sessionStorage.getItem(draftKey);
+                        if (!raw) return;
+                        var draft = JSON.parse(raw);
+                        if (!draft || typeof draft !== "object") return;
+                        var employee = form.querySelector('[name="employee_id"]');
+                        var closeInput = form.querySelector("[data-quick-shift-close-input]");
+                        var restInput = form.querySelector("[data-full-day-rest-toggle]");
+                        if (employee && draft.employeeId) employee.value = draft.employeeId;
+                        if (closeInput) closeInput.checked = Boolean(draft.showEndAsClose);
+                        if (restInput) restInput.checked = Boolean(draft.fullDayRest);
+                        writeRows(form, draft.rows);
+                      } catch (error) {
+                        try { window.sessionStorage.removeItem(draftKey); } catch (storageError) {}
+                      }
                     }
 
                     function isRestDay(form) {
@@ -2540,6 +2618,11 @@ export default async function StaffSchedulePage({
                         });
                       });
 
+                      form.addEventListener("submit", function () {
+                        saveDraft(form);
+                      });
+
+                      restoreDraft(form);
                       refreshBlockControls(form);
                     }
 
