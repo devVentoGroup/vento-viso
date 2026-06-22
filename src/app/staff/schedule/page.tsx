@@ -418,6 +418,7 @@ async function saveShiftAction(formData: FormData) {
   )];
   const siteId = asText(formData.get("site_id"));
   const shiftDate = asText(formData.get("shift_date"));
+  const blockShiftDates = formData.getAll("block_shift_date").map((value) => asText(value));
   const startTime = asText(formData.get("start_time"));
   const endTime = asText(formData.get("end_time"));
   const blockStartTimes = formData.getAll("block_start_time").map((value) => asText(value));
@@ -430,15 +431,17 @@ async function saveShiftAction(formData: FormData) {
   const shiftKind = explicitShiftKind === "descanso" || isRestShift || isFullDayRest ? "descanso" : "laboral";
   const rawShiftBlocks = blockStartTimes
     .map((blockStart, index) => ({
+      shiftDate: blockShiftDates[index] || shiftDate,
       startTime: blockStart,
       endTime: blockEndTimes[index] ?? "",
       notes: blockNotes[index] ?? "",
     }))
-    .filter((block) => block.startTime || block.endTime);
-  const firstRawShiftBlock = rawShiftBlocks[0] ?? { startTime: "", endTime: "" };
+    .filter((block) => block.shiftDate || block.startTime || block.endTime);
+  const firstRawShiftBlock = rawShiftBlocks[0] ?? { shiftDate: shiftDate, startTime: "", endTime: "" };
   const resolvedShiftBlocks = shiftKind === "descanso"
     ? [
         {
+          shiftDate: shiftDate || firstRawShiftBlock.shiftDate,
           startTime: isFullDayRest ? FULL_DAY_REST_START_TIME : startTime || firstRawShiftBlock.startTime,
           endTime: isFullDayRest ? FULL_DAY_REST_END_TIME : endTime || firstRawShiftBlock.endTime,
           notes: shiftNotes || firstRawShiftBlock.notes,
@@ -446,19 +449,23 @@ async function saveShiftAction(formData: FormData) {
       ]
     : rawShiftBlocks.length > 0
       ? rawShiftBlocks
-      : [{ startTime, endTime, notes: shiftNotes }];
+      : [{ shiftDate, startTime, endTime, notes: shiftNotes }];
   const orderedShiftBlocks = [...resolvedShiftBlocks].sort((first, second) => {
+    const dateCompare = first.shiftDate.localeCompare(second.shiftDate, "es");
+    if (dateCompare !== 0) return dateCompare;
     const startCompare = first.startTime.localeCompare(second.startTime, "es");
     return startCompare !== 0 ? startCompare : first.endTime.localeCompare(second.endTime, "es");
   });
   const firstShiftBlock = orderedShiftBlocks[0] ?? { startTime: "", endTime: "" };
+  const requestedShiftDates = [...new Set(orderedShiftBlocks.map((block) => block.shiftDate).filter(Boolean))];
   const resolvedStartTime = firstShiftBlock.startTime;
   const resolvedEndTime = firstShiftBlock.endTime;
   const showEndAsClose = asText(formData.get("show_end_as_close")) === "1";
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
   const keepSlot = asText(formData.get("keep_slot")) === "1";
   const keepQuick = asText(formData.get("keep_quick")) === "1";
-  const slotDay = asText(formData.get("slot_day")) || shiftDate;
+  const primaryShiftDate = firstShiftBlock.shiftDate || shiftDate;
+  const slotDay = asText(formData.get("slot_day")) || primaryShiftDate;
   const slotStart = asText(formData.get("slot_start")) || resolvedStartTime;
   const slotEnd = asText(formData.get("slot_end")) || resolvedEndTime;
   const requestedEmployeeIds =
@@ -470,7 +477,7 @@ async function saveShiftAction(formData: FormData) {
   });
   const supabase = createAdminClient();
 
-  if (requestedEmployeeIds.length === 0 || !siteId || !shiftDate || orderedShiftBlocks.length === 0) {
+  if (requestedEmployeeIds.length === 0 || !siteId || requestedShiftDates.length === 0 || orderedShiftBlocks.length === 0) {
     redirect(`${returnTo}&error=${encodeURIComponent("Completa trabajador, fecha y horario.")}`);
   }
 
@@ -478,13 +485,17 @@ async function saveShiftAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un trabajador por turno.")}`);
   }
 
+  if (shiftId && requestedShiftDates.length !== 1) {
+    redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un día por turno.")}`);
+  }
+
   if (shiftId && orderedShiftBlocks.length !== 1) {
     redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un bloque horario por turno.")}`);
   }
 
-  const incompleteBlocks = orderedShiftBlocks.some((block) => !block.startTime || !block.endTime);
+  const incompleteBlocks = orderedShiftBlocks.some((block) => !block.shiftDate || !block.startTime || !block.endTime);
   if (incompleteBlocks) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Completa inicio y fin de cada bloque horario.")}`);
+    redirect(`${returnTo}&error=${encodeURIComponent("Completa día, inicio y fin de cada bloque horario.")}`);
   }
 
   if (shiftKind !== "descanso") {
@@ -498,7 +509,7 @@ async function saveShiftAction(formData: FormData) {
         const first = orderedShiftBlocks[i];
         const second = orderedShiftBlocks[j];
         if (!first || !second) continue;
-        if (first.startTime < second.endTime && second.startTime < first.endTime) {
+        if (first.shiftDate === second.shiftDate && first.startTime < second.endTime && second.startTime < first.endTime) {
           redirect(
             `${returnTo}&error=${encodeURIComponent(
               `Los bloques del turno partido se solapan (${first.startTime.slice(0, 5)} - ${first.endTime.slice(0, 5)} y ${second.startTime.slice(0, 5)} - ${second.endTime.slice(0, 5)}).`,
@@ -513,9 +524,9 @@ async function saveShiftAction(formData: FormData) {
   if (shiftKind !== "descanso") {
     let overlapQuery = supabase
       .from("employee_shifts")
-      .select("id, employee_id, start_time, end_time")
+      .select("id, employee_id, shift_date, start_time, end_time")
       .in("employee_id", requestedEmployeeIds)
-      .eq("shift_date", shiftDate)
+      .in("shift_date", requestedShiftDates)
       .neq("shift_kind", "descanso");
     if (shiftId) {
       overlapQuery = overlapQuery.neq("id", shiftId);
@@ -525,9 +536,9 @@ async function saveShiftAction(formData: FormData) {
       redirect(`${returnTo}&error=${encodeURIComponent(overlapErr.message)}`);
     }
     const overlaps = (sameDayShifts ?? []).filter(
-      (s: { employee_id: string; start_time: string; end_time: string }) =>
+      (s: { employee_id: string; shift_date: string; start_time: string; end_time: string }) =>
         orderedShiftBlocks.some(
-          (block) => block.startTime < s.end_time && s.start_time < block.endTime,
+          (block) => block.shiftDate === s.shift_date && block.startTime < s.end_time && s.start_time < block.endTime,
         ),
     );
     if (overlaps.length > 0) {
@@ -546,7 +557,7 @@ async function saveShiftAction(formData: FormData) {
         .map((id) => {
           const conflict = overlaps.find((shift) => shift.employee_id === id);
           if (!conflict) return conflictNames.get(id) ?? id;
-          return `${conflictNames.get(id) ?? id} (${conflict.start_time.slice(0, 5)} - ${conflict.end_time.slice(0, 5)})`;
+          return `${conflictNames.get(id) ?? id} ${conflict.shift_date} (${conflict.start_time.slice(0, 5)} - ${conflict.end_time.slice(0, 5)})`;
         })
         .join(", ");
       redirect(
@@ -559,7 +570,6 @@ async function saveShiftAction(formData: FormData) {
 
   const basePayload = {
     site_id: siteId,
-    shift_date: shiftDate,
     shift_kind: shiftKind,
     break_minutes: shiftKind === "descanso" ? 0 : Math.max(0, asNumber(formData.get("break_minutes"), 0)),
     status: asText(formData.get("status")) || "scheduled",
@@ -573,6 +583,7 @@ async function saveShiftAction(formData: FormData) {
     orderedShiftBlocks.map((block, index) => ({
       ...basePayload,
       employee_id: id,
+      shift_date: block.shiftDate,
       start_time: block.startTime,
       end_time: block.endTime,
       notes: block.notes || null,
@@ -586,6 +597,7 @@ async function saveShiftAction(formData: FormData) {
         .update({
           ...basePayload,
           employee_id: requestedEmployeeIds[0],
+          shift_date: primaryShiftDate,
           start_time: resolvedStartTime,
           end_time: resolvedEndTime,
           show_end_as_close: shiftKind === "descanso" ? false : showEndAsClose,
@@ -614,7 +626,7 @@ async function saveShiftAction(formData: FormData) {
           slot_end: slotEnd,
           quick_keep: keepQuick ? "1" : null,
           quick_employee_id: keepQuick ? requestedEmployeeIds[0] ?? null : null,
-          quick_shift_date: keepQuick ? shiftDate : null,
+          quick_shift_date: keepQuick ? primaryShiftDate : null,
           edit_shift: null,
         })
       : !shiftId && keepQuick
@@ -625,7 +637,7 @@ async function saveShiftAction(formData: FormData) {
             slot_end: null,
             quick_keep: "1",
             quick_employee_id: requestedEmployeeIds[0] ?? null,
-            quick_shift_date: shiftDate,
+            quick_shift_date: primaryShiftDate,
             edit_shift: null,
           })
         : appendReturnParams(returnTo, {
@@ -2356,10 +2368,10 @@ export default async function StaffSchedulePage({
                   </select>
                 </label>
 
-                <label className="flex flex-col gap-1">
-                  <span className="ui-label">Día</span>
+                <label className="flex flex-col gap-1" data-quick-shift-time-control>
+                  <span className="ui-label">Día bloque 1</span>
                   <input
-                    name="shift_date"
+                    name="block_shift_date"
                     type="date"
                     className="ui-input"
                     required
@@ -2394,7 +2406,17 @@ export default async function StaffSchedulePage({
                       Quitar
                     </button>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Día bloque 2</span>
+                      <input
+                        name="block_shift_date"
+                        type="date"
+                        className="ui-input"
+                        min={weekDays[0]?.iso ?? undefined}
+                        max={weekDays[6]?.iso ?? undefined}
+                      />
+                    </label>
                     <label className="flex flex-col gap-1">
                       <span className="ui-label">Inicio bloque 2</span>
                       <input name="block_start_time" type="time" className="ui-input" data-quick-shift-time-input />
@@ -2403,7 +2425,7 @@ export default async function StaffSchedulePage({
                       <span className="ui-label">Fin bloque 2</span>
                       <input name="block_end_time" type="time" className="ui-input" data-quick-shift-time-input />
                     </label>
-                    <label className="flex flex-col gap-1 md:col-span-2">
+                    <label className="flex flex-col gap-1 md:col-span-3">
                       <span className="ui-label">Nota bloque 2</span>
                       <input name="block_notes" className="ui-input" placeholder="Opcional" maxLength={240} />
                     </label>
@@ -2420,7 +2442,17 @@ export default async function StaffSchedulePage({
                       Quitar
                     </button>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Día bloque 3</span>
+                      <input
+                        name="block_shift_date"
+                        type="date"
+                        className="ui-input"
+                        min={weekDays[0]?.iso ?? undefined}
+                        max={weekDays[6]?.iso ?? undefined}
+                      />
+                    </label>
                     <label className="flex flex-col gap-1">
                       <span className="ui-label">Inicio bloque 3</span>
                       <input name="block_start_time" type="time" className="ui-input" data-quick-shift-time-input />
@@ -2429,7 +2461,7 @@ export default async function StaffSchedulePage({
                       <span className="ui-label">Fin bloque 3</span>
                       <input name="block_end_time" type="time" className="ui-input" data-quick-shift-time-input />
                     </label>
-                    <label className="flex flex-col gap-1 md:col-span-2">
+                    <label className="flex flex-col gap-1 md:col-span-3">
                       <span className="ui-label">Nota bloque 3</span>
                       <input name="block_notes" className="ui-input" placeholder="Opcional" maxLength={240} />
                     </label>
@@ -2438,10 +2470,10 @@ export default async function StaffSchedulePage({
 
                 <div className="flex flex-wrap items-center gap-2 md:col-span-6" data-quick-shift-add-row>
                   <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" data-add-shift-block>
-                    + Agregar otro bloque
+                    + Agregar otro bloque o día
                   </button>
                   <span className="text-xs text-[var(--ui-muted)]">
-                    Úsalo para turnos partidos de la misma persona en el mismo día.
+                    Úsalo para cargar varios bloques o varios días del mismo trabajador.
                   </span>
                 </div>
 
@@ -2528,35 +2560,14 @@ export default async function StaffSchedulePage({
                       });
 
                       if (addButton) {
-                        addButton.disabled = restDay || hiddenBlocks.length === 0;
+                        addButton.disabled = restDay;
+                        addButton.setAttribute("aria-disabled", restDay || hiddenBlocks.length === 0 ? "true" : "false");
                       }
                     }
 
                     function initQuickShiftForm(form) {
                       if (!form || form.getAttribute("data-quick-shift-ready") === "1") return;
                       form.setAttribute("data-quick-shift-ready", "1");
-
-                      var addButton = form.querySelector("[data-add-shift-block]");
-                      if (addButton) {
-                        addButton.addEventListener("click", function () {
-                          var nextBlock = Array.from(form.querySelectorAll('[data-quick-shift-block="optional"]')).find(function (block) {
-                            return block.classList.contains("hidden");
-                          });
-                          if (!nextBlock) return;
-                          nextBlock.classList.remove("hidden");
-                          refreshBlockControls(form);
-                        });
-                      }
-
-                      form.querySelectorAll("[data-remove-shift-block]").forEach(function (button) {
-                        button.addEventListener("click", function () {
-                          var block = button.closest('[data-quick-shift-block="optional"]');
-                          if (!block) return;
-                          clearBlock(block);
-                          block.classList.add("hidden");
-                          refreshBlockControls(form);
-                        });
-                      });
 
                       form.querySelectorAll("[data-full-day-rest-toggle]").forEach(function (input) {
                         input.addEventListener("change", function () {
@@ -2569,6 +2580,39 @@ export default async function StaffSchedulePage({
 
                     function initAllQuickShiftForms() {
                       document.querySelectorAll("[data-quick-shift-form]").forEach(initQuickShiftForm);
+                    }
+
+                    if (!window.__visoQuickShiftDelegated) {
+                      window.__visoQuickShiftDelegated = true;
+
+                      document.addEventListener("click", function (event) {
+                        var addButton = event.target && event.target.closest ? event.target.closest("[data-add-shift-block]") : null;
+                        if (addButton) {
+                          var form = addButton.closest("[data-quick-shift-form]");
+                          if (!form || isRestDay(form)) return;
+                          var nextBlock = Array.from(form.querySelectorAll('[data-quick-shift-block="optional"]')).find(function (block) {
+                            return block.classList.contains("hidden");
+                          });
+                          if (!nextBlock) return;
+                          nextBlock.classList.remove("hidden");
+                          var firstDateInput = form.querySelector('input[name="block_shift_date"]');
+                          var nextDateInput = nextBlock.querySelector('input[name="block_shift_date"]');
+                          if (firstDateInput && nextDateInput && !nextDateInput.value) {
+                            nextDateInput.value = firstDateInput.value;
+                          }
+                          refreshBlockControls(form);
+                          return;
+                        }
+
+                        var removeButton = event.target && event.target.closest ? event.target.closest("[data-remove-shift-block]") : null;
+                        if (!removeButton) return;
+                        var block = removeButton.closest('[data-quick-shift-block="optional"]');
+                        var quickForm = removeButton.closest("[data-quick-shift-form]");
+                        if (!block || !quickForm) return;
+                        clearBlock(block);
+                        block.classList.add("hidden");
+                        refreshBlockControls(quickForm);
+                      });
                     }
 
                     if (document.readyState === "loading") {
