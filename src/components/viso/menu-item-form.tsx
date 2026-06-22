@@ -22,35 +22,6 @@ type ProductOption = {
   default_price?: number | null;
 };
 
-type MenuItemOptionLine = {
-  client_id: string;
-  id?: string | undefined;
-  name: string;
-  description: string;
-  price_delta_amount: string;
-  product_id: string;
-  quantity_per_option: string;
-  stock_unit_code: string;
-  is_default: boolean;
-  is_active: boolean;
-  sort_order: string;
-};
-
-type MenuItemOptionGroupLine = {
-  client_id: string;
-  id?: string | undefined;
-  code?: string | undefined;
-  name: string;
-  description: string;
-  selection_type: "single" | "multiple";
-  is_required: boolean;
-  min_select: string;
-  max_select: string;
-  sort_order: string;
-  is_active: boolean;
-  options: MenuItemOptionLine[];
-};
-
 type CommercialCategoryOption = {
   id: string;
   site_id: string;
@@ -122,14 +93,12 @@ type MenuItemFormValues = {
   variant_label?: string;
   pass_card_layout?: "compact" | "featured" | string;
   opens_detail_modal?: boolean;
-  option_groups?: MenuItemOptionGroupLine[];
 };
 
 type MenuItemFormProps = {
   mode: "create" | "edit";
   sites: SiteOption[];
   products: ProductOption[];
-  inventoryProducts?: ProductOption[];
   categories: CommercialCategoryOption[];
   collections?: CommercialCollectionOption[];
   collectionCategoryLinks?: CollectionCategoryLinkOption[];
@@ -218,77 +187,10 @@ function getProductPriceForSite(product: ProductOption, siteId: string) {
   return null;
 }
 
-function createLocalId(prefix: string) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function createEmptyOptionLine(sortOrder = 10): MenuItemOptionLine {
-  return {
-    client_id: createLocalId("option"),
-    name: "",
-    description: "",
-    price_delta_amount: "0",
-    product_id: "",
-    quantity_per_option: "1",
-    stock_unit_code: "un",
-    is_default: false,
-    is_active: true,
-    sort_order: String(sortOrder),
-  };
-}
-
-function createEmptyOptionGroup(sortOrder = 10): MenuItemOptionGroupLine {
-  return {
-    client_id: createLocalId("group"),
-    name: "",
-    description: "",
-    selection_type: "single",
-    is_required: true,
-    min_select: "1",
-    max_select: "1",
-    sort_order: String(sortOrder),
-    is_active: true,
-    options: [createEmptyOptionLine(10)],
-  };
-}
-
-function normalizeOptionGroups(value: MenuItemOptionGroupLine[] | null | undefined): MenuItemOptionGroupLine[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((group, groupIndex) => ({
-    client_id: group.client_id || group.id || createLocalId("group"),
-    ...(group.id ? { id: group.id } : {}),
-    ...(group.code ? { code: group.code } : {}),
-    name: group.name ?? "",
-    description: group.description ?? "",
-    selection_type: group.selection_type === "multiple" ? "multiple" : "single",
-    is_required: group.is_required !== false,
-    min_select: String(group.min_select ?? (group.is_required === false ? "0" : "1")),
-    max_select: String(group.max_select ?? (group.selection_type === "multiple" ? "3" : "1")),
-    sort_order: String(group.sort_order ?? (groupIndex + 1) * 10),
-    is_active: group.is_active !== false,
-    options: Array.isArray(group.options)
-      ? group.options.map((option, optionIndex) => ({
-          client_id: option.client_id || option.id || createLocalId("option"),
-          ...(option.id ? { id: option.id } : {}),
-          name: option.name ?? "",
-          description: option.description ?? "",
-          price_delta_amount: String(option.price_delta_amount ?? "0"),
-          product_id: option.product_id ?? "",
-          quantity_per_option: String(option.quantity_per_option ?? "1"),
-          stock_unit_code: option.stock_unit_code ?? "un",
-          is_default: Boolean(option.is_default),
-          is_active: option.is_active !== false,
-          sort_order: String(option.sort_order ?? (optionIndex + 1) * 10),
-        }))
-      : [],
-  }));
-}
-
 export function MenuItemForm({
   mode,
   sites,
   products,
-  inventoryProducts = [],
   categories,
   collections = [],
   collectionCategoryLinks,
@@ -315,9 +217,6 @@ export function MenuItemForm({
   const [badgesCsv, setBadgesCsv] = useState(initial.badges_csv);
   const [displayGroup, setDisplayGroup] = useState(initial.display_group ?? "");
   const [variantLabel, setVariantLabel] = useState(initial.variant_label ?? "");
-  const [optionGroups, setOptionGroups] = useState<MenuItemOptionGroupLine[]>(() =>
-    normalizeOptionGroups(initial.option_groups),
-  );
   const [imageUrl, setImageUrl] = useState(initial.image_url);
   const [isActive, setIsActive] = useState(initial.is_active);
   const [isFeatured, setIsFeatured] = useState(initial.is_featured);
@@ -334,18 +233,6 @@ export function MenuItemForm({
   const resolvedFormId = formId || `menu-item-form-${generatedFormId}`;
   const productPickerRef = useRef<HTMLDivElement | null>(null);
   const productPickerListId = `${resolvedFormId}-product-results`;
-
-  const operationalProducts = useMemo(() => {
-    const source = inventoryProducts.length > 0 ? inventoryProducts : products;
-    return source
-      .filter((product) => product.is_active !== false)
-      .sort((a, b) => getProductDisplayName(a).localeCompare(getProductDisplayName(b), "es-CO"));
-  }, [inventoryProducts, products]);
-
-  const operationalProductMap = useMemo(() => {
-    return new Map(operationalProducts.map((product) => [product.id, product]));
-  }, [operationalProducts]);
-
 
   const siteLabel = useMemo(() => {
     const selected = sites.find((site) => site.id === siteId);
@@ -583,114 +470,7 @@ export function MenuItemForm({
   }, [priceAmount, suggestedPrice]);
 
 
-  const hasOperationalOptions = useMemo(() => {
-    return optionGroups.some(
-      (group) => group.is_active !== false && group.options.some((option) => option.is_active !== false),
-    );
-  }, [optionGroups]);
-
-  useEffect(() => {
-    if (hasOperationalOptions && !opensDetailModal) {
-      setOpensDetailModal(true);
-    }
-  }, [hasOperationalOptions, opensDetailModal]);
-
   const submitDisabled = mode === "create" && (!siteId || !productId || selectedProductAlreadyCreated);
-
-  const updateOptionGroup = <K extends keyof MenuItemOptionGroupLine>(
-    groupId: string,
-    key: K,
-    value: MenuItemOptionGroupLine[K],
-  ) => {
-    setOptionGroups((current) =>
-      current.map((group) => {
-        if (group.client_id !== groupId) return group;
-        const nextGroup = { ...group, [key]: value };
-        if (key === "selection_type" && value === "single") {
-          nextGroup.min_select = group.is_required ? "1" : "0";
-          nextGroup.max_select = "1";
-        }
-        if (key === "is_required" && value === true && group.selection_type === "single") {
-          nextGroup.min_select = "1";
-          nextGroup.max_select = "1";
-        }
-        return nextGroup;
-      }),
-    );
-  };
-
-  const addOptionGroup = () => {
-    setOptionGroups((current) => [...current, createEmptyOptionGroup((current.length + 1) * 10)]);
-  };
-
-  const removeOptionGroup = (groupId: string) => {
-    setOptionGroups((current) => current.filter((group) => group.client_id !== groupId));
-  };
-
-  const addOptionToGroup = (groupId: string) => {
-    setOptionGroups((current) =>
-      current.map((group) => {
-        if (group.client_id !== groupId) return group;
-        return {
-          ...group,
-          options: [...group.options, createEmptyOptionLine((group.options.length + 1) * 10)],
-        };
-      }),
-    );
-  };
-
-  const removeOptionFromGroup = (groupId: string, optionId: string) => {
-    setOptionGroups((current) =>
-      current.map((group) => {
-        if (group.client_id !== groupId) return group;
-        return {
-          ...group,
-          options: group.options.filter((option) => option.client_id !== optionId),
-        };
-      }),
-    );
-  };
-
-  const updateOptionLine = <K extends keyof MenuItemOptionLine>(
-    groupId: string,
-    optionId: string,
-    key: K,
-    value: MenuItemOptionLine[K],
-  ) => {
-    setOptionGroups((current) =>
-      current.map((group) => {
-        if (group.client_id !== groupId) return group;
-        return {
-          ...group,
-          options: group.options.map((option) => {
-            if (option.client_id !== optionId) return option;
-            return { ...option, [key]: value };
-          }),
-        };
-      }),
-    );
-  };
-
-  const setOptionProduct = (groupId: string, optionId: string, nextProductId: string) => {
-    const product = operationalProductMap.get(nextProductId) ?? null;
-    setOptionGroups((current) =>
-      current.map((group) => {
-        if (group.client_id !== groupId) return group;
-        return {
-          ...group,
-          options: group.options.map((option) => {
-            if (option.client_id !== optionId) return option;
-            return {
-              ...option,
-              product_id: nextProductId,
-              name: option.name.trim() || (product ? getProductDisplayName(product) : option.name),
-              stock_unit_code: option.stock_unit_code.trim() || product?.stock_unit_code || product?.unit || "un",
-            };
-          }),
-        };
-      }),
-    );
-  };
 
   const handleUpload = async (file: File | null) => {
     if (!file) return;
@@ -742,7 +522,6 @@ export function MenuItemForm({
       <input type="hidden" name="code" value={initial.code} />
       <input type="hidden" name="sort_order" value={initial.sort_order} />
       <input type="hidden" name="metadata_extra" value={initial.metadata_extra} />
-      <input type="hidden" name="catalog_option_groups" value={JSON.stringify(optionGroups)} />
 
       <div className="ui-panel space-y-6">
         <div>
@@ -1242,7 +1021,7 @@ export function MenuItemForm({
             <div className="sm:col-span-2">
               <div className="ui-label">Agrupación visual opcional</div>
               <p className="ui-caption">
-                Solo cambia cómo se ve la card en Pass. No descuenta inventario. Para sabores, toppings, vaso o cono usa las opciones operacionales de la siguiente sección.
+                Solo cambia cómo se ve la card en Pass. No descuenta inventario. Sabores, toppings, vaso o cono se configuran después desde la edición del producto.
               </p>
             </div>
             <label className="space-y-2">
@@ -1371,237 +1150,8 @@ export function MenuItemForm({
 
 
       <div className="ui-panel space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="ui-h3">4. Opciones operacionales y personalización</div>
-            <p className="ui-caption">
-              Usa esta sección para sabores, toppings, presentación, tamaño, adiciones o cualquier elección que deba sumar precio y descontar inventario.
-              Cada opción activa debe tener producto operacional, cantidad y unidad de consumo.
-            </p>
-          </div>
-          <button type="button" className="ui-btn ui-btn--brand ui-btn--sm" onClick={addOptionGroup}>
-            Agregar grupo
-          </button>
-        </div>
-
-        {optionGroups.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5 text-sm font-semibold text-[var(--ui-muted)]">
-            Sin opciones operacionales. El producto se agregará directo al pedido y solo consumirá su producto base.
-          </div>
-        ) : null}
-
-        <div className="space-y-4">
-          {optionGroups.map((group, groupIndex) => (
-            <div key={group.client_id} className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-black text-[var(--ui-text)]">Grupo {groupIndex + 1}</div>
-                  <p className="ui-caption">Ejemplos: Sabor, Presentación, Toppings Normal, Toppings Premium.</p>
-                </div>
-                <button
-                  type="button"
-                  className="ui-btn ui-btn--ghost ui-btn--sm"
-                  onClick={() => removeOptionGroup(group.client_id)}
-                >
-                  Eliminar grupo
-                </button>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-4">
-                <label className="space-y-2 lg:col-span-2">
-                  <span className="ui-label">Nombre del grupo operacional</span>
-                  <input
-                    className="ui-input"
-                    value={group.name}
-                    onChange={(event) => updateOptionGroup(group.client_id, "name", event.target.value)}
-                    placeholder="Sabor / Presentación / Toppings Normal"
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="ui-label">Tipo de selección</span>
-                  <select
-                    className="ui-input"
-                    value={group.selection_type}
-                    onChange={(event) =>
-                      updateOptionGroup(
-                        group.client_id,
-                        "selection_type",
-                        event.target.value === "multiple" ? "multiple" : "single",
-                      )
-                    }
-                  >
-                    <option value="single">Única</option>
-                    <option value="multiple">Múltiple</option>
-                  </select>
-                </label>
-                <label className="flex items-center gap-2 pt-8 text-sm font-semibold text-[var(--ui-text)]">
-                  <input
-                    type="checkbox"
-                    checked={group.is_required}
-                    onChange={(event) => updateOptionGroup(group.client_id, "is_required", event.target.checked)}
-                  />
-                  Obligatorio
-                </label>
-                <label className="space-y-2 lg:col-span-2">
-                  <span className="ui-label">Descripción interna</span>
-                  <input
-                    className="ui-input"
-                    value={group.description}
-                    onChange={(event) => updateOptionGroup(group.client_id, "description", event.target.value)}
-                    placeholder="El cliente debe escoger un sabor."
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="ui-label">Mínimo</span>
-                  <input
-                    type="number"
-                    min="0"
-                    className="ui-input"
-                    value={group.selection_type === "single" && group.is_required ? "1" : group.min_select}
-                    disabled={group.selection_type === "single" && group.is_required}
-                    onChange={(event) => updateOptionGroup(group.client_id, "min_select", event.target.value)}
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="ui-label">Máximo</span>
-                  <input
-                    type="number"
-                    min="1"
-                    className="ui-input"
-                    value={group.selection_type === "single" ? "1" : group.max_select}
-                    disabled={group.selection_type === "single"}
-                    onChange={(event) => updateOptionGroup(group.client_id, "max_select", event.target.value)}
-                  />
-                </label>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm font-black text-[var(--ui-text)]">Opciones del grupo</div>
-                  <button
-                    type="button"
-                    className="ui-btn ui-btn--ghost ui-btn--sm"
-                    onClick={() => addOptionToGroup(group.client_id)}
-                  >
-                    Agregar opción
-                  </button>
-                </div>
-
-                {group.options.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-[var(--ui-border)] bg-white p-4 text-sm font-semibold text-[var(--ui-muted)]">
-                    Este grupo no tiene opciones. Agrega al menos una opción antes de guardar.
-                  </div>
-                ) : null}
-
-                {group.options.map((option, optionIndex) => {
-                  const linkedProduct = operationalProductMap.get(option.product_id) ?? null;
-                  return (
-                    <div key={option.client_id} className="rounded-xl border border-[var(--ui-border)] bg-white p-4">
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-xs font-black uppercase text-[var(--ui-muted)]">Opción {optionIndex + 1}</div>
-                        <button
-                          type="button"
-                          className="ui-btn ui-btn--ghost ui-btn--sm"
-                          onClick={() => removeOptionFromGroup(group.client_id, option.client_id)}
-                        >
-                          Eliminar opción
-                        </button>
-                      </div>
-
-                      <div className="grid gap-4 lg:grid-cols-6">
-                        <label className="space-y-2 lg:col-span-2">
-                          <span className="ui-label">Nombre visible</span>
-                          <input
-                            className="ui-input"
-                            value={option.name}
-                            onChange={(event) => updateOptionLine(group.client_id, option.client_id, "name", event.target.value)}
-                            placeholder="Oreo / Cono / Sandía"
-                          />
-                        </label>
-                        <label className="space-y-2 lg:col-span-2">
-                          <span className="ui-label">Producto operacional que descuenta</span>
-                          <select
-                            className="ui-input"
-                            value={option.product_id}
-                            onChange={(event) => setOptionProduct(group.client_id, option.client_id, event.target.value)}
-                          >
-                            <option value="">Selecciona producto operacional</option>
-                            {operationalProducts.map((product) => (
-                              <option key={product.id} value={product.id}>
-                                {getProductDisplayName(product)}{product.sku ? ` · ${product.sku}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                          {linkedProduct ? (
-                            <p className="ui-caption">
-                              Unidad sugerida: {linkedProduct.stock_unit_code || linkedProduct.unit || "un"}
-                            </p>
-                          ) : null}
-                        </label>
-                        <label className="space-y-2">
-                          <span className="ui-label">Precio extra</span>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            className="ui-input"
-                            value={formatCopInput(option.price_delta_amount)}
-                            onChange={(event) =>
-                              updateOptionLine(group.client_id, option.client_id, "price_delta_amount", onlyDigits(event.target.value) || "0")
-                            }
-                            placeholder="$ 0"
-                          />
-                        </label>
-                        <label className="space-y-2">
-                          <span className="ui-label">Cantidad consumo</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.001"
-                            className="ui-input"
-                            value={option.quantity_per_option}
-                            onChange={(event) => updateOptionLine(group.client_id, option.client_id, "quantity_per_option", event.target.value)}
-                            placeholder="1"
-                          />
-                        </label>
-                        <label className="space-y-2">
-                          <span className="ui-label">Unidad consumo</span>
-                          <input
-                            className="ui-input"
-                            value={option.stock_unit_code}
-                            onChange={(event) => updateOptionLine(group.client_id, option.client_id, "stock_unit_code", event.target.value)}
-                            placeholder="un / g / ml"
-                          />
-                        </label>
-                        <label className="space-y-2 lg:col-span-3">
-                          <span className="ui-label">Descripción opcional</span>
-                          <input
-                            className="ui-input"
-                            value={option.description}
-                            onChange={(event) => updateOptionLine(group.client_id, option.client_id, "description", event.target.value)}
-                            placeholder="Visible o interna según el consumo"
-                          />
-                        </label>
-                        <label className="flex items-center gap-2 pt-8 text-sm font-semibold text-[var(--ui-text)]">
-                          <input
-                            type="checkbox"
-                            checked={option.is_default}
-                            onChange={(event) => updateOptionLine(group.client_id, option.client_id, "is_default", event.target.checked)}
-                          />
-                          Predeterminada
-                        </label>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="ui-panel space-y-6">
         <div>
-          <div className="ui-h3">Imagen comercial</div>
+          <div className="ui-h3">4. Imagen comercial</div>
           <p className="ui-caption">
             Foto visible en Pass. Se guarda como imagen comercial separada del producto operacional.
           </p>
@@ -1656,7 +1206,6 @@ export function MenuItemForm({
             <span className={`ui-chip ${opensDetailModal ? "ui-chip--success" : ""}`}>
               {opensDetailModal ? "Abre modal" : "Agregado directo"}
             </span>
-            {hasOperationalOptions ? <span className="ui-chip ui-chip--brand">Opciones con inventario</span> : null}
           </div>
         </div>
 
@@ -1707,14 +1256,8 @@ export function MenuItemForm({
               {description.trim() || "Descripción del producto comercial que vera el usuario al comprar."}
             </p>
 
-            {hasOperationalOptions ? (
-              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 text-xs font-semibold text-[var(--ui-muted)]">
-                Este item abrirá personalización y guardará las opciones seleccionadas para precio e inventario.
-              </div>
-            ) : null}
-
             <div className="rounded-full bg-[var(--ui-brand)] px-4 py-3 text-center text-sm font-black text-white">
-              {opensDetailModal || hasOperationalOptions ? `Personalizar · desde ${asCop(priceAmount)}` : "Agregar al pedido"}
+              {opensDetailModal ? `Ver detalle · desde ${asCop(priceAmount)}` : "Agregar al pedido"}
             </div>
           </div>
         </div>

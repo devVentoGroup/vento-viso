@@ -795,7 +795,6 @@ export default async function NewMenuItemPage({
           variant_label: "",
           pass_card_layout: "compact",
           opens_detail_modal: false,
-          option_groups: [],
         }}
         action={createMenuItem}
         secondaryActions={
