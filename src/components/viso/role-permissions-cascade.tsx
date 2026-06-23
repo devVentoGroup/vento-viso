@@ -61,6 +61,15 @@ type PermissionGroup = {
 const APP_ORDER = ["fogo", "nexo", "origo", "shell", "viso", "anima"];
 
 const APP_LABELS: Record<string, string> = {
+    fogo: "FOGO · Recetas y producción",
+    nexo: "NEXO · Inventario y remisiones",
+    origo: "ORIGO · Compras y proveedores",
+    shell: "SHELL · Entrada al ecosistema",
+    viso: "VISO · Administración",
+    anima: "ANIMA · Turnos y asistencia",
+};
+
+const APP_SHORT_LABELS: Record<string, string> = {
     fogo: "FOGO",
     nexo: "NEXO",
     origo: "ORIGO",
@@ -69,45 +78,54 @@ const APP_LABELS: Record<string, string> = {
     anima: "ANIMA",
 };
 
+const APP_DESCRIPTIONS: Record<string, string> = {
+    fogo: "Recetas, fichas de preparación y lotes de producción.",
+    nexo: "Inventario, stock, ubicaciones, retiros y remisiones.",
+    origo: "Compras, proveedores y recepción de productos.",
+    shell: "Acceso inicial, perfil y navegación general.",
+    viso: "Trabajadores, permisos, documentos y configuración administrativa.",
+    anima: "Turnos, check-in, check-out y asistencia.",
+};
+
 const DEFAULT_SITE_TYPE_OPTIONS: ScopeOption[] = [
-    { value: "satellite", label: "Satélite" },
+    { value: "satellite", label: "Satélites: tiendas/puntos de venta" },
     { value: "production_center", label: "Centro de producción" },
-    { value: "admin", label: "Administración" },
+    { value: "admin", label: "Administración / Vento Group" },
 ];
 
 const DEFAULT_AREA_KIND_OPTIONS: ScopeOption[] = [
-    { value: "bar", label: "Bar" },
-    { value: "cocina", label: "Cocina" },
-    { value: "bodega", label: "Bodega" },
-    { value: "mostrador", label: "Mostrador" },
-    { value: "admin", label: "Administración" },
+    { value: "bar", label: "Áreas de barra" },
+    { value: "cocina", label: "Áreas de cocina" },
+    { value: "bodega", label: "Áreas de bodega" },
+    { value: "mostrador", label: "Áreas de mostrador" },
+    { value: "admin", label: "Áreas administrativas" },
 ];
 
 const SCOPE_OPTIONS: Array<{ value: PermissionScopeType; label: string; description: string }> = [
     {
         value: "global",
-        label: "Global",
-        description: "Aplica en todo Vento OS.",
+        label: "Toda la empresa",
+        description: "Permite esto en cualquier sede y área. Úsalo solo para roles administrativos o propietarios.",
     },
     {
         value: "site",
-        label: "Sede específica",
-        description: "Solo aplica en una sede concreta.",
+        label: "Una sede exacta",
+        description: "Permite esto solo en una sede concreta, por ejemplo Molka o Vento Café.",
     },
     {
         value: "site_type",
-        label: "Tipo de sede",
-        description: "Aplica por satellite, production_center o admin.",
+        label: "Todas las sedes de un tipo",
+        description: "Permite esto en todos los satélites, centros de producción o sedes administrativas.",
     },
     {
         value: "area",
-        label: "Área específica",
-        description: "Solo aplica en un área concreta.",
+        label: "Un área exacta",
+        description: "Permite esto solo en un área concreta de una sede.",
     },
     {
         value: "area_kind",
-        label: "Tipo de área",
-        description: "Aplica por cocina, bar, bodega, etc.",
+        label: "Todas las áreas de un tipo",
+        description: "Permite esto en todas las áreas que sean cocina, barra, bodega, mostrador, etc.",
     },
 ];
 
@@ -140,26 +158,73 @@ const ACTION_LABELS: Record<string, string> = {
     access: "Entrar a la aplicación",
     view: "Ver",
     read: "Ver",
-    list: "Listar",
+    list: "Ver lista",
     create: "Crear",
     add: "Crear",
     update: "Editar",
     edit: "Editar",
-    manage: "Administrar",
+    manage: "Crear y editar",
     delete: "Eliminar",
     remove: "Eliminar",
     publish: "Publicar",
     approve: "Aprobar",
     cancel: "Anular",
-    upload: "Subir",
+    upload: "Subir archivos",
     download: "Descargar",
     export: "Exportar",
     import: "Importar",
     view_all: "Ver todo",
 };
 
+const FRIENDLY_PERMISSION_LABELS: Record<string, string> = {
+    "fogo.access": "Entrar a FOGO",
+    "fogo.production.recipe_book.view": "Ver libro de recetas",
+    "fogo.production.recipes": "Consultar recetas internas",
+    "fogo.production.recipes.manage": "Crear y editar recetas",
+    "fogo.production.batches": "Ver módulo de producción",
+    "fogo.production.batches.view": "Ver lotes de producción",
+    "fogo.production.batches.create": "Crear lotes de producción",
+    "fogo.production.orders": "Ver órdenes de producción",
+
+    "nexo.access": "Entrar a NEXO",
+    "nexo.inventory.stock": "Ver stock",
+    "nexo.inventory.movements": "Ver movimientos de inventario",
+    "nexo.inventory.withdraw": "Hacer retiros de inventario",
+    "nexo.inventory.remissions": "Ver remisiones",
+    "nexo.inventory.remissions.receive": "Recibir remisiones",
+    "nexo.inventory.remissions.prepare": "Preparar remisiones",
+    "nexo.inventory.locations": "Ver ubicaciones LOC",
+
+    "viso.access": "Entrar a VISO",
+    "viso.staff.manage": "Administrar trabajadores",
+    "viso.staff.permissions.manage": "Administrar permisos",
+    "viso.staff.documents.manage": "Gestionar documentos de trabajadores",
+
+    "anima.access": "Entrar a ANIMA",
+    "anima.attendance.check_in": "Hacer check-in",
+    "anima.attendance.check_out": "Hacer check-out",
+};
+
+const FRIENDLY_PERMISSION_DESCRIPTIONS: Record<string, string> = {
+    "fogo.access": "Hace que la app FOGO aparezca disponible y permite entrar a su operación base.",
+    "fogo.production.recipe_book.view": "Muestra la pantalla Recetario en el menú lateral y permite consultar fichas de preparación publicadas.",
+    "fogo.production.recipes": "Permite consultar información interna de recetas usada por FOGO.",
+    "fogo.production.recipes.manage": "Permite crear, editar y publicar recetas. Úsalo solo para responsables de receta o administración.",
+    "fogo.production.batches.create": "Permite presionar Producir lote y registrar producción real para una receta.",
+    "fogo.production.batches.view": "Permite consultar lotes de producción ya creados.",
+    "fogo.production.orders": "Permite consultar órdenes de producción cuando existan.",
+};
+
 function appLabel(appCode: string) {
     return APP_LABELS[appCode] ?? appCode.toUpperCase();
+}
+
+function appShortLabel(appCode: string) {
+    return APP_SHORT_LABELS[appCode] ?? appCode.toUpperCase();
+}
+
+function permissionFullCode(permission: RolePermissionOption) {
+    return `${permission.appCode}.${permission.code}`;
 }
 
 function humanize(value: string) {
@@ -191,8 +256,16 @@ function moduleLabel(moduleKey: string) {
 }
 
 function actionLabel(permission: RolePermissionOption) {
+    const fullCode = permissionFullCode(permission);
+    if (FRIENDLY_PERMISSION_LABELS[fullCode]) return FRIENDLY_PERMISSION_LABELS[fullCode];
+    if (permission.name) return permission.name;
     const actionKey = actionKeyFromPermission(permission.code);
-    return permission.name ?? ACTION_LABELS[actionKey] ?? humanize(actionKey);
+    return ACTION_LABELS[actionKey] ?? humanize(actionKey);
+}
+
+function permissionDescription(permission: RolePermissionOption) {
+    const fullCode = permissionFullCode(permission);
+    return FRIENDLY_PERMISSION_DESCRIPTIONS[fullCode] ?? "Define qué puede hacer este rol y en qué sedes o áreas aplica.";
 }
 
 function normalizeScopeType(value: string | null | undefined): PermissionScopeType {
@@ -220,22 +293,22 @@ function scopeLabel(
     const scopeType = normalizeScopeType(assignment.scopeType);
 
     if (scopeType === "site") {
-        return `Sede: ${findScopeLabel(options.siteOptions, assignment.scopeSiteId) || "sin sede"}`;
+        return `Solo en la sede: ${findScopeLabel(options.siteOptions, assignment.scopeSiteId) || "sin sede"}`;
     }
 
     if (scopeType === "site_type") {
-        return `Tipo de sede: ${findScopeLabel(options.siteTypeOptions, assignment.scopeSiteType) || "sin tipo"}`;
+        return `En todas las sedes tipo: ${findScopeLabel(options.siteTypeOptions, assignment.scopeSiteType) || "sin tipo"}`;
     }
 
     if (scopeType === "area") {
-        return `Área: ${findScopeLabel(options.areaOptions, assignment.scopeAreaId) || "sin área"}`;
+        return `Solo en el área: ${findScopeLabel(options.areaOptions, assignment.scopeAreaId) || "sin área"}`;
     }
 
     if (scopeType === "area_kind") {
-        return `Tipo de área: ${findScopeLabel(options.areaKindOptions, assignment.scopeAreaKind) || "sin tipo"}`;
+        return `En todas las áreas tipo: ${findScopeLabel(options.areaKindOptions, assignment.scopeAreaKind) || "sin tipo"}`;
     }
 
-    return "Global";
+    return "En toda la empresa";
 }
 
 function sortApps(a: string, b: string) {
@@ -346,19 +419,19 @@ function ScopeFields({
 }) {
     if (scopeType === "global") {
         return (
-            <p className="text-xs text-[var(--ui-muted)]">
-                Este permiso aplicará en todas las sedes y áreas.
-            </p>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                Aplica en toda la empresa. Úsalo para propietarios, gerencia o administración. Para operación normal, prefiere sede o tipo de sede.
+            </div>
         );
     }
 
     if (scopeType === "site") {
         return (
             <label className="space-y-1">
-                <span className="ui-label block">Sede</span>
+                <span className="ui-label block">¿En qué sede exacta?</span>
                 {siteOptions.length > 0 ? (
                     <select name="scope_site_id" className="ui-input" required>
-                        <option value="">Selecciona sede</option>
+                        <option value="">Selecciona una sede</option>
                         {siteOptions.map((option) => (
                             <option key={option.value} value={option.value}>
                                 {option.label}
@@ -368,6 +441,7 @@ function ScopeFields({
                 ) : (
                     <input name="scope_site_id" className="ui-input" placeholder="ID de sede" required />
                 )}
+                <span className="block text-xs text-[var(--ui-muted)]">Ejemplo: solo Molka o solo Vento Café.</span>
             </label>
         );
     }
@@ -375,15 +449,16 @@ function ScopeFields({
     if (scopeType === "site_type") {
         return (
             <label className="space-y-1">
-                <span className="ui-label block">Tipo de sede</span>
+                <span className="ui-label block">¿En qué tipo de sede?</span>
                 <select name="scope_site_type" className="ui-input" required>
-                    <option value="">Selecciona tipo</option>
+                    <option value="">Selecciona tipo de sede</option>
                     {siteTypeOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                             {option.label}
                         </option>
                     ))}
                 </select>
+                <span className="block text-xs text-[var(--ui-muted)]">Recomendado para roles que deben operar igual en todos los satélites o en todos los centros de producción.</span>
             </label>
         );
     }
@@ -391,10 +466,10 @@ function ScopeFields({
     if (scopeType === "area") {
         return (
             <label className="space-y-1">
-                <span className="ui-label block">Área</span>
+                <span className="ui-label block">¿En qué área exacta?</span>
                 {areaOptions.length > 0 ? (
                     <select name="scope_area_id" className="ui-input" required>
-                        <option value="">Selecciona área</option>
+                        <option value="">Selecciona un área</option>
                         {areaOptions.map((option) => (
                             <option key={option.value} value={option.value}>
                                 {option.label}
@@ -404,16 +479,17 @@ function ScopeFields({
                 ) : (
                     <input name="scope_area_id" className="ui-input" placeholder="ID de área" required />
                 )}
+                <span className="block text-xs text-[var(--ui-muted)]">Úsalo solo cuando el permiso sea para una zona puntual de una sede.</span>
             </label>
         );
     }
 
     return (
         <label className="space-y-1">
-            <span className="ui-label block">Tipo de área</span>
+            <span className="ui-label block">¿En qué tipo de área?</span>
             {areaKindOptions.length > 0 ? (
                 <select name="scope_area_kind" className="ui-input" required>
-                    <option value="">Selecciona tipo</option>
+                    <option value="">Selecciona tipo de área</option>
                     {areaKindOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                             {option.label}
@@ -423,6 +499,7 @@ function ScopeFields({
             ) : (
                 <input name="scope_area_kind" className="ui-input" placeholder="Tipo de área" required />
             )}
+            <span className="block text-xs text-[var(--ui-muted)]">Úsalo cuando el permiso dependa de cocina, barra, bodega, mostrador, etc.</span>
         </label>
     );
 }
@@ -487,11 +564,12 @@ function PermissionToggle({
     grantPermissionAction: (formData: FormData) => Promise<void>;
     removePermissionAction: (formData: FormData) => Promise<void>;
 }) {
-    const [scopeType, setScopeType] = useState<PermissionScopeType>("global");
+    const [scopeType, setScopeType] = useState<PermissionScopeType>("site_type");
     const allowedAssignments = assignments.filter((assignment) => assignment.isAllowed);
     const deniedAssignments = assignments.filter((assignment) => !assignment.isAllowed);
     const isAllowed = allowedAssignments.length > 0;
     const isDenied = !isAllowed && deniedAssignments.length > 0;
+    const fullCode = permissionFullCode(permission);
 
     const scopeOptions = {
         siteOptions,
@@ -511,51 +589,56 @@ function PermissionToggle({
                 <CheckboxMark checked={isAllowed} />
                 <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
-                            <span className="block text-sm font-semibold text-[var(--ui-text)]">
+                        <div className="min-w-0">
+                            <span className="block text-base font-semibold text-[var(--ui-text)]">
                                 {actionLabel(permission)}
                             </span>
-                            <span className="mt-0.5 block break-all text-xs text-[var(--ui-muted)]">
-                                {permission.appCode}.{permission.code}
+                            <span className="mt-1 block text-xs leading-5 text-[var(--ui-muted)]">
+                                {permissionDescription(permission)}
                             </span>
                         </div>
 
                         {isAllowed ? (
-                            <span className="ui-chip ui-chip--success">Activo</span>
+                            <span className="ui-chip ui-chip--success">Permitido</span>
                         ) : isDenied ? (
-                            <span className="ui-chip ui-chip--danger">Denegado</span>
+                            <span className="ui-chip ui-chip--danger">Bloqueado</span>
                         ) : (
-                            <span className="ui-chip">Inactivo</span>
+                            <span className="ui-chip">Sin permiso</span>
                         )}
                     </div>
 
                     {allowedAssignments.length > 0 ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                            {allowedAssignments.map((assignment, index) => {
-                                const text = scopeLabel(assignment, scopeOptions);
+                        <div className="mt-3 space-y-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+                                Ya permitido en:
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {allowedAssignments.map((assignment, index) => {
+                                    const text = scopeLabel(assignment, scopeOptions);
 
-                                return (
-                                    <RemoveScopeForm
-                                        key={`${permission.id}-${assignment.scopeType ?? "global"}-${assignment.scopeSiteId ?? ""}-${assignment.scopeAreaId ?? ""}-${assignment.scopeSiteType ?? ""}-${assignment.scopeAreaKind ?? ""}-${index}`}
-                                        role={role}
-                                        permission={permission}
-                                        assignment={assignment}
-                                        removePermissionAction={removePermissionAction}
-                                        canManagePermissions={canManagePermissions}
-                                        scopeText={text}
-                                    />
-                                );
-                            })}
+                                    return (
+                                        <RemoveScopeForm
+                                            key={`${permission.id}-${assignment.scopeType ?? "global"}-${assignment.scopeSiteId ?? ""}-${assignment.scopeAreaId ?? ""}-${assignment.scopeSiteType ?? ""}-${assignment.scopeAreaKind ?? ""}-${index}`}
+                                            role={role}
+                                            permission={permission}
+                                            assignment={assignment}
+                                            removePermissionAction={removePermissionAction}
+                                            canManagePermissions={canManagePermissions}
+                                            scopeText={text}
+                                        />
+                                    );
+                                })}
+                            </div>
                         </div>
                     ) : null}
 
-                    <form action={grantPermissionAction} className="mt-4 space-y-3">
+                    <form action={grantPermissionAction} className="mt-4 space-y-3 rounded-2xl border border-[var(--ui-border)] bg-white/70 p-3">
                         <input type="hidden" name="role" value={role} />
                         <input type="hidden" name="permission_id" value={permission.id} />
                         <input type="hidden" name="is_allowed" value="true" />
 
                         <label className="space-y-1">
-                            <span className="ui-label block">Alcance</span>
+                            <span className="ui-label block">Dónde aplica este permiso</span>
                             <select
                                 name="scope_type"
                                 className="ui-input"
@@ -569,7 +652,7 @@ function PermissionToggle({
                                     </option>
                                 ))}
                             </select>
-                            <span className="block text-xs text-[var(--ui-muted)]">
+                            <span className="block text-xs leading-5 text-[var(--ui-muted)]">
                                 {SCOPE_OPTIONS.find((option) => option.value === scopeType)?.description}
                             </span>
                         </label>
@@ -582,13 +665,22 @@ function PermissionToggle({
                             areaKindOptions={areaKindOptions}
                         />
 
-                        <button
-                            type="submit"
-                            disabled={!canManagePermissions}
-                            className="ui-btn ui-btn--ghost h-9 px-3 text-sm"
-                        >
-                            {isAllowed ? "Agregar otro alcance" : "Activar permiso"}
-                        </button>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <button
+                                type="submit"
+                                disabled={!canManagePermissions}
+                                className="ui-btn ui-btn--brand h-10 px-4 text-sm"
+                            >
+                                {isAllowed ? "Permitir también aquí" : "Permitir"}
+                            </button>
+
+                            <details className="text-xs text-[var(--ui-muted)]">
+                                <summary className="cursor-pointer font-semibold">Detalle técnico</summary>
+                                <div className="mt-1 rounded-lg bg-[var(--ui-surface-2)] px-2 py-1 font-mono text-[11px]">
+                                    {fullCode}
+                                </div>
+                            </details>
+                        </div>
                     </form>
                 </div>
             </div>
@@ -643,9 +735,9 @@ export function RolePermissionsCascade({
                         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
                             Matriz de permisos
                         </div>
-                        <h2 className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">Permisos por rol</h2>
-                        <p className="mt-1 text-sm text-[var(--ui-muted)]">
-                            Selecciona un rol, activa aplicaciones y define permisos por pantalla en cascada.
+                        <h2 className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">Qué puede hacer cada rol</h2>
+                        <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--ui-muted)]">
+                            Primero elige el rol. Luego permite entrar a una app, ver sus pantallas y ejecutar acciones. Cada permiso debe decir dónde aplica: toda la empresa, una sede, un tipo de sede, un área o un tipo de área.
                         </p>
                     </div>
 
@@ -680,8 +772,8 @@ export function RolePermissionsCascade({
                     <div className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-4 shadow-[var(--ui-shadow-soft)]">
                         <div className="mb-3 flex items-center justify-between gap-3">
                             <div>
-                                <h3 className="ui-h3">Aplicaciones</h3>
-                                <p className="ui-caption mt-1">Rol: {selectedRoleName}</p>
+                                <h3 className="ui-h3">Apps del ecosistema</h3>
+                                <p className="ui-caption mt-1">Configurando: {selectedRoleName}</p>
                             </div>
                             <span className="ui-chip">{groups.length}</span>
                         </div>
@@ -707,9 +799,9 @@ export function RolePermissionsCascade({
                                     >
                                         <CheckboxMark checked={checked} partial={partial} />
                                         <span className="min-w-0 flex-1">
-                                            <span className="block text-sm font-semibold text-[var(--ui-text)]">{appLabel(group.appCode)}</span>
-                                            <span className="block text-xs text-[var(--ui-muted)]">
-                                                {group.active}/{group.total} permisos activos
+                                            <span className="block text-sm font-semibold text-[var(--ui-text)]">{appShortLabel(group.appCode)}</span>
+                                            <span className="block text-xs leading-5 text-[var(--ui-muted)]">
+                                                {group.active}/{group.total} permisos permitidos
                                             </span>
                                         </span>
                                     </button>
@@ -732,15 +824,18 @@ export function RolePermissionsCascade({
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <div>
                                         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
-                                            Aplicación
+                                            App seleccionada
                                         </div>
                                         <h3 className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">
                                             {appLabel(selectedGroup.appCode)}
                                         </h3>
+                                        <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--ui-muted)]">
+                                            {APP_DESCRIPTIONS[selectedGroup.appCode] ?? "Define qué puede hacer este rol dentro de esta app."}
+                                        </p>
                                     </div>
 
                                     <span className="ui-chip ui-chip--brand">
-                                        {selectedGroup.active}/{selectedGroup.total} activos
+                                        {selectedGroup.active}/{selectedGroup.total} permitidos
                                     </span>
                                 </div>
 
@@ -761,7 +856,7 @@ export function RolePermissionsCascade({
                                     </div>
                                 ) : (
                                     <div className="ui-alert mt-5">
-                                        Esta aplicación no tiene permiso <strong>{selectedGroup.appCode}.access</strong> registrado.
+                                        Esta app no tiene configurado su permiso de entrada. Crea primero el permiso de acceso para poder mostrarla aquí.
                                     </div>
                                 )}
                             </section>
@@ -781,8 +876,8 @@ export function RolePermissionsCascade({
                                                 <CheckboxMark checked={activeCount === module.permissions.length && module.permissions.length > 0} partial={activeCount > 0 && activeCount < module.permissions.length} />
                                                 <div>
                                                     <h4 className="text-lg font-semibold text-[var(--ui-text)]">{module.label}</h4>
-                                                    <p className="text-xs text-[var(--ui-muted)]">
-                                                        {selectedGroup.appCode}.{module.key}
+                                                    <p className="text-xs leading-5 text-[var(--ui-muted)]">
+                                                        Configura qué acciones de este módulo quedan permitidas y dónde aplican.
                                                     </p>
                                                 </div>
                                             </div>
