@@ -10,6 +10,8 @@ import {
   type StaffPermissionOption,
 } from "@/components/viso/staff-permissions-panel";
 import { StaffDocumentsPanel } from "@/components/viso/staff-documents-panel";
+import { StaffAreaPurposePanel } from "@/components/viso/staff-area-purpose-panel";
+import { StaffInventoryLocationPanel } from "@/components/viso/staff-inventory-location-panel";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -140,6 +142,30 @@ type EmployeeAreaPurposeAssignmentRow = {
   area?: { id: string; site_id: string | null; name: string | null; kind: string | null } | { id: string; site_id: string | null; name: string | null; kind: string | null }[] | null;
 };
 
+type StaffAreaPurposeAssignmentResult =
+  | {
+      ok: true;
+      siteId: string;
+      purpose: "operational" | "remission";
+      areaId: string | null;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+
+type StaffInventoryLocationAssignmentResult =
+  | {
+      ok: true;
+      siteId: string;
+      locationId: string | null;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 const PHOTO_MIME_EXTENSIONS: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -246,7 +272,7 @@ function asNumber(value: FormDataEntryValue | null, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-async function saveEmployeeAreaPurposeAssignment(formData: FormData) {
+async function saveEmployeeAreaPurposeAssignment(formData: FormData): Promise<StaffAreaPurposeAssignmentResult> {
   "use server";
   const employeeId = asText(formData.get("employee_id"));
   const siteId = asText(formData.get("site_id"));
@@ -255,7 +281,7 @@ async function saveEmployeeAreaPurposeAssignment(formData: FormData) {
   const areaId = asText(formData.get("area_id"));
 
   if (!employeeId || !siteId) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Faltan empleado o sede para asignar área.")}`);
+    return { ok: false, error: "Faltan empleado o sede para asignar área." };
   }
 
   await requireAppAccess({
@@ -272,12 +298,14 @@ async function saveEmployeeAreaPurposeAssignment(formData: FormData) {
       .eq("employee_id", employeeId)
       .eq("site_id", siteId)
       .eq("purpose", purpose);
+
     if (delError) {
-      redirect(`/staff/${employeeId}?error=${encodeURIComponent(delError.message)}`);
+      return { ok: false, error: delError.message };
     }
+
     revalidatePath(`/staff/${employeeId}`);
     revalidatePath("/staff");
-    redirect(`/staff/${employeeId}?ok=area_assignment_saved`);
+    return { ok: true, siteId, purpose, areaId: null };
   }
 
   const { data: areaCheck, error: areaCheckError } = await supabase
@@ -285,11 +313,13 @@ async function saveEmployeeAreaPurposeAssignment(formData: FormData) {
     .select("id,site_id,is_active")
     .eq("id", areaId)
     .maybeSingle();
+
   if (areaCheckError || !areaCheck) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Área inválida.")}`);
+    return { ok: false, error: "Área inválida." };
   }
+
   if (String(areaCheck.site_id ?? "") !== siteId) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("El área no pertenece a la sede seleccionada.")}`);
+    return { ok: false, error: "El área no pertenece a la sede seleccionada." };
   }
 
   const { error } = await supabase.from("employee_area_purpose_assignments").upsert(
@@ -305,22 +335,22 @@ async function saveEmployeeAreaPurposeAssignment(formData: FormData) {
   );
 
   if (error) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+    return { ok: false, error: error.message };
   }
 
   revalidatePath(`/staff/${employeeId}`);
   revalidatePath("/staff");
-  redirect(`/staff/${employeeId}?ok=area_assignment_saved`);
+  return { ok: true, siteId, purpose, areaId };
 }
 
-async function saveEmployeeInventoryLocationAssignment(formData: FormData) {
+async function saveEmployeeInventoryLocationAssignment(formData: FormData): Promise<StaffInventoryLocationAssignmentResult> {
   "use server";
   const employeeId = asText(formData.get("employee_id"));
   const siteId = asText(formData.get("site_id"));
   const locationId = asText(formData.get("location_id"));
 
   if (!employeeId || !siteId) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("Faltan trabajador o sede para asignar LOC.")}`);
+    return { ok: false, error: "Faltan trabajador o sede para asignar LOC." };
   }
 
   await requireAppAccess({
@@ -337,12 +367,14 @@ async function saveEmployeeInventoryLocationAssignment(formData: FormData) {
       .eq("employee_id", employeeId)
       .eq("site_id", siteId)
       .eq("purpose", "kiosk_withdraw");
+
     if (delError) {
-      redirect(`/staff/${employeeId}?error=${encodeURIComponent(delError.message)}`);
+      return { ok: false, error: delError.message };
     }
+
     revalidatePath(`/staff/${employeeId}`);
     revalidatePath("/staff");
-    redirect(`/staff/${employeeId}?ok=inventory_location_assignment_saved`);
+    return { ok: true, siteId, locationId: null };
   }
 
   const { data: locationCheck, error: locationCheckError } = await supabase
@@ -350,11 +382,13 @@ async function saveEmployeeInventoryLocationAssignment(formData: FormData) {
     .select("id,site_id,is_active")
     .eq("id", locationId)
     .maybeSingle();
+
   if (locationCheckError || !locationCheck) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("LOC inválido.")}`);
+    return { ok: false, error: "LOC inválido." };
   }
+
   if (String(locationCheck.site_id ?? "") !== siteId) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent("El LOC no pertenece a la sede seleccionada.")}`);
+    return { ok: false, error: "El LOC no pertenece a la sede seleccionada." };
   }
 
   const { error } = await supabase.from("employee_inventory_location_assignments").upsert(
@@ -370,12 +404,12 @@ async function saveEmployeeInventoryLocationAssignment(formData: FormData) {
   );
 
   if (error) {
-    redirect(`/staff/${employeeId}?error=${encodeURIComponent(error.message)}`);
+    return { ok: false, error: error.message };
   }
 
   revalidatePath(`/staff/${employeeId}`);
   revalidatePath("/staff");
-  redirect(`/staff/${employeeId}?ok=inventory_location_assignment_saved`);
+  return { ok: true, siteId, locationId };
 }
 
 async function setEmployeeKioskPin(formData: FormData) {
@@ -1368,6 +1402,108 @@ export default async function StaffDetailPage({
     return acc;
   }, {} as Record<string, EmployeeInventoryLocationAssignmentRow>);
 
+
+  const areaPurposePanelSites = siteLinks.map((link) => {
+    const site = Array.isArray(link.site) ? link.site[0] ?? null : link.site ?? null;
+    const siteId = String(link.site_id ?? "").trim();
+
+    return {
+      siteId,
+      siteName: site?.name ?? site?.code ?? siteId,
+    };
+  });
+
+  const areaPurposePanelAreasBySite = Object.fromEntries(
+    Object.entries(areasBySite).map(([siteId, rows]) => [
+      siteId,
+      rows
+        .slice()
+        .sort((a, b) =>
+          String(a.name ?? a.kind ?? "").localeCompare(String(b.name ?? b.kind ?? ""), "es", { sensitivity: "base" })
+        )
+        .map((area) => ({
+          id: area.id,
+          label: area.name ?? area.kind ?? area.id,
+        })),
+    ])
+  ) as Record<string, { id: string; label: string }[]>;
+
+  const areaPurposePanelRemissionOptionsBySite = Object.fromEntries(
+    siteLinks.map((link) => {
+      const siteId = String(link.site_id ?? "").trim();
+      const siteAreas = (areasBySite[siteId] ?? []).slice().sort((a, b) =>
+        String(a.name ?? a.kind ?? "").localeCompare(String(b.name ?? b.kind ?? ""), "es", { sensitivity: "base" })
+      );
+      const siteRemissionKinds = remissionKindsBySite[siteId] ?? [];
+      const remissionAllowed = siteRemissionKinds.length
+        ? siteAreas.filter((area) => siteRemissionKinds.includes(String(area.kind ?? "").trim()))
+        : siteAreas.filter((area) => remissionGlobalKinds.has(String(area.kind ?? "").trim()));
+      const remissionOptions = remissionAllowed.length > 0 ? remissionAllowed : siteAreas;
+
+      return [
+        siteId,
+        remissionOptions.map((area) => ({
+          id: area.id,
+          label: area.name ?? area.kind ?? area.id,
+        })),
+      ];
+    })
+  ) as Record<string, { id: string; label: string }[]>;
+
+  const areaPurposePanelAssignments = Object.fromEntries(
+    siteLinks.map((link) => {
+      const siteId = String(link.site_id ?? "").trim();
+      const operationalAssignment = assignmentBySitePurpose[`${siteId}::operational`];
+      const remissionAssignment = assignmentBySitePurpose[`${siteId}::remission`];
+
+      return [
+        siteId,
+        {
+          operationalAreaId: operationalAssignment?.area_id ?? "",
+          remissionAreaId: remissionAssignment?.area_id ?? "",
+        },
+      ];
+    })
+  ) as Record<string, { operationalAreaId: string; remissionAreaId: string }>;
+
+  const inventoryLocationPanelSites = siteLinks.map((link) => {
+    const site = Array.isArray(link.site) ? link.site[0] ?? null : link.site ?? null;
+    const siteId = String(link.site_id ?? "").trim();
+
+    return {
+      siteId,
+      siteName: site?.name ?? site?.code ?? siteId,
+    };
+  });
+
+  const inventoryLocationPanelLocationsBySite = Object.fromEntries(
+    Object.entries(locationsBySite).map(([siteId, rows]) => [
+      siteId,
+      rows
+        .slice()
+        .sort((a, b) =>
+          String(a.description ?? a.zone ?? a.code ?? "").localeCompare(
+            String(b.description ?? b.zone ?? b.code ?? ""),
+            "es",
+            { sensitivity: "base" }
+          )
+        )
+        .map((location) => ({
+          id: location.id,
+          label: location.description || location.zone || location.code || location.id,
+        })),
+    ])
+  ) as Record<string, { id: string; label: string }[]>;
+
+  const inventoryLocationPanelAssignments = Object.fromEntries(
+    siteLinks.map((link) => {
+      const siteId = String(link.site_id ?? "").trim();
+      const assignment = inventoryLocationAssignmentBySite[siteId];
+
+      return [siteId, assignment?.location_id ?? ""];
+    })
+  ) as Record<string, string>;
+
   const attendanceLabel = attendance?.current_status === "check_in" ? "En turno" : attendance?.current_status === "check_out" ? "Fuera de turno" : "Sin registros";
   const primarySiteName =
     siteRows.find((site) => site.id === emp.site_id)?.name ??
@@ -1661,94 +1797,14 @@ export default async function StaffDetailPage({
         )}
       </div>
 
-      <div className="ui-panel space-y-4">
-        <div className="ui-h3">Áreas por propósito</div>
-        <p className="ui-body-muted">
-          Asigna por sede un área operativa y un área para remisiones. Ejemplo: cajera con rol Caja y remisión por Mostrador.
-        </p>
-        {siteLinks.length === 0 ? (
-          <div className="ui-empty">Primero asigna al menos una sede al trabajador.</div>
-        ) : (
-          <div className="max-h-[520px] overflow-auto">
-            <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>Sede</TableHeaderCell>
-                <TableHeaderCell>Área operativa</TableHeaderCell>
-                <TableHeaderCell>Área remisión</TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {siteLinks.map((link) => {
-                const site = Array.isArray(link.site) ? link.site[0] ?? null : link.site ?? null;
-                const siteId = String(link.site_id ?? "").trim();
-                const siteAreas = (areasBySite[siteId] ?? []).slice().sort((a, b) =>
-                  String(a.name ?? a.kind ?? "").localeCompare(String(b.name ?? b.kind ?? ""), "es", { sensitivity: "base" })
-                );
-                const siteRemissionKinds = remissionKindsBySite[siteId] ?? [];
-                const remissionAllowed = siteRemissionKinds.length
-                  ? siteAreas.filter((area) => siteRemissionKinds.includes(String(area.kind ?? "").trim()))
-                  : siteAreas.filter((area) => remissionGlobalKinds.has(String(area.kind ?? "").trim()));
-                const remissionOptions = remissionAllowed.length > 0 ? remissionAllowed : siteAreas;
-
-                const operationalAssignment = assignmentBySitePurpose[`${siteId}::operational`];
-                const remissionAssignment = assignmentBySitePurpose[`${siteId}::remission`];
-
-                return (
-                  <TableRow key={`area-purpose-${siteId}`}>
-                    <TableCell>{site?.name ?? site?.code ?? siteId}</TableCell>
-                    <TableCell>
-                      <form action={saveEmployeeAreaPurposeAssignment} className="flex items-center gap-2">
-                        <input type="hidden" name="employee_id" value={emp.id} />
-                        <input type="hidden" name="site_id" value={siteId} />
-                        <input type="hidden" name="purpose" value="operational" />
-                        <select
-                          name="area_id"
-                          className="ui-input min-w-[220px]"
-                          defaultValue={operationalAssignment?.area_id ?? ""}
-                        >
-                          <option value="">Sin definir</option>
-                          {siteAreas.map((area) => (
-                            <option key={area.id} value={area.id}>
-                              {area.name ?? area.kind ?? area.id}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
-                          Guardar
-                        </button>
-                      </form>
-                    </TableCell>
-                    <TableCell>
-                      <form action={saveEmployeeAreaPurposeAssignment} className="flex items-center gap-2">
-                        <input type="hidden" name="employee_id" value={emp.id} />
-                        <input type="hidden" name="site_id" value={siteId} />
-                        <input type="hidden" name="purpose" value="remission" />
-                        <select
-                          name="area_id"
-                          className="ui-input min-w-[220px]"
-                          defaultValue={remissionAssignment?.area_id ?? ""}
-                        >
-                          <option value="">Sin definir</option>
-                          {remissionOptions.map((area) => (
-                            <option key={area.id} value={area.id}>
-                              {area.name ?? area.kind ?? area.id}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
-                          Guardar
-                        </button>
-                      </form>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-            </Table>
-          </div>
-        )}
-      </div>
+      <StaffAreaPurposePanel
+        employeeId={emp.id}
+        sites={areaPurposePanelSites}
+        areasBySite={areaPurposePanelAreasBySite}
+        remissionOptionsBySite={areaPurposePanelRemissionOptionsBySite}
+        initialAssignments={areaPurposePanelAssignments}
+        saveAssignmentAction={saveEmployeeAreaPurposeAssignment}
+      />
 
       <div className="ui-panel space-y-4">
         <div>
@@ -1789,69 +1845,14 @@ export default async function StaffDetailPage({
             </button>
           </form>
         </div>
-        {siteLinks.length === 0 ? (
-          <div className="ui-empty">Primero asigna al menos una sede al trabajador.</div>
-        ) : (
-          <div className="max-h-[520px] overflow-auto">
-            <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>Sede</TableHeaderCell>
-                <TableHeaderCell>LOC destino para retiro</TableHeaderCell>
-                <TableHeaderCell>Estado</TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {siteLinks.map((link) => {
-                const site = Array.isArray(link.site) ? link.site[0] ?? null : link.site ?? null;
-                const siteId = String(link.site_id ?? "").trim();
-                const siteLocations = (locationsBySite[siteId] ?? []).slice().sort((a, b) =>
-                  String(a.description ?? a.zone ?? a.code ?? "").localeCompare(
-                    String(b.description ?? b.zone ?? b.code ?? ""),
-                    "es",
-                    { sensitivity: "base" }
-                  )
-                );
-                const assignment = inventoryLocationAssignmentBySite[siteId];
 
-                return (
-                  <TableRow key={`inventory-location-${siteId}`}>
-                    <TableCell>{site?.name ?? site?.code ?? siteId}</TableCell>
-                    <TableCell>
-                      <form action={saveEmployeeInventoryLocationAssignment} className="flex flex-wrap items-center gap-2">
-                        <input type="hidden" name="employee_id" value={emp.id} />
-                        <input type="hidden" name="site_id" value={siteId} />
-                        <select
-                          name="location_id"
-                          className="ui-input min-w-[260px]"
-                          defaultValue={assignment?.location_id ?? ""}
-                        >
-                          <option value="">Sin LOC asignado</option>
-                          {siteLocations.map((location) => (
-                            <option key={location.id} value={location.id}>
-                              {location.description || location.zone || location.code || location.id}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
-                          Guardar
-                        </button>
-                      </form>
-                    </TableCell>
-                    <TableCell>
-                      {assignment ? (
-                        <span className="ui-chip ui-chip--success">Configurado</span>
-                      ) : (
-                        <span className="ui-chip">Pendiente</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-            </Table>
-          </div>
-        )}
+        <StaffInventoryLocationPanel
+          employeeId={emp.id}
+          sites={inventoryLocationPanelSites}
+          locationsBySite={inventoryLocationPanelLocationsBySite}
+          initialAssignments={inventoryLocationPanelAssignments}
+          saveAssignmentAction={saveEmployeeInventoryLocationAssignment}
+        />
       </div>
 
       <div className="ui-panel space-y-4">
