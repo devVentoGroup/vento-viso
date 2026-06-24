@@ -213,7 +213,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function readOperationalContextFromDeviceInfo(
-  deviceInfo: Record<string, unknown> | null | undefined
+  deviceInfo: Record<string, unknown> | null | undefined,
 ): Partial<ActiveWorkContext> | null {
   const root = asRecord(deviceInfo);
   const context = asRecord(root?.operationalContext);
@@ -238,7 +238,9 @@ function isOperationalSite(site: SiteRow): boolean {
   return String(site.operational_visibility ?? "operational") === "operational";
 }
 
-function normalizeIconName(value: string | null | undefined): IconName | undefined {
+function normalizeIconName(
+  value: string | null | undefined,
+): IconName | undefined {
   const icon = String(value ?? "").trim();
   return ICON_NAMES.has(icon as IconName) ? (icon as IconName) : undefined;
 }
@@ -268,8 +270,23 @@ function splitPermissionCode(permissionCode: string, fallbackAppId: string) {
   };
 }
 
+function isOperationsHref(href: string) {
+  return href === "/operations" || href.startsWith("/operations/");
+}
+
+function buildOperationsNavItem(row: NavigationRow, href: string): NavItem {
+  return {
+    href,
+    label: "Operación",
+    description: "Contexto operativo, puntos de marcación, roles y perfiles.",
+    icon: "briefcase",
+    permissionCode: String(row.required_permission_code ?? "").trim(),
+  };
+}
+
 function buildNavGroups(rows: NavigationRow[]): NavGroup[] {
   const groups = new Map<string, NavItem[]>();
+  let operationsNavAdded = false;
 
   for (const row of rows) {
     const groupLabel = String(row.group_label ?? "").trim();
@@ -280,6 +297,16 @@ function buildNavGroups(rows: NavigationRow[]): NavGroup[] {
     if (!groupLabel || !href || !label || !permissionCode) continue;
 
     const current = groups.get(groupLabel) ?? [];
+
+    if (isOperationsHref(href)) {
+      if (!operationsNavAdded) {
+        current.push(buildOperationsNavItem(row, href));
+        operationsNavAdded = true;
+      }
+
+      groups.set(groupLabel, current);
+      continue;
+    }
 
     current.push({
       href,
@@ -292,10 +319,12 @@ function buildNavGroups(rows: NavigationRow[]): NavGroup[] {
     groups.set(groupLabel, current);
   }
 
-  return Array.from(groups.entries()).map(([label, items]) => ({
-    label,
-    items,
-  }));
+  return Array.from(groups.entries())
+    .map(([label, items]) => ({
+      label,
+      items,
+    }))
+    .filter((group) => group.items.length > 0);
 }
 
 async function resolveActiveWorkContext({
@@ -390,7 +419,7 @@ async function resolveAllowedApps({
         ...app,
         access: allowed ? "enabled" : "disabled",
       };
-    })
+    }),
   );
 
   return resolved;
@@ -412,7 +441,7 @@ async function resolveNavigationItems({
   const { data, error } = await supabase
     .from("app_navigation_items")
     .select(
-      "group_label,group_order,label,description,href,icon,required_permission_code,sort_order"
+      "group_label,group_order,label,description,href,icon,required_permission_code,sort_order",
     )
     .eq("app_code", appCode)
     .eq("is_active", true)
@@ -443,7 +472,7 @@ async function resolveNavigationItems({
         },
         actualRole,
       });
-    })
+    }),
   );
 
   const allowedRows = rows.filter((_, index) => permissionResults[index]);
@@ -501,13 +530,13 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
       activeWorkContext?.siteId ||
         employeeSiteRows[0]?.site_id ||
         employeeRow?.site_id ||
-        ""
+        "",
     );
 
     activeSiteId =
       preferredSiteId && assignedSiteIds.includes(preferredSiteId)
         ? preferredSiteId
-        : assignedSiteIds[0] ?? "";
+        : (assignedSiteIds[0] ?? "");
 
     activeAreaId = asId(activeWorkContext?.areaId);
     effectiveRole = asId(activeWorkContext?.operationalRole) || role;
@@ -581,4 +610,3 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
     </VentoChrome>
   );
 }
-
