@@ -103,13 +103,21 @@ type OperationalRoleOption = {
   code: string;
   label: string;
   isDefault?: boolean | null;
+  requiresExternalCheckin?: boolean | null;
+  requiresExternalCheckout?: boolean | null;
 };
 
 type SiteOperationalRoleRow = {
+  site_id: string;
+  area_id: string | null;
+  area_name: string | null;
+  area_kind: string | null;
   role_code: string;
-  label: string | null;
+  role_label: string | null;
+  role_family: string | null;
   is_default: boolean | null;
-  sort_order: number | null;
+  requires_external_checkin: boolean | null;
+  requires_external_checkout: boolean | null;
 };
 
 const FULL_DAY_REST_START_TIME = "00:00";
@@ -235,6 +243,28 @@ function getOperationalRoleLabel(value: string | null | undefined, options: Oper
   const code = String(value ?? "").trim();
   if (!code) return "Rol base";
   return options.find((option) => option.code === code)?.label ?? humanizeRoleCode(code);
+}
+
+const BASE_ROLE_TO_OPERATIONAL_ROLE: Record<string, string> = {
+  cajero: "cajero_satelite",
+  barista: "barista_satelite",
+  cocinero: "cocinero_satelite",
+  mesero: "servicio_salon",
+  servicio: "servicio_salon",
+  mostrador: "mostrador_satelite",
+  bodeguero: "bodeguero",
+  conductor: "conductor_logistica",
+  panadero: "produccion_panaderia",
+  pastelero: "produccion_reposteria",
+  repostero: "produccion_reposteria",
+  gerente: "gerencia_operativa",
+  gerente_general: "gerencia_operativa",
+  propietario: "propietario_admin",
+};
+
+function getOperationalRoleCandidateFromBaseRole(value: string | null | undefined) {
+  const normalized = normalizeRole(value).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return BASE_ROLE_TO_OPERATIONAL_ROLE[normalized] ?? normalized;
 }
 
 function formatWeekLabel(weekStart: Date) {
@@ -520,6 +550,10 @@ async function saveShiftAction(formData: FormData) {
 
   if (shiftId && orderedShiftBlocks.length !== 1) {
     redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un bloque horario por turno.")}`);
+  }
+
+  if (shiftKind !== "descanso" && !operationalRole) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Selecciona un rol operativo de la matriz para este turno.")}`);
   }
 
   const incompleteBlocks = orderedShiftBlocks.some((block) => !block.shiftDate || !block.startTime || !block.endTime);
@@ -1878,13 +1912,12 @@ export default async function StaffSchedulePage({
       : Promise.resolve({ data: [], error: null }),
     selectedSiteId
       ? supabase
-          .schema("viso")
-          .from("site_operational_roles")
-          .select("role_code,label,is_default,sort_order")
+          .from("vento_site_operational_role_matrix_v1")
+          .select("site_id,area_id,area_name,area_kind,role_code,role_label,role_family,is_default,requires_external_checkin,requires_external_checkout,is_active")
           .eq("site_id", selectedSiteId)
           .eq("is_active", true)
-          .order("sort_order", { ascending: true })
-          .order("label", { ascending: true })
+          .order("area_name", { ascending: true })
+          .order("role_label", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -1902,24 +1935,59 @@ export default async function StaffSchedulePage({
   const employees = [...employeeMap.values()].sort((a, b) =>
     (a.full_name ?? a.alias ?? a.id).localeCompare(b.full_name ?? b.alias ?? b.id, "es"),
   );
-  const roleOptions = [...new Set(employees.map((employee) => employee.role).filter(Boolean) as string[])].sort(
-    (a, b) => a.localeCompare(b, "es"),
-  );
-  const configuredOperationalRoles = ((siteOperationalRolesRes.data ?? []) as SiteOperationalRoleRow[])
-    .map((row) => ({
-      code: String(row.role_code ?? "").trim(),
-      label: String(row.label ?? row.role_code ?? "").trim(),
-      isDefault: row.is_default,
-    }))
-    .filter((role) => role.code);
-  const operationalRoleOptions: OperationalRoleOption[] = configuredOperationalRoles.length > 0
-    ? configuredOperationalRoles
-    : roleOptions.map((role) => ({ code: role, label: humanizeRoleCode(role) }));
+  const configuredOperationalRoleRows = (siteOperationalRolesRes.data ?? []) as SiteOperationalRoleRow[];
+  const operationalRoleOptions: OperationalRoleOption[] = Array.from(
+    configuredOperationalRoleRows
+      .reduce((map, row) => {
+        const code = String(row.role_code ?? "").trim();
+        if (!code) return map;
+
+        const current = map.get(code) ?? {
+          code,
+          label: String(row.role_label ?? row.role_code ?? "").trim(),
+          isDefault: false,
+          requiresExternalCheckin: false,
+          requiresExternalCheckout: false,
+          areaLabels: [] as string[],
+        };
+
+        const areaLabel = String(row.area_name ?? "General").trim() || "General";
+        if (!current.areaLabels.includes(areaLabel)) {
+          current.areaLabels.push(areaLabel);
+        }
+
+        current.isDefault = Boolean(current.isDefault || row.is_default);
+        current.requiresExternalCheckin = Boolean(
+          current.requiresExternalCheckin || row.requires_external_checkin,
+        );
+        current.requiresExternalCheckout = Boolean(
+          current.requiresExternalCheckout || row.requires_external_checkout,
+        );
+
+        map.set(code, current);
+        return map;
+      }, new Map<string, OperationalRoleOption & { areaLabels: string[] }>())
+      .values(),
+  ).map((role) => {
+    const areaSummary = role.areaLabels.length > 0 ? role.areaLabels.join(", ") : "General";
+    return {
+      code: role.code,
+      label: `${role.label} · ${areaSummary}`,
+      isDefault: role.isDefault,
+      requiresExternalCheckin: role.requiresExternalCheckin,
+      requiresExternalCheckout: role.requiresExternalCheckout,
+    };
+  });
   const operationalRoleCodes = new Set(operationalRoleOptions.map((role) => role.code));
+  const defaultOperationalRoleCodes = operationalRoleOptions
+    .filter((role) => role.isDefault)
+    .map((role) => role.code);
   const siteDefaultOperationalRole =
     operationalRoleOptions.length === 1
       ? operationalRoleOptions[0]?.code ?? ""
-      : operationalRoleOptions.find((role) => role.isDefault)?.code ?? "";
+      : defaultOperationalRoleCodes.length === 1
+        ? defaultOperationalRoleCodes[0] ?? ""
+        : "";
   const employeeIds = employees.map((employee) => employee.id);
   const staffingRequirements = (staffingRequirementsRes.data ?? []) as StaffingRequirementRow[];
   const availabilityConfigRows = (availabilityConfigRes.data ?? []) as (AvailabilityRow & { id: string })[];
@@ -2084,15 +2152,15 @@ export default async function StaffSchedulePage({
     const existingCode = String(existingRole ?? "").trim();
     if (existingCode && operationalRoleCodes.has(existingCode)) return existingCode;
 
-    const baseRoles = [
+    const candidateRoles = [
       ...new Set(
         targetEmployeeIds
-          .map((id) => String(employeeMap.get(id)?.role ?? "").trim())
+          .map((id) => getOperationalRoleCandidateFromBaseRole(employeeMap.get(id)?.role))
           .filter((role) => role && operationalRoleCodes.has(role)),
       ),
     ];
 
-    if (baseRoles.length === 1) return baseRoles[0] ?? "";
+    if (candidateRoles.length === 1) return candidateRoles[0] ?? "";
     return siteDefaultOperationalRole;
   };
   const quickShiftOperationalRole = resolveDefaultOperationalRole(
@@ -2344,7 +2412,7 @@ export default async function StaffSchedulePage({
                       ) : null}
                       {operationalRoleOptions.map((role) => (
                         <option key={role.code} value={role.code}>
-                          {role.label}
+                          {role.label}{role.requiresExternalCheckin || role.requiresExternalCheckout ? " · punto externo" : ""}
                         </option>
                       ))}
                     </select>
@@ -2487,7 +2555,7 @@ export default async function StaffSchedulePage({
                     <option value="">Usar rol base del trabajador</option>
                     {operationalRoleOptions.map((role) => (
                       <option key={role.code} value={role.code}>
-                        {role.label}
+                        {role.label}{role.requiresExternalCheckin || role.requiresExternalCheckout ? " · punto externo" : ""}
                       </option>
                     ))}
                   </select>
