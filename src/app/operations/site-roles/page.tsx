@@ -55,16 +55,6 @@ type SiteRoleRow = {
   [key: string]: unknown;
 };
 
-const suggestedRoles = [
-  { value: "conductor", label: "Conductor" },
-  { value: "barista", label: "Barista" },
-  { value: "cajero", label: "Cajero" },
-  { value: "cocina", label: "Cocina" },
-  { value: "produccion", label: "Producción" },
-  { value: "logistica", label: "Logística" },
-  { value: "administrador", label: "Administrador" },
-];
-
 function safeDecode(value: string | null | undefined) {
   if (!value) return "";
   try {
@@ -282,8 +272,8 @@ export default async function SiteRolesPage({
               Habilitar rol operativo
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              El rol se guarda con código técnico normalizado. Ejemplo:
-              conductor, barista o produccion.
+              Crea el código operativo que necesite la sede. No es un catálogo
+              fijo de cargos; es una regla operativa por sede.
             </p>
           </div>
 
@@ -323,19 +313,14 @@ export default async function SiteRolesPage({
               <input
                 name="role_code"
                 className="ui-input"
-                list="suggested-operational-roles"
-                placeholder="conductor"
+                placeholder="Ejemplo: conductor_ruta"
+                autoComplete="off"
                 required
               />
-              <datalist id="suggested-operational-roles">
-                {suggestedRoles.map((role) => (
-                  <option
-                    key={role.value}
-                    value={role.value}
-                    label={role.label}
-                  />
-                ))}
-              </datalist>
+              <p className="text-xs leading-5 text-slate-500">
+                Se normaliza automáticamente a minúsculas, sin tildes y con
+                guiones bajos. Ejemplo: Conductor Ruta → conductor_ruta.
+              </p>
             </label>
 
             <label className="flex items-center gap-2">
