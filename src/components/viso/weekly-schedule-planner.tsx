@@ -16,6 +16,7 @@ type PlannerShift = {
   start_time: string;
   end_time: string;
   shift_kind?: string | null;
+  operational_role?: string | null;
   show_end_as_close?: boolean | null;
   break_minutes: number | null;
   status: string;
@@ -36,6 +37,12 @@ type PlannerTotals = {
   monthMinutes: number;
 };
 
+type OperationalRoleOption = {
+  code: string;
+  label: string;
+  isDefault?: boolean | null;
+};
+
 type WeeklySchedulePlannerProps = {
   employees: PlannerEmployee[];
   shifts: PlannerShift[];
@@ -43,6 +50,7 @@ type WeeklySchedulePlannerProps = {
   siteId: string;
   returnTo: string;
   visibleStatusByShiftId?: Record<string, string>;
+  operationalRoleOptions?: OperationalRoleOption[];
   initialSlot?: {
     dayIso: string;
     startTime: string;
@@ -160,6 +168,55 @@ function getEmployeeShortLabel(employee: PlannerEmployee) {
   return `${parts[0]} ${parts[1]}`;
 }
 
+function humanizeRoleCode(value: string | null | undefined) {
+  return String(value ?? "")
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getOperationalRoleLabel(value: string | null | undefined, options: OperationalRoleOption[] = []) {
+  const code = String(value ?? "").trim();
+  if (!code) return "Rol base";
+  return options.find((option) => option.code === code)?.label ?? humanizeRoleCode(code);
+}
+
+function getSiteDefaultOperationalRole(options: OperationalRoleOption[] = []) {
+  if (options.length === 1) return options[0]?.code ?? "";
+  return options.find((option) => option.isDefault)?.code ?? "";
+}
+
+function getEmployeeDefaultOperationalRole(
+  employee: PlannerEmployee | null | undefined,
+  options: OperationalRoleOption[] = [],
+) {
+  const baseRole = String(employee?.role ?? "").trim();
+  if (!baseRole) return "";
+  return options.some((option) => option.code === baseRole) ? baseRole : "";
+}
+
+function resolveDefaultOperationalRoleForEmployeeIds(
+  employeeIds: string[],
+  employeeById: Map<string, PlannerEmployee>,
+  options: OperationalRoleOption[] = [],
+  existingRole?: string | null,
+) {
+  const current = String(existingRole ?? "").trim();
+  if (current && options.some((option) => option.code === current)) return current;
+
+  const baseRoles = [
+    ...new Set(
+      employeeIds
+        .map((id) => getEmployeeDefaultOperationalRole(employeeById.get(id), options))
+        .filter(Boolean),
+    ),
+  ];
+
+  if (baseRoles.length === 1) return baseRoles[0] ?? "";
+  return getSiteDefaultOperationalRole(options);
+}
+
 function ShiftEditInline({
   shift,
   employees,
@@ -168,6 +225,7 @@ function ShiftEditInline({
   saveAction,
   deleteAction,
   getEmployeeLabel,
+  operationalRoleOptions,
   onCancel,
 }: {
   shift: PlannerShift;
@@ -177,10 +235,27 @@ function ShiftEditInline({
   saveAction: (formData: FormData) => Promise<void>;
   deleteAction: (formData: FormData) => Promise<void>;
   getEmployeeLabel: (e: PlannerEmployee) => string;
+  operationalRoleOptions: OperationalRoleOption[];
   onCancel: () => void;
 }) {
   const [employeeId, setEmployeeId] = useState(shift.employee_id);
+  const employeeById = useMemo(
+    () => new Map(employees.map((employee) => [employee.id, employee])),
+    [employees],
+  );
+  const suggestedOperationalRole = useMemo(
+    () =>
+      resolveDefaultOperationalRoleForEmployeeIds(
+        [employeeId],
+        employeeById,
+        operationalRoleOptions,
+        shift.operational_role,
+      ),
+    [employeeById, employeeId, operationalRoleOptions, shift.operational_role],
+  );
+  const [hasManualOperationalRole, setHasManualOperationalRole] = useState(Boolean(shift.operational_role));
   const [shiftDate, setShiftDate] = useState(shift.shift_date);
+  const [operationalRole, setOperationalRole] = useState(suggestedOperationalRole);
   const [startTime, setStartTime] = useState(shift.start_time.slice(0, 5));
   const [endTime, setEndTime] = useState(shift.end_time.slice(0, 5));
   const [showEndAsClose, setShowEndAsClose] = useState(Boolean(shift.show_end_as_close));
@@ -190,6 +265,12 @@ function ShiftEditInline({
       shift.start_time.slice(0, 5) === FULL_DAY_REST_START_TIME &&
       shift.end_time.slice(0, 5) === FULL_DAY_REST_END_TIME,
   );
+
+  useEffect(() => {
+    if (!hasManualOperationalRole) {
+      setOperationalRole(suggestedOperationalRole);
+    }
+  }, [hasManualOperationalRole, suggestedOperationalRole]);
 
   return (
     <>
@@ -206,10 +287,31 @@ function ShiftEditInline({
             name="employee_id"
             className="ui-input mt-1 w-full"
             value={employeeId}
-            onChange={(e) => setEmployeeId(e.target.value)}
+            onChange={(e) => {
+              setEmployeeId(e.target.value);
+              if (!shift.operational_role) setHasManualOperationalRole(false);
+            }}
           >
             {employees.map((emp) => (
               <option key={emp.id} value={emp.id}>{getEmployeeLabel(emp)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="ui-caption">Rol operativo</span>
+          <select
+            name="operational_role"
+            className="ui-input mt-1 w-full"
+            value={operationalRole}
+            disabled={isRestShift || isFullDayRest}
+            onChange={(e) => {
+              setHasManualOperationalRole(true);
+              setOperationalRole(e.target.value);
+            }}
+          >
+            <option value="">Usar rol base del trabajador</option>
+            {operationalRoleOptions.map((role) => (
+              <option key={role.code} value={role.code}>{role.label}</option>
             ))}
           </select>
         </label>
@@ -310,6 +412,7 @@ type PlannerShiftGroup = {
   start_time: string;
   end_time: string;
   shift_kind?: string | null;
+  operational_role?: string | null;
   show_end_as_close?: boolean | null;
   site_id: string;
   shifts: PlannerShift[];
@@ -367,7 +470,7 @@ function buildDayLayouts<T extends LayoutItem>(items: T[]) {
 function buildShiftGroups(shifts: PlannerShift[]) {
   const groups = new Map<string, PlannerShiftGroup>();
   for (const shift of shifts) {
-    const key = `${shift.shift_date}|${shift.start_time}|${shift.end_time}|${shift.show_end_as_close ? "close" : "time"}|${shift.shift_kind ?? "laboral"}`;
+    const key = `${shift.shift_date}|${shift.start_time}|${shift.end_time}|${shift.show_end_as_close ? "close" : "time"}|${shift.shift_kind ?? "laboral"}|${shift.operational_role ?? "base"}`;
     const existing = groups.get(key);
     if (existing) {
       existing.shifts.push(shift);
@@ -379,6 +482,7 @@ function buildShiftGroups(shifts: PlannerShift[]) {
       start_time: shift.start_time,
       end_time: shift.end_time,
       shift_kind: shift.shift_kind ?? "laboral",
+      operational_role: shift.operational_role ?? null,
       show_end_as_close: shift.show_end_as_close ?? false,
       site_id: shift.site_id,
       shifts: [shift],
@@ -446,6 +550,7 @@ export function WeeklySchedulePlanner({
   siteId,
   returnTo,
   visibleStatusByShiftId,
+  operationalRoleOptions = [],
   initialSlot,
   totalsByEmployee,
   saveAction,
@@ -488,6 +593,17 @@ export function WeeklySchedulePlanner({
   const employeeById = useMemo(
     () => new Map(employees.map((employee) => [employee.id, employee])),
     [employees],
+  );
+  const selectedSlotOperationalRole = useMemo(
+    () =>
+      selection?.type === "slot"
+        ? resolveDefaultOperationalRoleForEmployeeIds(
+            selection.employeeIds,
+            employeeById,
+            operationalRoleOptions,
+          )
+        : "",
+    [employeeById, operationalRoleOptions, selection],
   );
   const getVisibleStatus = useCallback(
     (shift: PlannerShift) => visibleStatusByShiftId?.[shift.id] ?? (shift.published_at ? "Programado" : "Borrador"),
@@ -948,6 +1064,11 @@ export function WeeklySchedulePlanner({
                               <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80">
                                 {formatRange(group.start_time, group.end_time, group.show_end_as_close, group.shift_kind)}
                               </div>
+                              {group.operational_role ? (
+                                <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--ui-brand)]">
+                                  {getOperationalRoleLabel(group.operational_role, operationalRoleOptions)}
+                                </div>
+                              ) : null}
                               <div className="flex flex-wrap gap-1">
                                 {(() => {
                                   if (group.shifts.length === 1) {
@@ -1203,6 +1324,7 @@ export function WeeklySchedulePlanner({
                         {empShifts.map((s) => (
                           <li key={s.id}>
                             {getDayLabel(s.shift_date)} — {formatRange(s.start_time, s.end_time, s.show_end_as_close, s.shift_kind)}
+                            {s.operational_role ? ` · ${getOperationalRoleLabel(s.operational_role, operationalRoleOptions)}` : null}
                             {s.break_minutes ? ` · ${s.break_minutes} min descanso` : null}
                           </li>
                         ))}
@@ -1409,6 +1531,20 @@ export function WeeklySchedulePlanner({
               <input type="hidden" name="break_minutes" value="0" />
               <input type="hidden" name="status" value="scheduled" />
               <input type="hidden" name="notes" value="" />
+              <label className="block">
+                <span className="ui-caption">Rol operativo del turno</span>
+                <select
+                  key={`slot-operational-role-${selectedSlotOperationalRole || "base"}`}
+                  name="operational_role"
+                  className="ui-input mt-1 w-full"
+                  defaultValue={selectedSlotOperationalRole}
+                >
+                  <option value="">Usar rol base del trabajador</option>
+                  {operationalRoleOptions.map((role) => (
+                    <option key={role.code} value={role.code}>{role.label}</option>
+                  ))}
+                </select>
+              </label>
               <input type="hidden" name="slot_day" value={selection.dayIso} />
               <input type="hidden" name="slot_start" value={selection.startTime} />
               <input type="hidden" name="slot_end" value={selection.endTime} />
@@ -1612,7 +1748,9 @@ export function WeeklySchedulePlanner({
                 <p className="ui-body-muted">
                   {getDayLabel(selection.shift.shift_date)} · {formatRange(selection.shift.start_time, selection.shift.end_time, selection.shift.show_end_as_close, selection.shift.shift_kind)}
                 </p>
-                <p className="ui-caption">{getVisibleStatus(selection.shift)}</p>
+                <p className="ui-caption">
+                  {getVisibleStatus(selection.shift)} · Rol operativo: {getOperationalRoleLabel(selection.shift.operational_role, operationalRoleOptions)}
+                </p>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={startEditingShift} className="ui-btn ui-btn--ghost">
                     Editar
@@ -1639,6 +1777,7 @@ export function WeeklySchedulePlanner({
                 saveAction={saveAction}
                 deleteAction={deleteAction}
                 getEmployeeLabel={getEmployeeLabel}
+                operationalRoleOptions={operationalRoleOptions}
                 onCancel={() => setSelection({ ...selection, editing: false })}
               />
             )}

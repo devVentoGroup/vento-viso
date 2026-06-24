@@ -41,6 +41,7 @@ type ShiftRow = {
   start_time: string;
   end_time: string;
   shift_kind?: string | null;
+  operational_role?: string | null;
   show_end_as_close?: boolean | null;
   break_minutes: number | null;
   status: string;
@@ -96,6 +97,19 @@ type AvailabilityRow = {
   available_to: string;
   is_available: boolean;
   availability_kind: "preferred" | "allowed" | "blocked";
+};
+
+type OperationalRoleOption = {
+  code: string;
+  label: string;
+  isDefault?: boolean | null;
+};
+
+type SiteOperationalRoleRow = {
+  role_code: string;
+  label: string | null;
+  is_default: boolean | null;
+  sort_order: number | null;
 };
 
 const FULL_DAY_REST_START_TIME = "00:00";
@@ -207,6 +221,20 @@ function roleMatches(role: string | null | undefined, requiredRole: string | nul
     normalizedRole.includes(normalizedRequired) ||
     normalizedRequired.includes(normalizedRole)
   );
+}
+
+function humanizeRoleCode(value: string | null | undefined) {
+  return String(value ?? "")
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getOperationalRoleLabel(value: string | null | undefined, options: OperationalRoleOption[] = []) {
+  const code = String(value ?? "").trim();
+  if (!code) return "Rol base";
+  return options.find((option) => option.code === code)?.label ?? humanizeRoleCode(code);
 }
 
 function formatWeekLabel(weekStart: Date) {
@@ -426,6 +454,7 @@ async function saveShiftAction(formData: FormData) {
   const blockNotes = formData.getAll("block_notes").map((value) => asText(value));
   const shiftNotes = asText(formData.get("notes"));
   const explicitShiftKind = asText(formData.get("shift_kind"));
+  const operationalRole = asText(formData.get("operational_role")) || null;
   const isRestShift = asText(formData.get("rest_shift")) === "1";
   const isFullDayRest = asText(formData.get("full_day_rest")) === "1";
   const shiftKind = explicitShiftKind === "descanso" || isRestShift || isFullDayRest ? "descanso" : "laboral";
@@ -571,6 +600,7 @@ async function saveShiftAction(formData: FormData) {
   const basePayload = {
     site_id: siteId,
     shift_kind: shiftKind,
+    operational_role: shiftKind === "descanso" ? null : operationalRole,
     break_minutes: shiftKind === "descanso" ? 0 : Math.max(0, asNumber(formData.get("break_minutes"), 0)),
     status: asText(formData.get("status")) || "scheduled",
     notes: shiftNotes || orderedShiftBlocks[0]?.notes || null,
@@ -768,7 +798,7 @@ async function assignManyShiftAction(formData: FormData) {
 
   const { data: sourceShifts, error: sourceError } = await supabase
     .from("employee_shifts")
-    .select("id,employee_id,shift_date,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes,site_id,published_at")
+    .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,published_at")
     .in("id", sourceShiftIds);
 
   if (sourceError) {
@@ -857,6 +887,7 @@ async function assignManyShiftAction(formData: FormData) {
         start_time: shift.start_time,
         end_time: shift.end_time,
         shift_kind: shift.shift_kind ?? "laboral",
+        operational_role: shift.operational_role ?? null,
         show_end_as_close: shift.show_end_as_close ?? false,
         break_minutes: shift.break_minutes ?? 0,
         status: shift.status || "scheduled",
@@ -902,7 +933,7 @@ async function copyPreviousWeekAction(formData: FormData) {
 
   const { data: previousRows, error: previousError } = await supabase
     .from("employee_shifts")
-    .select("employee_id,site_id,shift_date,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes")
+    .select("employee_id,site_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes")
     .eq("site_id", siteId)
     .gte("shift_date", isoDate(prevStart))
     .lte("shift_date", isoDate(prevEnd));
@@ -918,6 +949,7 @@ async function copyPreviousWeekAction(formData: FormData) {
     start_time: string;
     end_time: string;
     shift_kind?: string | null;
+    operational_role?: string | null;
     show_end_as_close?: boolean | null;
     break_minutes: number | null;
     status: string;
@@ -977,7 +1009,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
 
   const query = supabase
     .from("employee_shifts")
-    .select("employee_id,site_id,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes")
+    .select("employee_id,site_id,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes")
     .eq("site_id", siteId)
     .eq("shift_date", sourceDayIso)
     .eq("employee_id", employeeId);
@@ -994,6 +1026,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
     start_time: string;
     end_time: string;
     shift_kind?: string | null;
+    operational_role?: string | null;
     show_end_as_close?: boolean | null;
     break_minutes: number | null;
     status: string;
@@ -1012,6 +1045,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
       start_time: row.start_time,
       end_time: row.end_time,
       shift_kind: row.shift_kind ?? "laboral",
+      operational_role: row.operational_role ?? null,
       show_end_as_close: row.show_end_as_close ?? false,
       break_minutes: row.break_minutes,
       status: row.status,
@@ -1179,7 +1213,7 @@ async function suggestDraftWeekAction(formData: FormData) {
       .eq("is_active", true),
     supabase
       .from("employee_shifts")
-      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes,site_id,published_at")
+      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,published_at")
       .eq("site_id", siteId)
       .gte("shift_date", weekStartIso)
       .lte("shift_date", weekEndIso),
@@ -1421,6 +1455,7 @@ async function suggestDraftWeekAction(formData: FormData) {
       start_time: shift.startTime,
       end_time: shift.endTime,
       shift_kind: shift.shiftKind,
+      operational_role: shift.requiredRoleCode ?? null,
       show_end_as_close: false,
       break_minutes: 0,
       status: "scheduled",
@@ -1782,6 +1817,7 @@ export default async function StaffSchedulePage({
     availabilityConfigRes,
     planningLimitsRes,
     shiftPreferencesRes,
+    siteOperationalRolesRes,
   ] = await Promise.all([
     selectedSiteId
       ? supabase
@@ -1801,7 +1837,7 @@ export default async function StaffSchedulePage({
     selectedSiteId
       ? supabase
           .from("employee_shifts")
-          .select("id,employee_id,shift_date,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes,site_id,published_at")
+          .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,published_at")
           .eq("site_id", selectedSiteId)
           .gte("shift_date", weekStartIso)
           .lte("shift_date", weekEndIso)
@@ -1840,6 +1876,16 @@ export default async function StaffSchedulePage({
           .select("employee_id,prefers_morning,prefers_afternoon,prefers_evening,avoid_opening,avoid_closing")
           .eq("site_id", selectedSiteId)
       : Promise.resolve({ data: [], error: null }),
+    selectedSiteId
+      ? supabase
+          .schema("viso")
+          .from("site_operational_roles")
+          .select("role_code,label,is_default,sort_order")
+          .eq("site_id", selectedSiteId)
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true })
+          .order("label", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   const employeeMap = new Map<string, EmployeeRow>();
@@ -1859,6 +1905,21 @@ export default async function StaffSchedulePage({
   const roleOptions = [...new Set(employees.map((employee) => employee.role).filter(Boolean) as string[])].sort(
     (a, b) => a.localeCompare(b, "es"),
   );
+  const configuredOperationalRoles = ((siteOperationalRolesRes.data ?? []) as SiteOperationalRoleRow[])
+    .map((row) => ({
+      code: String(row.role_code ?? "").trim(),
+      label: String(row.label ?? row.role_code ?? "").trim(),
+      isDefault: row.is_default,
+    }))
+    .filter((role) => role.code);
+  const operationalRoleOptions: OperationalRoleOption[] = configuredOperationalRoles.length > 0
+    ? configuredOperationalRoles
+    : roleOptions.map((role) => ({ code: role, label: humanizeRoleCode(role) }));
+  const operationalRoleCodes = new Set(operationalRoleOptions.map((role) => role.code));
+  const siteDefaultOperationalRole =
+    operationalRoleOptions.length === 1
+      ? operationalRoleOptions[0]?.code ?? ""
+      : operationalRoleOptions.find((role) => role.isDefault)?.code ?? "";
   const employeeIds = employees.map((employee) => employee.id);
   const staffingRequirements = (staffingRequirementsRes.data ?? []) as StaffingRequirementRow[];
   const availabilityConfigRows = (availabilityConfigRes.data ?? []) as (AvailabilityRow & { id: string })[];
@@ -1880,7 +1941,7 @@ export default async function StaffSchedulePage({
   if (employeeIds.length > 0 && selectedSiteId) {
     const { data: monthShiftRows } = await supabase
       .from("employee_shifts")
-      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,show_end_as_close,break_minutes,status,notes,site_id")
+      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id")
       .in("employee_id", employeeIds)
       .eq("site_id", selectedSiteId)
       .gte("shift_date", monthStartIso)
@@ -2016,6 +2077,27 @@ export default async function StaffSchedulePage({
     if (!candidate) return weekDays[0]?.iso ?? "";
     return weekDays.some((day) => day.iso === candidate) ? candidate : weekDays[0]?.iso ?? "";
   })();
+  const resolveDefaultOperationalRole = (
+    targetEmployeeIds: string[],
+    existingRole?: string | null,
+  ) => {
+    const existingCode = String(existingRole ?? "").trim();
+    if (existingCode && operationalRoleCodes.has(existingCode)) return existingCode;
+
+    const baseRoles = [
+      ...new Set(
+        targetEmployeeIds
+          .map((id) => String(employeeMap.get(id)?.role ?? "").trim())
+          .filter((role) => role && operationalRoleCodes.has(role)),
+      ),
+    ];
+
+    if (baseRoles.length === 1) return baseRoles[0] ?? "";
+    return siteDefaultOperationalRole;
+  };
+  const quickShiftOperationalRole = resolveDefaultOperationalRole(
+    quickEmployeeId ? [quickEmployeeId] : [],
+  );
   const selectedShift =
     editShiftId && viewMode === "table"
       ? weekShifts.find((shift) => shift.id === editShiftId) ?? null
@@ -2023,6 +2105,10 @@ export default async function StaffSchedulePage({
   const selectedShiftEmployee = selectedShift
     ? employees.find((employee) => employee.id === selectedShift.employee_id) ?? null
     : null;
+  const selectedShiftOperationalRole = resolveDefaultOperationalRole(
+    selectedShift ? [selectedShift.employee_id] : [],
+    selectedShift?.operational_role,
+  );
   const employeesGroupedByArea = (() => {
     const groups = new Map<string, EmployeeRow[]>();
     for (const employee of employees) {
@@ -2247,6 +2333,23 @@ export default async function StaffSchedulePage({
                     </select>
                   </label>
 
+                  <label className="flex flex-col gap-1 md:col-span-2">
+                    <span className="ui-label">Rol operativo del turno</span>
+                    <select name="operational_role" className="ui-input" defaultValue={selectedShiftOperationalRole}>
+                      <option value="">Usar rol base del trabajador</option>
+                      {selectedShiftOperationalRole && !operationalRoleCodes.has(selectedShiftOperationalRole) ? (
+                        <option value={selectedShiftOperationalRole}>
+                          {getOperationalRoleLabel(selectedShiftOperationalRole, operationalRoleOptions)}
+                        </option>
+                      ) : null}
+                      {operationalRoleOptions.map((role) => (
+                        <option key={role.code} value={role.code}>
+                          {role.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
                   <label className="flex flex-col gap-1">
                     <span className="ui-label">Día</span>
                     <input
@@ -2361,8 +2464,30 @@ export default async function StaffSchedulePage({
                   <select name="employee_id" className="ui-input" required defaultValue={quickEmployeeId}>
                     <option value="" disabled>Seleccionar</option>
                     {employees.map((employee) => (
-                      <option key={employee.id} value={employee.id}>
+                      <option
+                        key={employee.id}
+                        value={employee.id}
+                        data-operational-role={resolveDefaultOperationalRole([employee.id])}
+                      >
                         {employee.full_name ?? employee.alias ?? employee.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1 md:col-span-2">
+                  <span className="ui-label">Rol operativo</span>
+                  <select
+                    name="operational_role"
+                    className="ui-input"
+                    defaultValue={quickShiftOperationalRole}
+                    data-operational-role-select
+                    data-site-default-role={siteDefaultOperationalRole}
+                  >
+                    <option value="">Usar rol base del trabajador</option>
+                    {operationalRoleOptions.map((role) => (
+                      <option key={role.code} value={role.code}>
+                        {role.label}
                       </option>
                     ))}
                   </select>
@@ -2528,10 +2653,12 @@ export default async function StaffSchedulePage({
                     function saveDraft(form) {
                       try {
                         var employee = form.querySelector('[name="employee_id"]');
+                        var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
                         var closeInput = form.querySelector("[data-quick-shift-close-input]");
                         var restInput = form.querySelector("[data-full-day-rest-toggle]");
                         window.sessionStorage.setItem(draftKey, JSON.stringify({
                           employeeId: employee ? employee.value || "" : "",
+                          operationalRole: operationalRoleSelect ? operationalRoleSelect.value || "" : "",
                           showEndAsClose: Boolean(closeInput && closeInput.checked),
                           fullDayRest: Boolean(restInput && restInput.checked),
                           rows: getBlockRows(form),
@@ -2554,9 +2681,14 @@ export default async function StaffSchedulePage({
                         var draft = JSON.parse(raw);
                         if (!draft || typeof draft !== "object") return;
                         var employee = form.querySelector('[name="employee_id"]');
+                        var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
                         var closeInput = form.querySelector("[data-quick-shift-close-input]");
                         var restInput = form.querySelector("[data-full-day-rest-toggle]");
                         if (employee && draft.employeeId) employee.value = draft.employeeId;
+                        if (operationalRoleSelect && typeof draft.operationalRole === "string") {
+                          operationalRoleSelect.value = draft.operationalRole;
+                          operationalRoleSelect.setAttribute("data-user-changed", "1");
+                        }
                         if (closeInput) closeInput.checked = Boolean(draft.showEndAsClose);
                         if (restInput) restInput.checked = Boolean(draft.fullDayRest);
                         writeRows(form, draft.rows);
@@ -2581,6 +2713,7 @@ export default async function StaffSchedulePage({
                       var optionalBlocks = Array.from(form.querySelectorAll('[data-quick-shift-block="optional"]'));
                       var addButton = form.querySelector("[data-add-shift-block]");
                       var closeInput = form.querySelector("[data-quick-shift-close-input]");
+                      var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
 
                       if (restDay) {
                         optionalBlocks.forEach(function (block) {
@@ -2602,10 +2735,26 @@ export default async function StaffSchedulePage({
                         setElementHidden(element, !restDay);
                       });
 
+                      if (operationalRoleSelect) {
+                        operationalRoleSelect.disabled = restDay;
+                      }
+
                       if (addButton) {
                         addButton.disabled = restDay;
                         addButton.setAttribute("aria-disabled", restDay ? "true" : "false");
                       }
+                    }
+
+                    function syncDefaultOperationalRole(form) {
+                      var employeeSelect = form.querySelector('select[name="employee_id"]');
+                      var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
+                      if (!employeeSelect || !operationalRoleSelect) return;
+                      if (operationalRoleSelect.getAttribute("data-user-changed") === "1") return;
+
+                      var selectedOption = employeeSelect.options[employeeSelect.selectedIndex];
+                      var employeeRole = selectedOption ? selectedOption.getAttribute("data-operational-role") || "" : "";
+                      var siteDefaultRole = operationalRoleSelect.getAttribute("data-site-default-role") || "";
+                      operationalRoleSelect.value = employeeRole || siteDefaultRole || "";
                     }
 
                     function initQuickShiftForm(form) {
@@ -2618,11 +2767,26 @@ export default async function StaffSchedulePage({
                         });
                       });
 
+                      var employeeSelect = form.querySelector('select[name="employee_id"]');
+                      var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
+                      if (employeeSelect) {
+                        employeeSelect.addEventListener("change", function () {
+                          if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
+                          syncDefaultOperationalRole(form);
+                        });
+                      }
+                      if (operationalRoleSelect) {
+                        operationalRoleSelect.addEventListener("change", function () {
+                          operationalRoleSelect.setAttribute("data-user-changed", "1");
+                        });
+                      }
+
                       form.addEventListener("submit", function () {
                         saveDraft(form);
                       });
 
                       restoreDraft(form);
+                      syncDefaultOperationalRole(form);
                       refreshBlockControls(form);
                     }
 
@@ -2953,7 +3117,7 @@ export default async function StaffSchedulePage({
                                             ) : (
                                               <>
                                                 <span>{visibleStatusByShiftId[shift.id] ?? "Programado"}</span>
-                                                <span>{formatHoursCompact(getShiftMinutes(shift))}</span>
+                                                <span>{shift.operational_role ? getOperationalRoleLabel(shift.operational_role, operationalRoleOptions) : formatHoursCompact(getShiftMinutes(shift))}</span>
                                               </>
                                             )}
                                           </div>
@@ -3251,6 +3415,7 @@ export default async function StaffSchedulePage({
             initialSlot={initialSlot}
             totalsByEmployee={totalsByEmployee}
             visibleStatusByShiftId={visibleStatusByShiftId}
+            operationalRoleOptions={operationalRoleOptions}
             saveAction={saveShiftAction}
             deleteAction={deleteShiftAction}
             deleteManyAction={deleteManyShiftAction}
