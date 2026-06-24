@@ -274,9 +274,9 @@ function isOperationsHref(href: string) {
   return href === "/operations" || href.startsWith("/operations/");
 }
 
-function buildOperationsNavItem(row: NavigationRow, href: string): NavItem {
+function buildOperationsNavItem(row: NavigationRow): NavItem {
   return {
-    href,
+    href: "/operations",
     label: "Operación",
     description: "Contexto operativo, puntos de marcación, roles y perfiles.",
     icon: "briefcase",
@@ -300,7 +300,7 @@ function buildNavGroups(rows: NavigationRow[]): NavGroup[] {
 
     if (isOperationsHref(href)) {
       if (!operationsNavAdded) {
-        current.push(buildOperationsNavItem(row, href));
+        current.push(buildOperationsNavItem(row));
         operationsNavAdded = true;
       }
 
