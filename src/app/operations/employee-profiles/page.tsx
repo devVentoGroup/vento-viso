@@ -48,6 +48,7 @@ type SiteRow = {
 };
 
 type SiteRoleRow = {
+  id: string;
   site_id: string | null;
   role_code: string | null;
   is_active: boolean | null;
@@ -59,8 +60,7 @@ type CheckinPointRow = {
 
 type ProfileRow = {
   employee_id: string | null;
-  site_id: string | null;
-  role_code: string | null;
+  site_operational_role_id: string | null;
   checkin_site_id: string | null;
   checkout_site_id: string | null;
   is_active: boolean | null;
@@ -144,23 +144,7 @@ function pointLabel(point: CheckinPointRow | null | undefined) {
 }
 
 function profileKey(profile: ProfileRow) {
-  return [profile.employee_id, profile.site_id, profile.role_code].filter(Boolean).join("::");
-}
-
-function siteRoleKey(siteId: string, roleCode: string) {
-  return `${siteId}::${roleCode}`;
-}
-
-function parseSiteRoleKey(value: string) {
-  const separator = value.indexOf("::");
-  if (separator === -1) {
-    return { siteId: "", roleCode: "" };
-  }
-
-  return {
-    siteId: value.slice(0, separator),
-    roleCode: value.slice(separator + 2),
-  };
+  return [profile.employee_id, profile.site_operational_role_id].filter(Boolean).join("::");
 }
 
 function isOperationalSite(site: SiteRow) {
@@ -198,7 +182,7 @@ async function loadData(db: SupabaseLike): Promise<LoadedData> {
     loadTable<SiteRoleRow>({
       db,
       table: "site_operational_roles",
-      columns: "site_id,role_code,is_active",
+      columns: "id,site_id,role_code,is_active",
       orderColumn: "role_code",
     }),
     loadTable<CheckinPointRow>({
@@ -210,7 +194,7 @@ async function loadData(db: SupabaseLike): Promise<LoadedData> {
     loadTable<ProfileRow>({
       db,
       table: "employee_site_operational_profiles",
-      columns: "employee_id,site_id,role_code,checkin_site_id,checkout_site_id,is_active",
+      columns: "employee_id,site_operational_role_id,checkin_site_id,checkout_site_id,is_active",
       orderColumn: "employee_id",
     }),
   ]);
@@ -233,14 +217,14 @@ async function saveEmployeeProfile(formData: FormData) {
   "use server";
 
   const employeeId = readFormString(formData, "employee_id");
-  const parsedRole = parseSiteRoleKey(readFormString(formData, "site_role_key"));
+  const siteOperationalRoleId = readFormString(formData, "site_operational_role_id");
   const checkinSiteId = readFormString(formData, "checkin_site_id");
   const checkoutSiteId = readFormString(formData, "checkout_site_id");
   const statusAction = readFormString(formData, "status_action");
   const isActive = statusAction === "deactivate" ? false : statusAction === "activate" ? true : formData.get("is_active") === "on";
 
   if (!employeeId) buildRedirect("error", "Selecciona un trabajador.");
-  if (!parsedRole.siteId || !parsedRole.roleCode) buildRedirect("error", "Selecciona una sede y un rol operativo.");
+  if (!siteOperationalRoleId) buildRedirect("error", "Selecciona una sede y un rol operativo.");
   if (!checkinSiteId) buildRedirect("error", "Selecciona el punto físico de entrada.");
   if (!checkoutSiteId) buildRedirect("error", "Selecciona el punto físico de salida.");
 
@@ -252,8 +236,7 @@ async function saveEmployeeProfile(formData: FormData) {
   const db = supabase as unknown as SupabaseLike;
   const payload = {
     employee_id: employeeId,
-    site_id: parsedRole.siteId,
-    role_code: parsedRole.roleCode,
+    site_operational_role_id: siteOperationalRoleId,
     checkin_site_id: checkinSiteId,
     checkout_site_id: checkoutSiteId,
     is_active: isActive,
@@ -261,8 +244,7 @@ async function saveEmployeeProfile(formData: FormData) {
 
   let result = await db.rpc("upsert_employee_site_operational_profile", {
     p_employee_id: employeeId,
-    p_site_id: parsedRole.siteId,
-    p_role_code: parsedRole.roleCode,
+    p_site_operational_role_id: siteOperationalRoleId,
     p_checkin_site_id: checkinSiteId,
     p_checkout_site_id: checkoutSiteId,
     p_is_active: isActive,
@@ -270,7 +252,7 @@ async function saveEmployeeProfile(formData: FormData) {
 
   if (result.error && isRpcSignatureError(result.error.message)) {
     result = await db.from<ProfileRow>("employee_site_operational_profiles").upsert(payload, {
-      onConflict: "employee_id,site_id,role_code",
+      onConflict: "employee_id,site_operational_role_id",
     });
   }
 
@@ -299,13 +281,15 @@ export default async function EmployeeProfilesPage({
   const employeeMap = new Map(employees.map((employee) => [employee.id, employee]));
   const siteMap = new Map(sites.map((site) => [site.id, site]));
   const pointMap = new Map(points.map((point) => [pointId(point), point]));
+  const siteRoleMap = new Map(siteRoles.map((role) => [role.id, role]));
   const siteRoleOptions = siteRoles
     .map((row) => {
+      const siteOperationalRoleId = String(row.id ?? "").trim();
       const siteId = String(row.site_id ?? "").trim();
       const roleCode = String(row.role_code ?? "").trim();
-      if (!siteId || !roleCode) return null;
+      if (!siteOperationalRoleId || !siteId || !roleCode) return null;
       return {
-        value: siteRoleKey(siteId, roleCode),
+        value: siteOperationalRoleId,
         label: `${siteName(siteMap.get(siteId))} · ${roleCode}`,
       };
     })
@@ -353,7 +337,7 @@ export default async function EmployeeProfilesPage({
 
           <label className="space-y-1">
             <span className="text-sm font-medium text-[var(--ui-text)]">Sede y rol operativo</span>
-            <select name="site_role_key" className="ui-input" required>
+            <select name="site_operational_role_id" className="ui-input" required>
               <option value="">Seleccionar sede y rol</option>
               {siteRoleOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -425,8 +409,10 @@ export default async function EmployeeProfilesPage({
             <TableBody>
               {profiles.map((profile) => {
                 const employeeId = String(profile.employee_id ?? "");
-                const siteId = String(profile.site_id ?? "");
-                const roleCode = String(profile.role_code ?? "");
+                const siteOperationalRoleId = String(profile.site_operational_role_id ?? "");
+                const siteRole = siteRoleMap.get(siteOperationalRoleId);
+                const siteId = String(siteRole?.site_id ?? "");
+                const roleCode = String(siteRole?.role_code ?? "");
                 const checkinSiteId = String(profile.checkin_site_id ?? "");
                 const checkoutSiteId = String(profile.checkout_site_id ?? "");
                 const isActive = profile.is_active !== false;
@@ -435,7 +421,7 @@ export default async function EmployeeProfilesPage({
                   <TableRow key={profileKey(profile)}>
                     <TableCell>{employeeName(employeeMap.get(employeeId))}</TableCell>
                     <TableCell>{siteName(siteMap.get(siteId))}</TableCell>
-                    <TableCell>{roleCode || "—"}</TableCell>
+                    <TableCell>{roleCode || "Rol no encontrado"}</TableCell>
                     <TableCell>{pointLabel(pointMap.get(checkinSiteId))}</TableCell>
                     <TableCell>{pointLabel(pointMap.get(checkoutSiteId))}</TableCell>
                     <TableCell>
@@ -446,7 +432,7 @@ export default async function EmployeeProfilesPage({
                     <TableCell className="text-right">
                       <form action={saveEmployeeProfile}>
                         <input type="hidden" name="employee_id" value={employeeId} />
-                        <input type="hidden" name="site_role_key" value={siteRoleKey(siteId, roleCode)} />
+                        <input type="hidden" name="site_operational_role_id" value={siteOperationalRoleId} />
                         <input type="hidden" name="checkin_site_id" value={checkinSiteId} />
                         <input type="hidden" name="checkout_site_id" value={checkoutSiteId} />
                         <input type="hidden" name="status_action" value={isActive ? "deactivate" : "activate"} />

@@ -47,6 +47,8 @@ type ShiftRow = {
   status: string;
   notes: string | null;
   site_id: string;
+  checkin_site_id?: string | null;
+  checkout_site_id?: string | null;
   published_at?: string | null;
 };
 
@@ -118,6 +120,32 @@ type SiteOperationalRoleRow = {
   is_default: boolean | null;
   requires_external_checkin: boolean | null;
   requires_external_checkout: boolean | null;
+};
+
+type SiteOperationalRoleLinkRow = {
+  id: string;
+  site_id: string | null;
+  role_code: string | null;
+  is_active: boolean | null;
+};
+
+type EmployeeOperationalProfileRow = {
+  employee_id: string;
+  site_operational_role_id: string | null;
+  checkin_site_id: string | null;
+  checkout_site_id: string | null;
+  is_active: boolean | null;
+};
+
+type ShiftOperationalContextSeed = {
+  employeeId: string;
+  siteId: string;
+  operationalRole: string | null | undefined;
+};
+
+type ShiftOperationalContext = {
+  checkinSiteId: string | null;
+  checkoutSiteId: string | null;
 };
 
 const FULL_DAY_REST_START_TIME = "00:00";
@@ -464,6 +492,124 @@ function getEmployeeRef(row: EmployeeSiteLink["employee"]) {
   return Array.isArray(row) ? row[0] ?? null : row;
 }
 
+function cleanOptionalText(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function uniqueTextValues(values: Array<string | null | undefined>) {
+  return [...new Set(values.map(cleanOptionalText).filter((value): value is string => Boolean(value)))];
+}
+
+function profileLookupKey(employeeId: string, siteId: string, operationalRole: string) {
+  return `${employeeId}::${siteId}::${operationalRole}`;
+}
+
+function roleLookupKey(siteId: string, operationalRole: string) {
+  return `${siteId}::${operationalRole}`;
+}
+
+async function loadShiftOperationalContextIndex(
+  supabase: ReturnType<typeof createAdminClient>,
+  seeds: ShiftOperationalContextSeed[],
+) {
+  const normalizedSeeds = seeds
+    .map((seed) => ({
+      employeeId: cleanOptionalText(seed.employeeId),
+      siteId: cleanOptionalText(seed.siteId),
+      operationalRole: cleanOptionalText(seed.operationalRole),
+    }))
+    .filter(
+      (seed): seed is { employeeId: string; siteId: string; operationalRole: string } =>
+        Boolean(seed.employeeId && seed.siteId && seed.operationalRole),
+    );
+
+  const contextIndex = new Map<string, ShiftOperationalContext>();
+  if (normalizedSeeds.length === 0) return contextIndex;
+
+  const siteIds = uniqueTextValues(normalizedSeeds.map((seed) => seed.siteId));
+  const roleCodes = uniqueTextValues(normalizedSeeds.map((seed) => seed.operationalRole));
+  const employeeIds = uniqueTextValues(normalizedSeeds.map((seed) => seed.employeeId));
+
+  const { data: roleRows, error: rolesError } = await supabase
+    .from("site_operational_roles")
+    .select("id,site_id,role_code,is_active")
+    .in("site_id", siteIds)
+    .in("role_code", roleCodes)
+    .neq("is_active", false);
+
+  if (rolesError) throw new Error(rolesError.message);
+
+  const roleIdBySiteAndCode = new Map<string, string>();
+  for (const row of (roleRows ?? []) as SiteOperationalRoleLinkRow[]) {
+    const siteId = cleanOptionalText(row.site_id);
+    const roleCode = cleanOptionalText(row.role_code);
+    const roleId = cleanOptionalText(row.id);
+    if (!siteId || !roleCode || !roleId) continue;
+    roleIdBySiteAndCode.set(roleLookupKey(siteId, roleCode), roleId);
+  }
+
+  const roleIds = uniqueTextValues(
+    normalizedSeeds.map((seed) => roleIdBySiteAndCode.get(roleLookupKey(seed.siteId, seed.operationalRole))),
+  );
+  if (roleIds.length === 0) return contextIndex;
+
+  const { data: profileRows, error: profilesError } = await supabase
+    .from("employee_site_operational_profiles")
+    .select("employee_id,site_operational_role_id,checkin_site_id,checkout_site_id,is_active")
+    .in("employee_id", employeeIds)
+    .in("site_operational_role_id", roleIds)
+    .neq("is_active", false);
+
+  if (profilesError) throw new Error(profilesError.message);
+
+  const profileByEmployeeAndRoleId = new Map<string, EmployeeOperationalProfileRow>();
+  for (const profile of (profileRows ?? []) as EmployeeOperationalProfileRow[]) {
+    const employeeId = cleanOptionalText(profile.employee_id);
+    const roleId = cleanOptionalText(profile.site_operational_role_id);
+    if (!employeeId || !roleId) continue;
+    profileByEmployeeAndRoleId.set(`${employeeId}::${roleId}`, profile);
+  }
+
+  for (const seed of normalizedSeeds) {
+    const roleId = roleIdBySiteAndCode.get(roleLookupKey(seed.siteId, seed.operationalRole));
+    if (!roleId) continue;
+
+    const profile = profileByEmployeeAndRoleId.get(`${seed.employeeId}::${roleId}`);
+    if (!profile) continue;
+
+    contextIndex.set(profileLookupKey(seed.employeeId, seed.siteId, seed.operationalRole), {
+      checkinSiteId: cleanOptionalText(profile.checkin_site_id),
+      checkoutSiteId: cleanOptionalText(profile.checkout_site_id),
+    });
+  }
+
+  return contextIndex;
+}
+
+function getShiftOperationalContext(
+  contextIndex: Map<string, ShiftOperationalContext>,
+  employeeId: string,
+  siteId: string,
+  operationalRole: string | null | undefined,
+) {
+  const roleCode = cleanOptionalText(operationalRole);
+  if (!employeeId || !siteId || !roleCode) return null;
+  return contextIndex.get(profileLookupKey(employeeId, siteId, roleCode)) ?? null;
+}
+
+function withShiftOperationalContext<T extends Record<string, unknown>>(
+  payload: T,
+  context: ShiftOperationalContext | null,
+  shiftKind: string,
+) {
+  return {
+    ...payload,
+    checkin_site_id: shiftKind === "descanso" ? null : context?.checkinSiteId ?? null,
+    checkout_site_id: shiftKind === "descanso" ? null : context?.checkoutSiteId ?? null,
+  };
+}
+
 async function saveShiftAction(formData: FormData) {
   "use server";
   const shiftId = asText(formData.get("shift_id"));
@@ -642,30 +788,55 @@ async function saveShiftAction(formData: FormData) {
     published_by: null,
   };
   const closeBlockIndex = shiftKind === "descanso" || !showEndAsClose ? -1 : orderedShiftBlocks.length - 1;
-
-  const insertPayload = requestedEmployeeIds.flatMap((id) =>
-    orderedShiftBlocks.map((block, index) => ({
-      ...basePayload,
-      employee_id: id,
-      shift_date: block.shiftDate,
-      start_time: block.startTime,
-      end_time: block.endTime,
-      notes: block.notes || null,
-      show_end_as_close: index === closeBlockIndex,
-    })),
+  const operationalContextIndex = await loadShiftOperationalContextIndex(
+    supabase,
+    shiftKind === "descanso"
+      ? []
+      : requestedEmployeeIds.map((id) => ({
+          employeeId: id,
+          siteId,
+          operationalRole,
+        })),
   );
 
+  const insertPayload = requestedEmployeeIds.flatMap((id) =>
+    orderedShiftBlocks.map((block, index) =>
+      withShiftOperationalContext(
+        {
+          ...basePayload,
+          employee_id: id,
+          shift_date: block.shiftDate,
+          start_time: block.startTime,
+          end_time: block.endTime,
+          notes: block.notes || null,
+          show_end_as_close: index === closeBlockIndex,
+        },
+        getShiftOperationalContext(operationalContextIndex, id, siteId, operationalRole),
+        shiftKind,
+      ),
+    ),
+  );
+
+  const updateContext = requestedEmployeeIds[0]
+    ? getShiftOperationalContext(operationalContextIndex, requestedEmployeeIds[0], siteId, operationalRole)
+    : null;
   const query = shiftId
     ? supabase
         .from("employee_shifts")
-        .update({
-          ...basePayload,
-          employee_id: requestedEmployeeIds[0],
-          shift_date: primaryShiftDate,
-          start_time: resolvedStartTime,
-          end_time: resolvedEndTime,
-          show_end_as_close: shiftKind === "descanso" ? false : showEndAsClose,
-        })
+        .update(
+          withShiftOperationalContext(
+            {
+              ...basePayload,
+              employee_id: requestedEmployeeIds[0],
+              shift_date: primaryShiftDate,
+              start_time: resolvedStartTime,
+              end_time: resolvedEndTime,
+              show_end_as_close: shiftKind === "descanso" ? false : showEndAsClose,
+            },
+            updateContext,
+            shiftKind,
+          ),
+        )
         .eq("id", shiftId)
     : supabase.from("employee_shifts").insert(insertPayload);
 
@@ -832,7 +1003,7 @@ async function assignManyShiftAction(formData: FormData) {
 
   const { data: sourceShifts, error: sourceError } = await supabase
     .from("employee_shifts")
-    .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,published_at")
+    .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,checkin_site_id,checkout_site_id,published_at")
     .in("id", sourceShiftIds);
 
   if (sourceError) {
@@ -907,6 +1078,17 @@ async function assignManyShiftAction(formData: FormData) {
     ),
   );
 
+  const operationalContextIndex = await loadShiftOperationalContextIndex(
+    supabase,
+    targetEmployeeIds.flatMap((employeeId) =>
+      shiftRows.map((shift) => ({
+        employeeId,
+        siteId: shift.site_id,
+        operationalRole: shift.operational_role,
+      })),
+    ),
+  );
+
   const payload = targetEmployeeIds.flatMap((employeeId) =>
     shiftRows
       .filter((shift) => shift.employee_id !== employeeId)
@@ -914,21 +1096,28 @@ async function assignManyShiftAction(formData: FormData) {
         (shift) =>
           !existingExact.has(`${employeeId}|${shift.shift_date}|${shift.start_time}|${shift.end_time}`),
       )
-      .map((shift) => ({
-        employee_id: employeeId,
-        site_id: shift.site_id,
-        shift_date: shift.shift_date,
-        start_time: shift.start_time,
-        end_time: shift.end_time,
-        shift_kind: shift.shift_kind ?? "laboral",
-        operational_role: shift.operational_role ?? null,
-        show_end_as_close: shift.show_end_as_close ?? false,
-        break_minutes: shift.break_minutes ?? 0,
-        status: shift.status || "scheduled",
-        notes: shift.notes ?? null,
-        published_at: null,
-        published_by: null,
-      })),
+      .map((shift) => {
+        const shiftKind = shift.shift_kind ?? "laboral";
+        return withShiftOperationalContext(
+          {
+            employee_id: employeeId,
+            site_id: shift.site_id,
+            shift_date: shift.shift_date,
+            start_time: shift.start_time,
+            end_time: shift.end_time,
+            shift_kind: shiftKind,
+            operational_role: shift.operational_role ?? null,
+            show_end_as_close: shift.show_end_as_close ?? false,
+            break_minutes: shift.break_minutes ?? 0,
+            status: shift.status || "scheduled",
+            notes: shift.notes ?? null,
+            published_at: null,
+            published_by: null,
+          },
+          getShiftOperationalContext(operationalContextIndex, employeeId, shift.site_id, shift.operational_role),
+          shiftKind,
+        );
+      }),
   );
 
   if (payload.length === 0) {
@@ -967,7 +1156,7 @@ async function copyPreviousWeekAction(formData: FormData) {
 
   const { data: previousRows, error: previousError } = await supabase
     .from("employee_shifts")
-    .select("employee_id,site_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes")
+    .select("employee_id,site_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,checkin_site_id,checkout_site_id")
     .eq("site_id", siteId)
     .gte("shift_date", isoDate(prevStart))
     .lte("shift_date", isoDate(prevEnd));
@@ -988,18 +1177,39 @@ async function copyPreviousWeekAction(formData: FormData) {
     break_minutes: number | null;
     status: string;
     notes: string | null;
+    checkin_site_id?: string | null;
+    checkout_site_id?: string | null;
   }>;
 
   if (rows.length === 0) {
     redirect(`${returnTo}&error=${encodeURIComponent("No hay turnos en la semana anterior para copiar.")}`);
   }
 
+  const operationalContextIndex = await loadShiftOperationalContextIndex(
+    supabase,
+    rows.map((row) => ({
+      employeeId: row.employee_id,
+      siteId: row.site_id,
+      operationalRole: row.operational_role,
+    })),
+  );
+
   const nextRows = rows.map((row) => {
     const baseDate = new Date(`${row.shift_date}T12:00:00`);
     baseDate.setDate(baseDate.getDate() + 7);
+    const shiftKind = row.shift_kind ?? "laboral";
+    const profileContext = getShiftOperationalContext(
+      operationalContextIndex,
+      row.employee_id,
+      row.site_id,
+      row.operational_role,
+    );
+
     return {
       ...row,
       shift_date: isoDate(baseDate),
+      checkin_site_id: shiftKind === "descanso" ? null : profileContext?.checkinSiteId ?? row.checkin_site_id ?? null,
+      checkout_site_id: shiftKind === "descanso" ? null : profileContext?.checkoutSiteId ?? row.checkout_site_id ?? null,
       published_at: null,
       published_by: null,
     };
@@ -1043,7 +1253,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
 
   const query = supabase
     .from("employee_shifts")
-    .select("employee_id,site_id,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes")
+    .select("employee_id,site_id,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,checkin_site_id,checkout_site_id")
     .eq("site_id", siteId)
     .eq("shift_date", sourceDayIso)
     .eq("employee_id", employeeId);
@@ -1065,28 +1275,51 @@ async function copyDayToOtherDaysAction(formData: FormData) {
     break_minutes: number | null;
     status: string;
     notes: string | null;
+    checkin_site_id?: string | null;
+    checkout_site_id?: string | null;
   }>;
 
   if (rows.length === 0) {
     redirect(`${returnTo}&error=${encodeURIComponent("Ese día no tiene turnos de esa persona para copiar.")}`);
   }
 
-  const toInsert = targetDays.flatMap((shiftDate) =>
+  const operationalContextIndex = await loadShiftOperationalContextIndex(
+    supabase,
     rows.map((row) => ({
-      employee_id: row.employee_id,
-      site_id: row.site_id,
-      shift_date: shiftDate,
-      start_time: row.start_time,
-      end_time: row.end_time,
-      shift_kind: row.shift_kind ?? "laboral",
-      operational_role: row.operational_role ?? null,
-      show_end_as_close: row.show_end_as_close ?? false,
-      break_minutes: row.break_minutes,
-      status: row.status,
-      notes: row.notes,
-      published_at: null,
-      published_by: null,
+      employeeId: row.employee_id,
+      siteId: row.site_id,
+      operationalRole: row.operational_role,
     })),
+  );
+
+  const toInsert = targetDays.flatMap((shiftDate) =>
+    rows.map((row) => {
+      const shiftKind = row.shift_kind ?? "laboral";
+      const profileContext = getShiftOperationalContext(
+        operationalContextIndex,
+        row.employee_id,
+        row.site_id,
+        row.operational_role,
+      );
+
+      return {
+        employee_id: row.employee_id,
+        site_id: row.site_id,
+        shift_date: shiftDate,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        shift_kind: shiftKind,
+        operational_role: row.operational_role ?? null,
+        show_end_as_close: row.show_end_as_close ?? false,
+        break_minutes: row.break_minutes,
+        status: row.status,
+        notes: row.notes,
+        checkin_site_id: shiftKind === "descanso" ? null : profileContext?.checkinSiteId ?? row.checkin_site_id ?? null,
+        checkout_site_id: shiftKind === "descanso" ? null : profileContext?.checkoutSiteId ?? row.checkout_site_id ?? null,
+        published_at: null,
+        published_by: null,
+      };
+    }),
   );
 
   // Evitar solapamientos: por cada día destino, comprobar que ni los existentes ni los nuevos se crucen
@@ -1247,7 +1480,7 @@ async function suggestDraftWeekAction(formData: FormData) {
       .eq("is_active", true),
     supabase
       .from("employee_shifts")
-      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,published_at")
+      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,checkin_site_id,checkout_site_id,published_at")
       .eq("site_id", siteId)
       .gte("shift_date", weekStartIso)
       .lte("shift_date", weekEndIso),
@@ -1482,21 +1715,38 @@ async function suggestDraftWeekAction(formData: FormData) {
       redirect(`${returnTo}&error=${encodeURIComponent(itemsError.message)}`);
     }
 
-    const draftRows = suggestion.shifts.map((shift) => ({
-      employee_id: shift.employeeId,
-      site_id: shift.siteId,
-      shift_date: shift.shiftDate,
-      start_time: shift.startTime,
-      end_time: shift.endTime,
-      shift_kind: shift.shiftKind,
-      operational_role: shift.requiredRoleCode ?? null,
-      show_end_as_close: false,
-      break_minutes: 0,
-      status: "scheduled",
-      notes: shift.notes ?? "Sugerido por VISO",
-      published_at: null,
-      published_by: null,
-    }));
+    const operationalContextIndex = await loadShiftOperationalContextIndex(
+      supabase,
+      suggestion.shifts.map((shift) => ({
+        employeeId: shift.employeeId,
+        siteId: shift.siteId,
+        operationalRole: shift.requiredRoleCode,
+      })),
+    );
+
+    const draftRows = suggestion.shifts.map((shift) => {
+      const shiftKind = shift.shiftKind;
+      const operationalRole = shiftKind === "descanso" ? null : shift.requiredRoleCode ?? null;
+      return withShiftOperationalContext(
+        {
+          employee_id: shift.employeeId,
+          site_id: shift.siteId,
+          shift_date: shift.shiftDate,
+          start_time: shift.startTime,
+          end_time: shift.endTime,
+          shift_kind: shiftKind,
+          operational_role: operationalRole,
+          show_end_as_close: false,
+          break_minutes: 0,
+          status: "scheduled",
+          notes: shift.notes ?? "Sugerido por VISO",
+          published_at: null,
+          published_by: null,
+        },
+        getShiftOperationalContext(operationalContextIndex, shift.employeeId, shift.siteId, operationalRole),
+        shiftKind,
+      );
+    });
 
     const { error: insertDraftError } = await supabase.from("employee_shifts").insert(draftRows);
     if (insertDraftError) {
@@ -1852,6 +2102,8 @@ export default async function StaffSchedulePage({
     planningLimitsRes,
     shiftPreferencesRes,
     siteOperationalRolesRes,
+    siteOperationalRoleLinksRes,
+    employeeOperationalProfilesRes,
   ] = await Promise.all([
     selectedSiteId
       ? supabase
@@ -1871,7 +2123,7 @@ export default async function StaffSchedulePage({
     selectedSiteId
       ? supabase
           .from("employee_shifts")
-          .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,published_at")
+          .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,checkin_site_id,checkout_site_id,published_at")
           .eq("site_id", selectedSiteId)
           .gte("shift_date", weekStartIso)
           .lte("shift_date", weekEndIso)
@@ -1919,6 +2171,19 @@ export default async function StaffSchedulePage({
           .order("area_name", { ascending: true })
           .order("role_label", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
+    selectedSiteId
+      ? supabase
+          .from("site_operational_roles")
+          .select("id,site_id,role_code,is_active")
+          .eq("site_id", selectedSiteId)
+          .neq("is_active", false)
+      : Promise.resolve({ data: [], error: null }),
+    selectedSiteId
+      ? supabase
+          .from("employee_site_operational_profiles")
+          .select("employee_id,site_operational_role_id,checkin_site_id,checkout_site_id,is_active")
+          .neq("is_active", false)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   const employeeMap = new Map<string, EmployeeRow>();
@@ -1936,6 +2201,22 @@ export default async function StaffSchedulePage({
     (a.full_name ?? a.alias ?? a.id).localeCompare(b.full_name ?? b.alias ?? b.id, "es"),
   );
   const configuredOperationalRoleRows = (siteOperationalRolesRes.data ?? []) as SiteOperationalRoleRow[];
+  const siteOperationalRoleLinks = (siteOperationalRoleLinksRes.data ?? []) as SiteOperationalRoleLinkRow[];
+  const employeeOperationalProfiles = (employeeOperationalProfilesRes.data ?? []) as EmployeeOperationalProfileRow[];
+  const siteOperationalRoleLinkMap = new Map(siteOperationalRoleLinks.map((role) => [role.id, role]));
+  const operationalProfilesByEmployee = new Map<string, EmployeeOperationalProfileRow[]>();
+
+  for (const profile of employeeOperationalProfiles) {
+    const roleLink = profile.site_operational_role_id
+      ? siteOperationalRoleLinkMap.get(profile.site_operational_role_id)
+      : null;
+    if (!roleLink || roleLink.site_id !== selectedSiteId) continue;
+
+    const current = operationalProfilesByEmployee.get(profile.employee_id) ?? [];
+    current.push(profile);
+    operationalProfilesByEmployee.set(profile.employee_id, current);
+  }
+
   const operationalRoleOptions: OperationalRoleOption[] = Array.from(
     configuredOperationalRoleRows
       .reduce((map, row) => {
@@ -2009,7 +2290,7 @@ export default async function StaffSchedulePage({
   if (employeeIds.length > 0 && selectedSiteId) {
     const { data: monthShiftRows } = await supabase
       .from("employee_shifts")
-      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id")
+      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,checkin_site_id,checkout_site_id")
       .in("employee_id", employeeIds)
       .eq("site_id", selectedSiteId)
       .gte("shift_date", monthStartIso)
@@ -2151,6 +2432,22 @@ export default async function StaffSchedulePage({
   ) => {
     const existingCode = String(existingRole ?? "").trim();
     if (existingCode && operationalRoleCodes.has(existingCode)) return existingCode;
+
+    const profileRoles = [
+      ...new Set(
+        targetEmployeeIds.flatMap((id) =>
+          (operationalProfilesByEmployee.get(id) ?? [])
+            .map((profile) =>
+              profile.site_operational_role_id
+                ? siteOperationalRoleLinkMap.get(profile.site_operational_role_id)?.role_code ?? null
+                : null,
+            )
+            .filter((role): role is string => Boolean(role && operationalRoleCodes.has(role))),
+        ),
+      ),
+    ];
+
+    if (profileRoles.length === 1) return profileRoles[0] ?? "";
 
     const candidateRoles = [
       ...new Set(
