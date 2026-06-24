@@ -122,18 +122,12 @@ type SiteOperationalRoleRow = {
   requires_external_checkout: boolean | null;
 };
 
-type SiteOperationalRoleLinkRow = {
-  id: string;
-  site_id: string | null;
-  role_code: string | null;
-  is_active: boolean | null;
-};
-
 type EmployeeOperationalProfileRow = {
   employee_id: string;
-  site_operational_role_id: string | null;
-  checkin_site_id: string | null;
-  checkout_site_id: string | null;
+  site_id: string | null;
+  default_operational_role: string | null;
+  default_checkin_site_id: string | null;
+  default_checkout_site_id: string | null;
   is_active: boolean | null;
 };
 
@@ -505,11 +499,7 @@ function profileLookupKey(employeeId: string, siteId: string, operationalRole: s
   return `${employeeId}::${siteId}::${operationalRole}`;
 }
 
-function roleLookupKey(siteId: string, operationalRole: string) {
-  return `${siteId}::${operationalRole}`;
-}
-
-async function loadShiftOperationalContextIndex(
+ async function loadShiftOperationalContextIndex(
   supabase: ReturnType<typeof createAdminClient>,
   seeds: ShiftOperationalContextSeed[],
 ) {
@@ -527,60 +517,29 @@ async function loadShiftOperationalContextIndex(
   const contextIndex = new Map<string, ShiftOperationalContext>();
   if (normalizedSeeds.length === 0) return contextIndex;
 
+  const employeeIds = uniqueTextValues(normalizedSeeds.map((seed) => seed.employeeId));
   const siteIds = uniqueTextValues(normalizedSeeds.map((seed) => seed.siteId));
   const roleCodes = uniqueTextValues(normalizedSeeds.map((seed) => seed.operationalRole));
-  const employeeIds = uniqueTextValues(normalizedSeeds.map((seed) => seed.employeeId));
-
-  const { data: roleRows, error: rolesError } = await supabase
-    .from("site_operational_roles")
-    .select("id,site_id,role_code,is_active")
-    .in("site_id", siteIds)
-    .in("role_code", roleCodes)
-    .neq("is_active", false);
-
-  if (rolesError) throw new Error(rolesError.message);
-
-  const roleIdBySiteAndCode = new Map<string, string>();
-  for (const row of (roleRows ?? []) as SiteOperationalRoleLinkRow[]) {
-    const siteId = cleanOptionalText(row.site_id);
-    const roleCode = cleanOptionalText(row.role_code);
-    const roleId = cleanOptionalText(row.id);
-    if (!siteId || !roleCode || !roleId) continue;
-    roleIdBySiteAndCode.set(roleLookupKey(siteId, roleCode), roleId);
-  }
-
-  const roleIds = uniqueTextValues(
-    normalizedSeeds.map((seed) => roleIdBySiteAndCode.get(roleLookupKey(seed.siteId, seed.operationalRole))),
-  );
-  if (roleIds.length === 0) return contextIndex;
 
   const { data: profileRows, error: profilesError } = await supabase
     .from("employee_site_operational_profiles")
-    .select("employee_id,site_operational_role_id,checkin_site_id,checkout_site_id,is_active")
+    .select("employee_id,site_id,default_operational_role,default_checkin_site_id,default_checkout_site_id,is_active")
     .in("employee_id", employeeIds)
-    .in("site_operational_role_id", roleIds)
+    .in("site_id", siteIds)
+    .in("default_operational_role", roleCodes)
     .neq("is_active", false);
 
   if (profilesError) throw new Error(profilesError.message);
 
-  const profileByEmployeeAndRoleId = new Map<string, EmployeeOperationalProfileRow>();
   for (const profile of (profileRows ?? []) as EmployeeOperationalProfileRow[]) {
     const employeeId = cleanOptionalText(profile.employee_id);
-    const roleId = cleanOptionalText(profile.site_operational_role_id);
-    if (!employeeId || !roleId) continue;
-    profileByEmployeeAndRoleId.set(`${employeeId}::${roleId}`, profile);
-  }
+    const siteId = cleanOptionalText(profile.site_id);
+    const operationalRole = cleanOptionalText(profile.default_operational_role);
+    if (!employeeId || !siteId || !operationalRole) continue;
 
-  for (const seed of normalizedSeeds) {
-    const roleId = roleIdBySiteAndCode.get(roleLookupKey(seed.siteId, seed.operationalRole));
-    if (!roleId) continue;
-
-    const profile = profileByEmployeeAndRoleId.get(`${seed.employeeId}::${roleId}`);
-    if (!profile) continue;
-
-    contextIndex.set(profileLookupKey(seed.employeeId, seed.siteId, seed.operationalRole), {
-      checkinSiteId: cleanOptionalText(profile.checkin_site_id),
-      checkoutSiteId: cleanOptionalText(profile.checkout_site_id),
+    contextIndex.set(profileLookupKey(employeeId, siteId, operationalRole), {
+      checkinSiteId: cleanOptionalText(profile.default_checkin_site_id),
+      checkoutSiteId: cleanOptionalText(profile.default_checkout_site_id),
     });
   }
 
@@ -2102,7 +2061,6 @@ export default async function StaffSchedulePage({
     planningLimitsRes,
     shiftPreferencesRes,
     siteOperationalRolesRes,
-    siteOperationalRoleLinksRes,
     employeeOperationalProfilesRes,
   ] = await Promise.all([
     selectedSiteId
@@ -2173,15 +2131,9 @@ export default async function StaffSchedulePage({
       : Promise.resolve({ data: [], error: null }),
     selectedSiteId
       ? supabase
-          .from("site_operational_roles")
-          .select("id,site_id,role_code,is_active")
-          .eq("site_id", selectedSiteId)
-          .neq("is_active", false)
-      : Promise.resolve({ data: [], error: null }),
-    selectedSiteId
-      ? supabase
           .from("employee_site_operational_profiles")
-          .select("employee_id,site_operational_role_id,checkin_site_id,checkout_site_id,is_active")
+          .select("employee_id,site_id,default_operational_role,default_checkin_site_id,default_checkout_site_id,is_active")
+          .eq("site_id", selectedSiteId)
           .neq("is_active", false)
       : Promise.resolve({ data: [], error: null }),
   ]);
@@ -2201,16 +2153,11 @@ export default async function StaffSchedulePage({
     (a.full_name ?? a.alias ?? a.id).localeCompare(b.full_name ?? b.alias ?? b.id, "es"),
   );
   const configuredOperationalRoleRows = (siteOperationalRolesRes.data ?? []) as SiteOperationalRoleRow[];
-  const siteOperationalRoleLinks = (siteOperationalRoleLinksRes.data ?? []) as SiteOperationalRoleLinkRow[];
   const employeeOperationalProfiles = (employeeOperationalProfilesRes.data ?? []) as EmployeeOperationalProfileRow[];
-  const siteOperationalRoleLinkMap = new Map(siteOperationalRoleLinks.map((role) => [role.id, role]));
   const operationalProfilesByEmployee = new Map<string, EmployeeOperationalProfileRow[]>();
 
   for (const profile of employeeOperationalProfiles) {
-    const roleLink = profile.site_operational_role_id
-      ? siteOperationalRoleLinkMap.get(profile.site_operational_role_id)
-      : null;
-    if (!roleLink || roleLink.site_id !== selectedSiteId) continue;
+    if (profile.site_id !== selectedSiteId) continue;
 
     const current = operationalProfilesByEmployee.get(profile.employee_id) ?? [];
     current.push(profile);
@@ -2437,11 +2384,7 @@ export default async function StaffSchedulePage({
       ...new Set(
         targetEmployeeIds.flatMap((id) =>
           (operationalProfilesByEmployee.get(id) ?? [])
-            .map((profile) =>
-              profile.site_operational_role_id
-                ? siteOperationalRoleLinkMap.get(profile.site_operational_role_id)?.role_code ?? null
-                : null,
-            )
+            .map((profile) => profile.default_operational_role)
             .filter((role): role is string => Boolean(role && operationalRoleCodes.has(role))),
         ),
       ),
