@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { OperationsNav } from "@/components/viso/operations-nav";
+import { SiteOperationalRoleForm } from "./site-operational-role-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import {
   Table,
@@ -321,6 +322,49 @@ export default async function SiteRolesPage({
   const activeMatrixCount = matrix.filter(roleMatrixIsActive).length;
   const externalRolesCount = matrix.filter(roleMatrixRequiresExternal).length;
 
+  const siteOptions = sites
+    .map((site) => {
+      const id = siteId(site);
+      const code = siteCode(site);
+      const label = siteName(site) || code || id;
+
+      return {
+        id,
+        label,
+        code,
+        kind: siteKind(site),
+      };
+    })
+    .filter((site) => site.id);
+
+  const areaOptions = areas
+    .map((area) => {
+      const id = areaId(area);
+      const siteIdValue = areaSiteId(area);
+      const label = areaName(area) || id;
+
+      return {
+        id,
+        siteId: siteIdValue,
+        label,
+        kind: areaKind(area),
+      };
+    })
+    .filter((area) => area.id && area.siteId);
+
+  const roleOptions = catalog
+    .map((role) => {
+      const code = operationalRoleCode(role);
+
+      return {
+        code,
+        label: operationalRoleLabel(role),
+        family: operationalRoleFamily(role),
+        requiresExternal: operationalRoleRequiresExternal(role),
+      };
+    })
+    .filter((role) => role.code);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -347,114 +391,12 @@ export default async function SiteRolesPage({
             </p>
           </div>
 
-          <form action={saveSiteRole} className="space-y-4">
-            <label className="space-y-1">
-              <span className="text-sm font-medium text-slate-700">
-                Sede operativa
-              </span>
-              <select
-                name="site_id"
-                className="ui-input"
-                required
-                defaultValue=""
-              >
-                <option value="" disabled>
-                  Selecciona una sede
-                </option>
-                {sites.map((site) => {
-                  const id = siteId(site);
-                  const code = siteCode(site);
-                  const label = siteName(site) || code || id;
-
-                  return (
-                    <option key={id || label} value={id}>
-                      {label}
-                      {code ? ` · ${code}` : ""}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-
-            <label className="space-y-1">
-              <span className="text-sm font-medium text-slate-700">
-                Área, opcional
-              </span>
-              <select name="area_id" className="ui-input" defaultValue="">
-                <option value="">General de la sede</option>
-                {areas.map((area) => {
-                  const id = areaId(area);
-                  const label = areaName(area) || id;
-                  const kind = areaKind(area);
-                  const siteValue = areaSiteId(area);
-
-                  return (
-                    <option key={id || label} value={id}>
-                      {label}
-                      {kind ? ` · ${kind}` : ""}
-                      {siteValue ? ` · ${siteValue.slice(0, 8)}` : ""}
-                    </option>
-                  );
-                })}
-              </select>
-              <p className="text-xs leading-5 text-slate-500">
-                Usa área solo cuando la sede necesita separar caja, barra, cocina, bodega o producción.
-              </p>
-            </label>
-
-            <label className="space-y-1">
-              <span className="text-sm font-medium text-slate-700">
-                Rol operativo aprobado
-              </span>
-              <select
-                name="role_code"
-                className="ui-input"
-                required
-                defaultValue=""
-              >
-                <option value="" disabled>
-                  Selecciona un rol del catálogo
-                </option>
-                {catalog.map((role) => {
-                  const code = operationalRoleCode(role);
-                  return (
-                    <option key={code} value={code}>
-                      {operationalRoleLabel(role)}
-                      {operationalRoleFamily(role) ? ` · ${operationalRoleFamily(role)}` : ""}
-                      {operationalRoleRequiresExternal(role) ? " · requiere punto externo" : ""}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex items-center gap-2">
-                <input
-                  name="is_default"
-                  type="checkbox"
-                  className="h-4 w-4"
-                />
-                <span className="text-sm font-medium text-slate-700">
-                  Rol por defecto
-                </span>
-              </label>
-
-              <label className="flex items-center gap-2">
-                <input
-                  name="is_active"
-                  type="checkbox"
-                  defaultChecked
-                  className="h-4 w-4"
-                />
-                <span className="text-sm font-medium text-slate-700">Activo</span>
-              </label>
-            </div>
-
-            <button type="submit" className="ui-btn ui-btn--brand">
-              Guardar en matriz
-            </button>
-          </form>
+          <SiteOperationalRoleForm
+            sites={siteOptions}
+            areas={areaOptions}
+            catalog={roleOptions}
+            action={saveSiteRole}
+          />
         </div>
 
         <div className="ui-panel space-y-5">
