@@ -25,7 +25,7 @@ type QueryResponse<T> = {
   error: DbError | null;
 };
 
-type MutationResponse = {
+type RpcResponse = {
   data: unknown;
   error: DbError | null;
 };
@@ -40,14 +40,19 @@ type SelectOrderBuilder<T> = {
 type SupabaseLike = {
   from: <T>(table: string) => {
     select: (columns: string) => SelectOrderBuilder<T>;
-    upsert: (
-      values: Record<string, unknown>,
-      options?: { onConflict?: string; ignoreDuplicates?: boolean },
-    ) => Promise<MutationResponse>;
   };
+  rpc: (functionName: string, args?: Record<string, unknown>) => Promise<RpcResponse>;
 };
 
 type SiteRow = {
+  [key: string]: unknown;
+};
+
+type AreaRow = {
+  [key: string]: unknown;
+};
+
+type OperationalRoleRow = {
   [key: string]: unknown;
 };
 
@@ -73,18 +78,8 @@ function readFormString(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function normalizeRoleCode(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
 function textValue(
-  row: SiteRow | SiteRoleRow | null | undefined,
+  row: SiteRow | AreaRow | OperationalRoleRow | SiteRoleRow | null | undefined,
   keys: string[],
 ) {
   if (!row) return "";
@@ -100,7 +95,7 @@ function textValue(
 }
 
 function booleanValue(
-  row: SiteRow | SiteRoleRow | null | undefined,
+  row: SiteRow | AreaRow | OperationalRoleRow | SiteRoleRow | null | undefined,
   keys: string[],
   fallback = false,
 ) {
@@ -137,48 +132,106 @@ function siteKind(row: SiteRow | null | undefined) {
   return textValue(row, ["site_kind", "site_type", "kind"]);
 }
 
-function roleSiteId(row: SiteRoleRow | null | undefined) {
+function areaId(row: AreaRow | null | undefined) {
+  return textValue(row, ["id", "area_id"]);
+}
+
+function areaSiteId(row: AreaRow | null | undefined) {
   return textValue(row, ["site_id"]);
 }
 
-function roleSiteName(row: SiteRoleRow | null | undefined) {
-  return textValue(row, ["site_name", "name"]);
+function areaName(row: AreaRow | null | undefined) {
+  return textValue(row, ["name", "area_name", "label"]);
 }
 
-function roleSiteCode(row: SiteRoleRow | null | undefined) {
-  return textValue(row, ["site_code", "code"]);
+function areaKind(row: AreaRow | null | undefined) {
+  return textValue(row, ["kind", "area_kind"]);
 }
 
-function roleCode(row: SiteRoleRow | null | undefined) {
-  return textValue(row, ["role_code"]);
+function operationalRoleCode(row: OperationalRoleRow | null | undefined) {
+  return textValue(row, ["code", "role_code"]);
 }
 
-function roleLabel(row: SiteRoleRow | null | undefined) {
+function operationalRoleLabel(row: OperationalRoleRow | null | undefined) {
+  return textValue(row, ["label", "role_label"]) || operationalRoleCode(row);
+}
+
+function operationalRoleFamily(row: OperationalRoleRow | null | undefined) {
+  return textValue(row, ["role_family"]);
+}
+
+function operationalRoleRequiresExternal(row: OperationalRoleRow | null | undefined) {
   return (
-    textValue(row, ["role_label", "label", "display_name"]) || roleCode(row)
+    booleanValue(row, ["requires_external_checkin"], false) ||
+    booleanValue(row, ["requires_external_checkout"], false)
   );
 }
 
-function roleIsActive(row: SiteRoleRow | null | undefined) {
+function roleMatrixKey(row: SiteRoleRow) {
+  return (
+    textValue(row, ["id"]) ||
+    [
+      textValue(row, ["site_id"]),
+      textValue(row, ["area_id"]) || "general",
+      textValue(row, ["role_code"]),
+    ].join(":")
+  );
+}
+
+function roleMatrixSiteName(row: SiteRoleRow | null | undefined) {
+  return textValue(row, ["site_name", "name"]);
+}
+
+function roleMatrixSiteCode(row: SiteRoleRow | null | undefined) {
+  return textValue(row, ["site_code", "code"]);
+}
+
+function roleMatrixAreaName(row: SiteRoleRow | null | undefined) {
+  return textValue(row, ["area_name"]);
+}
+
+function roleMatrixAreaKind(row: SiteRoleRow | null | undefined) {
+  return textValue(row, ["area_kind"]);
+}
+
+function roleMatrixCode(row: SiteRoleRow | null | undefined) {
+  return textValue(row, ["role_code"]);
+}
+
+function roleMatrixLabel(row: SiteRoleRow | null | undefined) {
+  return textValue(row, ["role_label", "label"]) || roleMatrixCode(row);
+}
+
+function roleMatrixFamily(row: SiteRoleRow | null | undefined) {
+  return textValue(row, ["role_family"]);
+}
+
+function roleMatrixIsDefault(row: SiteRoleRow | null | undefined) {
+  return booleanValue(row, ["is_default"], false);
+}
+
+function roleMatrixIsActive(row: SiteRoleRow | null | undefined) {
   return booleanValue(row, ["is_active", "active"], true);
 }
 
-function roleKey(row: SiteRoleRow) {
-  return textValue(row, ["id"]) || `${roleSiteId(row)}:${roleCode(row)}`;
+function roleMatrixRequiresExternal(row: SiteRoleRow | null | undefined) {
+  return (
+    booleanValue(row, ["requires_external_checkin"], false) ||
+    booleanValue(row, ["requires_external_checkout"], false)
+  );
 }
 
 async function saveSiteRole(formData: FormData) {
   "use server";
 
   const siteIdValue = readFormString(formData, "site_id");
-  const roleCodeValue = normalizeRoleCode(
-    readFormString(formData, "role_code"),
-  );
+  const areaIdValue = readFormString(formData, "area_id");
+  const roleCodeValue = readFormString(formData, "role_code");
+  const isDefault = formData.get("is_default") === "on";
   const isActive = formData.get("is_active") === "on";
 
   if (!siteIdValue) buildRedirect("error", "Selecciona una sede operativa.");
-  if (!roleCodeValue)
-    buildRedirect("error", "El código del rol operativo es obligatorio.");
+  if (!roleCodeValue) buildRedirect("error", "Selecciona un rol operativo del catálogo.");
 
   const { supabase } = await requireAppAccess({
     appId: "viso",
@@ -186,22 +239,22 @@ async function saveSiteRole(formData: FormData) {
   });
 
   const db = supabase as unknown as SupabaseLike;
-  const result = await db.from("site_operational_roles").upsert(
-    {
-      site_id: siteIdValue,
-      role_code: roleCodeValue,
-      is_active: isActive,
-    },
-    { onConflict: "site_id,role_code" },
-  );
+
+  const result = await db.rpc("upsert_site_operational_role", {
+    p_site_id: siteIdValue,
+    p_area_id: areaIdValue || null,
+    p_role_code: roleCodeValue,
+    p_is_default: isDefault,
+    p_is_active: isActive,
+  });
 
   if (result.error) buildRedirect("error", result.error.message);
 
   buildRedirect(
     "ok",
     isActive
-      ? "Rol operativo habilitado para la sede."
-      : "Rol operativo desactivado para la sede.",
+      ? "Rol operativo habilitado en la matriz."
+      : "Rol operativo desactivado en la matriz.",
   );
 }
 
@@ -220,26 +273,39 @@ export default async function SiteRolesPage({
   });
 
   const db = supabase as unknown as SupabaseLike;
-  const [sitesResult, rolesResult] = await Promise.all([
+
+  const [sitesResult, areasResult, catalogResult, matrixResult] = await Promise.all([
     db
       .from<SiteRow>("viso_operational_sites")
       .select("*")
       .order("name", { ascending: true }),
     db
-      .from<SiteRoleRow>("viso_site_operational_roles")
+      .from<AreaRow>("areas")
+      .select("*")
+      .order("name", { ascending: true }),
+    db
+      .from<OperationalRoleRow>("vento_operational_roles_v1")
+      .select("*")
+      .order("sort_order", { ascending: true }),
+    db
+      .from<SiteRoleRow>("vento_site_operational_role_matrix_v1")
       .select("*")
       .order("site_name", { ascending: true }),
   ]);
 
   const loadError =
-    sitesResult.error?.message || rolesResult.error?.message || "";
+    sitesResult.error?.message ||
+    areasResult.error?.message ||
+    catalogResult.error?.message ||
+    matrixResult.error?.message ||
+    "";
 
   if (loadError) {
     return (
       <div className="space-y-6">
         <PageHeader
-          title="Roles por sede"
-          subtitle="Define qué roles operativos pueden usarse en cada sede sin crear módulos nuevos en la navegación principal."
+          title="Matriz operativa"
+          subtitle="Administra roles operativos aprobados por sede y área."
         />
         <OperationsNav activePath={ROUTE} />
         <div className="ui-alert ui-alert--error">{loadError}</div>
@@ -248,14 +314,18 @@ export default async function SiteRolesPage({
   }
 
   const sites = sitesResult.data ?? [];
-  const roles = rolesResult.data ?? [];
-  const activeRolesCount = roles.filter(roleIsActive).length;
+  const areas = areasResult.data ?? [];
+  const catalog = catalogResult.data ?? [];
+  const matrix = matrixResult.data ?? [];
+
+  const activeMatrixCount = matrix.filter(roleMatrixIsActive).length;
+  const externalRolesCount = matrix.filter(roleMatrixRequiresExternal).length;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Roles por sede"
-        subtitle="Configura los roles operativos permitidos por sede para aplicar contexto correcto en ANIMA, NEXO y VISO."
+        title="Matriz operativa"
+        subtitle="Define qué roles operativos aprobados pueden aplicarse por sede y área. Esta matriz alimenta la creación de horarios y el contexto activo de ANIMA."
       />
 
       <OperationsNav activePath={ROUTE} />
@@ -268,12 +338,12 @@ export default async function SiteRolesPage({
       <div className="grid gap-6 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
         <div className="ui-panel space-y-5">
           <div>
-            <h2 className="text-lg font-semibold text-slate-950">
+            <p className="ui-eyebrow">Matriz cerrada</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-950">
               Habilitar rol operativo
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              Crea el código operativo que necesite la sede. No es un catálogo
-              fijo de cargos; es una regla operativa por sede.
+              No se crean roles libres. Selecciona un rol aprobado del catálogo y asígnalo a una sede o área.
             </p>
           </div>
 
@@ -308,39 +378,87 @@ export default async function SiteRolesPage({
 
             <label className="space-y-1">
               <span className="text-sm font-medium text-slate-700">
-                Rol operativo
+                Área, opcional
               </span>
-              <input
-                name="role_code"
-                className="ui-input"
-                placeholder="Ejemplo: conductor_ruta"
-                autoComplete="off"
-                required
-              />
+              <select name="area_id" className="ui-input" defaultValue="">
+                <option value="">General de la sede</option>
+                {areas.map((area) => {
+                  const id = areaId(area);
+                  const label = areaName(area) || id;
+                  const kind = areaKind(area);
+                  const siteValue = areaSiteId(area);
+
+                  return (
+                    <option key={id || label} value={id}>
+                      {label}
+                      {kind ? ` · ${kind}` : ""}
+                      {siteValue ? ` · ${siteValue.slice(0, 8)}` : ""}
+                    </option>
+                  );
+                })}
+              </select>
               <p className="text-xs leading-5 text-slate-500">
-                Se normaliza automáticamente a minúsculas, sin tildes y con
-                guiones bajos. Ejemplo: Conductor Ruta → conductor_ruta.
+                Usa área solo cuando la sede necesita separar caja, barra, cocina, bodega o producción.
               </p>
             </label>
 
-            <label className="flex items-center gap-2">
-              <input
-                name="is_active"
-                type="checkbox"
-                defaultChecked
-                className="h-4 w-4"
-              />
-              <span className="text-sm font-medium text-slate-700">Activo</span>
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">
+                Rol operativo aprobado
+              </span>
+              <select
+                name="role_code"
+                className="ui-input"
+                required
+                defaultValue=""
+              >
+                <option value="" disabled>
+                  Selecciona un rol del catálogo
+                </option>
+                {catalog.map((role) => {
+                  const code = operationalRoleCode(role);
+                  return (
+                    <option key={code} value={code}>
+                      {operationalRoleLabel(role)}
+                      {operationalRoleFamily(role) ? ` · ${operationalRoleFamily(role)}` : ""}
+                      {operationalRoleRequiresExternal(role) ? " · requiere punto externo" : ""}
+                    </option>
+                  );
+                })}
+              </select>
             </label>
 
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex items-center gap-2">
+                <input
+                  name="is_default"
+                  type="checkbox"
+                  className="h-4 w-4"
+                />
+                <span className="text-sm font-medium text-slate-700">
+                  Rol por defecto
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2">
+                <input
+                  name="is_active"
+                  type="checkbox"
+                  defaultChecked
+                  className="h-4 w-4"
+                />
+                <span className="text-sm font-medium text-slate-700">Activo</span>
+              </label>
+            </div>
+
             <button type="submit" className="ui-btn ui-btn--brand">
-              Guardar rol por sede
+              Guardar en matriz
             </button>
           </form>
         </div>
 
         <div className="ui-panel space-y-5">
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
                 Sedes
@@ -351,73 +469,113 @@ export default async function SiteRolesPage({
             </div>
             <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
-                Roles activos
+                Catálogo
               </p>
               <p className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">
-                {activeRolesCount}
+                {catalog.length}
               </p>
             </div>
             <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
-                Total reglas
+                Reglas activas
               </p>
               <p className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">
-                {roles.length}
+                {activeMatrixCount}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
+                Punto externo
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">
+                {externalRolesCount}
               </p>
             </div>
           </div>
 
           <div>
             <h2 className="text-lg font-semibold text-slate-950">
-              Reglas configuradas
+              Qué controla esta matriz
             </h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Estas reglas limitan qué rol operativo se puede aplicar a un turno
-              según su sede operativa.
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Al crear horarios en VISO, el rol operativo debe salir de esta matriz. Si el rol requiere punto externo, como conductor logística, el horario deberá pedir punto de entrada y salida.
             </p>
           </div>
         </div>
       </div>
 
       <div className="ui-panel">
-        {roles.length === 0 ? (
+        {matrix.length === 0 ? (
           <div className="ui-empty">
-            No hay roles operativos por sede configurados.
+            La matriz aún no tiene reglas. Agrega el primer rol operativo aprobado para una sede.
           </div>
         ) : (
           <Table>
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Sede</TableHeaderCell>
+                <TableHeaderCell>Área</TableHeaderCell>
                 <TableHeaderCell>Rol operativo</TableHeaderCell>
-                <TableHeaderCell>Código</TableHeaderCell>
+                <TableHeaderCell>Familia</TableHeaderCell>
+                <TableHeaderCell>Reglas</TableHeaderCell>
                 <TableHeaderCell>Estado</TableHeaderCell>
                 <TableHeaderCell></TableHeaderCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {roles.map((role) => {
-                const active = roleIsActive(role);
-                const siteValue = roleSiteId(role);
-                const codeValue = roleCode(role);
+              {matrix.map((role) => {
+                const active = roleMatrixIsActive(role);
+                const siteValue = textValue(role, ["site_id"]);
+                const areaValue = textValue(role, ["area_id"]);
+                const codeValue = roleMatrixCode(role);
 
                 return (
-                  <TableRow key={roleKey(role)}>
+                  <TableRow key={roleMatrixKey(role)}>
                     <TableCell>
                       <div className="font-medium text-slate-950">
-                        {roleSiteName(role) || "—"}
+                        {roleMatrixSiteName(role) || "—"}
                       </div>
-                      {roleSiteCode(role) ? (
+                      {roleMatrixSiteCode(role) ? (
                         <div className="mt-1 text-xs text-slate-500">
-                          {roleSiteCode(role)}
+                          {roleMatrixSiteCode(role)}
                         </div>
                       ) : null}
                     </TableCell>
-                    <TableCell>{roleLabel(role) || "—"}</TableCell>
                     <TableCell>
-                      <code className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                      {roleMatrixAreaName(role) ? (
+                        <div>
+                          <div className="font-medium text-slate-950">
+                            {roleMatrixAreaName(role)}
+                          </div>
+                          {roleMatrixAreaKind(role) ? (
+                            <div className="mt-1 text-xs text-slate-500">
+                              {roleMatrixAreaKind(role)}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        "General"
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="font-medium text-slate-950">
+                        {roleMatrixLabel(role) || "—"}
+                      </div>
+                      <code className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
                         {codeValue || "—"}
                       </code>
+                    </TableCell>
+                    <TableCell>{roleMatrixFamily(role) || "—"}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {roleMatrixIsDefault(role) ? (
+                          <span className="ui-chip ui-chip--soft">Default</span>
+                        ) : null}
+                        {roleMatrixRequiresExternal(role) ? (
+                          <span className="ui-chip ui-chip--soft">Punto externo</span>
+                        ) : null}
+                        {!roleMatrixIsDefault(role) && !roleMatrixRequiresExternal(role) ? "—" : null}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <span
@@ -429,16 +587,12 @@ export default async function SiteRolesPage({
                     <TableCell className="text-right">
                       {siteValue && codeValue ? (
                         <form action={saveSiteRole}>
-                          <input
-                            type="hidden"
-                            name="site_id"
-                            value={siteValue}
-                          />
-                          <input
-                            type="hidden"
-                            name="role_code"
-                            value={codeValue}
-                          />
+                          <input type="hidden" name="site_id" value={siteValue} />
+                          <input type="hidden" name="area_id" value={areaValue} />
+                          <input type="hidden" name="role_code" value={codeValue} />
+                          {roleMatrixIsDefault(role) ? (
+                            <input type="hidden" name="is_default" value="on" />
+                          ) : null}
                           {active ? null : (
                             <input type="hidden" name="is_active" value="on" />
                           )}
