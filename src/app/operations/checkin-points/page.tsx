@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
+import { OperationsNav } from "@/components/viso/operations-nav";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/vento/standard/table";
 import { requireAppAccess } from "@/lib/auth/guard";
 
@@ -232,6 +233,7 @@ export default async function CheckinPointsPage({
           title="Puntos de marcación"
           subtitle="Puntos físicos ocultos usados para validar entrada y salida sin convertirlos en sedes operativas visibles."
         />
+        <OperationsNav activePath={ROUTE} />
         <div className="ui-alert ui-alert--error">{error.message}</div>
       </div>
     );
@@ -246,20 +248,9 @@ export default async function CheckinPointsPage({
       <PageHeader
         title="Puntos de marcación"
         subtitle="Administra geocercas ocultas para validar asistencia en puntos físicos distintos a la sede operativa."
-        actions={
-          <>
-            <Link href="/operations/preview" className="ui-btn ui-btn--ghost">
-              Vista previa
-            </Link>
-            <Link href="/operations/site-roles" className="ui-btn ui-btn--ghost">
-              Roles por sede
-            </Link>
-            <Link href="/operations/employee-profiles" className="ui-btn ui-btn--ghost">
-              Perfiles trabajador-sede
-            </Link>
-          </>
-        }
       />
+
+      <OperationsNav activePath={ROUTE} />
 
       {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
