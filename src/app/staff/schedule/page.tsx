@@ -2812,13 +2812,9 @@ export default async function StaffSchedulePage({
   };
 
   const getSiteDefaultOperationalRoleForArea = (
-    areaId: string | null | undefined,
+    _areaId: string | null | undefined,
   ) => {
-    const options = getOperationalRoleOptionsForArea(areaId);
-    if (options.length === 1) return options[0]?.code ?? "";
-
-    const defaultOptions = options.filter((role) => role.isDefault);
-    return defaultOptions.length === 1 ? (defaultOptions[0]?.code ?? "") : "";
+    return "";
   };
 
   const operationalRoleCodes = new Set(
@@ -4147,17 +4143,18 @@ export default async function StaffSchedulePage({
                       var selectedEmployeeOption = employeeSelect && employeeSelect.selectedIndex >= 0
                         ? employeeSelect.options[employeeSelect.selectedIndex]
                         : null;
-                      var employeeRole = selectedEmployeeOption ? selectedEmployeeOption.getAttribute("data-operational-role") || "" : "";
-                      var defaultOptions = activeOptions.filter(function (option) {
-                        return option.getAttribute("data-is-default") === "1";
-                      });
+                      var employeeId = selectedEmployeeOption ? selectedEmployeeOption.value || "" : "";
+                      var employeeRole = employeeId && selectedEmployeeOption ? selectedEmployeeOption.getAttribute("data-operational-role") || "" : "";
+
+                      if (!employeeId) {
+                        operationalRoleSelect.value = "";
+                        operationalRoleSelect.removeAttribute("data-user-changed");
+                        refreshExternalPointControls(form);
+                        return;
+                      }
 
                       if (!selectRoleOption(operationalRoleSelect, activeOptions, employeeRole)) {
-                        if (defaultOptions.length === 1) {
-                          selectRoleOption(operationalRoleSelect, activeOptions, defaultOptions[0].value);
-                        } else if (activeOptions.length === 1) {
-                          selectRoleOption(operationalRoleSelect, activeOptions, activeOptions[0].value);
-                        } else if (!hasActiveSelection) {
+                        if (!hasActiveSelection) {
                           operationalRoleSelect.value = "";
                         }
                       }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type SiteOption = {
   id: string;
@@ -28,6 +28,16 @@ type SiteOperationalRoleFormProps = {
   areas: AreaOption[];
   catalog: OperationalRoleOption[];
   action: (formData: FormData) => void | Promise<void>;
+  initialValues?: {
+    id?: string;
+    siteId?: string;
+    areaId?: string;
+    roleCode?: string;
+    isDefault?: boolean;
+    isActive?: boolean;
+  };
+  submitLabel?: string;
+  compact?: boolean;
 };
 
 export function SiteOperationalRoleForm({
@@ -35,8 +45,15 @@ export function SiteOperationalRoleForm({
   areas,
   catalog,
   action,
+  initialValues,
+  submitLabel = "Guardar en matriz",
+  compact = false,
 }: SiteOperationalRoleFormProps) {
-  const [selectedSiteId, setSelectedSiteId] = useState("");
+  const [selectedSiteId, setSelectedSiteId] = useState(initialValues?.siteId ?? "");
+
+  useEffect(() => {
+    setSelectedSiteId(initialValues?.siteId ?? "");
+  }, [initialValues?.siteId]);
 
   const filteredAreas = useMemo(
     () => areas.filter((area) => area.siteId === selectedSiteId),
@@ -45,6 +62,10 @@ export function SiteOperationalRoleForm({
 
   return (
     <form action={action} className="space-y-4">
+      {initialValues?.id ? (
+        <input type="hidden" name="matrix_id" value={initialValues.id} />
+      ) : null}
+
       <label className="space-y-1">
         <span className="text-sm font-medium text-slate-700">
           Sede operativa
@@ -76,7 +97,7 @@ export function SiteOperationalRoleForm({
           key={selectedSiteId || "no-site"}
           name="area_id"
           className="ui-input"
-          defaultValue=""
+          defaultValue={initialValues?.areaId ?? ""}
           disabled={!selectedSiteId}
         >
           <option value="">General de la sede</option>
@@ -87,17 +108,24 @@ export function SiteOperationalRoleForm({
             </option>
           ))}
         </select>
-        <p className="text-xs leading-5 text-slate-500">
-          Primero selecciona la sede. Luego solo verás las áreas que pertenecen
-          a esa sede.
-        </p>
+        {!compact ? (
+          <p className="text-xs leading-5 text-slate-500">
+            Primero selecciona la sede. Luego solo verás las áreas que pertenecen
+            a esa sede.
+          </p>
+        ) : null}
       </label>
 
       <label className="space-y-1">
         <span className="text-sm font-medium text-slate-700">
           Rol operativo aprobado
         </span>
-        <select name="role_code" className="ui-input" required defaultValue="">
+        <select
+          name="role_code"
+          className="ui-input"
+          required
+          defaultValue={initialValues?.roleCode ?? ""}
+        >
           <option value="" disabled>
             Selecciona un rol del catálogo
           </option>
@@ -113,7 +141,12 @@ export function SiteOperationalRoleForm({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex items-center gap-2">
-          <input name="is_default" type="checkbox" className="h-4 w-4" />
+          <input
+            name="is_default"
+            type="checkbox"
+            defaultChecked={initialValues?.isDefault ?? false}
+            className="h-4 w-4"
+          />
           <span className="text-sm font-medium text-slate-700">
             Rol por defecto
           </span>
@@ -123,7 +156,7 @@ export function SiteOperationalRoleForm({
           <input
             name="is_active"
             type="checkbox"
-            defaultChecked
+            defaultChecked={initialValues?.isActive ?? true}
             className="h-4 w-4"
           />
           <span className="text-sm font-medium text-slate-700">Activo</span>
@@ -131,7 +164,35 @@ export function SiteOperationalRoleForm({
       </div>
 
       <button type="submit" className="ui-btn ui-btn--brand">
-        Guardar en matriz
+        {submitLabel}
+      </button>
+    </form>
+  );
+}
+
+type DeleteSiteOperationalRoleFormProps = {
+  id: string;
+  label: string;
+  action: (formData: FormData) => void | Promise<void>;
+};
+
+export function DeleteSiteOperationalRoleForm({
+  id,
+  label,
+  action,
+}: DeleteSiteOperationalRoleFormProps) {
+  return (
+    <form
+      action={action}
+      onSubmit={(event) => {
+        if (!window.confirm(`¿Eliminar ${label}? Esta regla dejará de estar disponible para nuevos horarios.`)) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <input type="hidden" name="matrix_id" value={id} />
+      <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm text-red-700">
+        Eliminar
       </button>
     </form>
   );

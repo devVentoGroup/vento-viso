@@ -1,7 +1,10 @@
 import { redirect } from "next/navigation";
 
 import { OperationsNav } from "@/components/viso/operations-nav";
-import { SiteOperationalRoleForm } from "./site-operational-role-form";
+import {
+  DeleteSiteOperationalRoleForm,
+  SiteOperationalRoleForm,
+} from "./site-operational-role-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import {
   Table,
@@ -225,6 +228,7 @@ function roleMatrixRequiresExternal(row: SiteRoleRow | null | undefined) {
 async function saveSiteRole(formData: FormData) {
   "use server";
 
+  const matrixIdValue = readFormString(formData, "matrix_id");
   const siteIdValue = readFormString(formData, "site_id");
   const areaIdValue = readFormString(formData, "area_id");
   const roleCodeValue = readFormString(formData, "role_code");
@@ -240,6 +244,59 @@ async function saveSiteRole(formData: FormData) {
   });
 
   const db = supabase as unknown as SupabaseLike;
+
+  if (matrixIdValue) {
+    const roleCheck = await (supabase as any)
+      .from("operational_roles")
+      .select("code")
+      .eq("code", roleCodeValue)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (roleCheck.error) buildRedirect("error", roleCheck.error.message);
+    if (!roleCheck.data) buildRedirect("error", "El rol operativo no existe o está inactivo.");
+
+    if (areaIdValue) {
+      const areaCheck = await (supabase as any)
+        .from("areas")
+        .select("id")
+        .eq("id", areaIdValue)
+        .eq("site_id", siteIdValue)
+        .maybeSingle();
+
+      if (areaCheck.error) buildRedirect("error", areaCheck.error.message);
+      if (!areaCheck.data) buildRedirect("error", "El área seleccionada no pertenece a la sede.");
+    }
+
+    if (isDefault) {
+      const clearDefaultQuery = (supabase as any)
+        .from("site_operational_roles")
+        .update({ is_default: false })
+        .eq("site_id", siteIdValue);
+
+      const clearResult = areaIdValue
+        ? await clearDefaultQuery.eq("area_id", areaIdValue)
+        : await clearDefaultQuery.is("area_id", null);
+
+      if (clearResult.error) buildRedirect("error", clearResult.error.message);
+    }
+
+    const result = await (supabase as any)
+      .from("site_operational_roles")
+      .update({
+        site_id: siteIdValue,
+        area_id: areaIdValue || null,
+        role_code: roleCodeValue,
+        is_default: isDefault,
+        is_active: isActive,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", matrixIdValue);
+
+    if (result.error) buildRedirect("error", result.error.message);
+
+    buildRedirect("ok", "Rol operativo actualizado en la matriz.");
+  }
 
   const result = await db.rpc("upsert_site_operational_role", {
     p_site_id: siteIdValue,
@@ -257,6 +314,27 @@ async function saveSiteRole(formData: FormData) {
       ? "Rol operativo habilitado en la matriz."
       : "Rol operativo desactivado en la matriz.",
   );
+}
+
+async function deleteSiteRole(formData: FormData) {
+  "use server";
+
+  const matrixIdValue = readFormString(formData, "matrix_id");
+  if (!matrixIdValue) buildRedirect("error", "No se encontró la regla para eliminar.");
+
+  const { supabase } = await requireAppAccess({
+    appId: "viso",
+    returnTo: ROUTE,
+  });
+
+  const result = await (supabase as any)
+    .from("site_operational_roles")
+    .delete()
+    .eq("id", matrixIdValue);
+
+  if (result.error) buildRedirect("error", result.error.message);
+
+  buildRedirect("ok", "Rol operativo eliminado de la matriz.");
 }
 
 export default async function SiteRolesPage({
@@ -470,6 +548,12 @@ export default async function SiteRolesPage({
                 const siteValue = textValue(role, ["site_id"]);
                 const areaValue = textValue(role, ["area_id"]);
                 const codeValue = roleMatrixCode(role);
+                const matrixIdValue = textValue(role, ["id"]);
+                const rowLabel = [
+                  roleMatrixSiteName(role),
+                  roleMatrixAreaName(role) || "General",
+                  roleMatrixLabel(role),
+                ].filter(Boolean).join(" / ");
 
                 return (
                   <TableRow key={roleMatrixKey(role)}>
@@ -526,25 +610,66 @@ export default async function SiteRolesPage({
                         {active ? "Activo" : "Inactivo"}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right">
-                      {siteValue && codeValue ? (
-                        <form action={saveSiteRole}>
-                          <input type="hidden" name="site_id" value={siteValue} />
-                          <input type="hidden" name="area_id" value={areaValue} />
-                          <input type="hidden" name="role_code" value={codeValue} />
-                          {roleMatrixIsDefault(role) ? (
-                            <input type="hidden" name="is_default" value="on" />
-                          ) : null}
-                          {active ? null : (
-                            <input type="hidden" name="is_active" value="on" />
-                          )}
-                          <button
-                            type="submit"
-                            className="ui-btn ui-btn--ghost ui-btn--sm"
-                          >
-                            {active ? "Desactivar" : "Activar"}
-                          </button>
-                        </form>
+                    <TableCell>
+                      {siteValue && codeValue && matrixIdValue ? (
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <form action={saveSiteRole}>
+                            <input type="hidden" name="matrix_id" value={matrixIdValue} />
+                            <input type="hidden" name="site_id" value={siteValue} />
+                            <input type="hidden" name="area_id" value={areaValue} />
+                            <input type="hidden" name="role_code" value={codeValue} />
+                            {roleMatrixIsDefault(role) ? (
+                              <input type="hidden" name="is_default" value="on" />
+                            ) : null}
+                            {active ? null : (
+                              <input type="hidden" name="is_active" value="on" />
+                            )}
+                            <button
+                              type="submit"
+                              className="ui-btn ui-btn--ghost ui-btn--sm"
+                            >
+                              {active ? "Desactivar" : "Activar"}
+                            </button>
+                          </form>
+
+                          <details className="relative">
+                            <summary className="ui-btn ui-btn--ghost ui-btn--sm cursor-pointer list-none">
+                              Editar
+                            </summary>
+                            <div className="absolute right-0 z-20 mt-2 w-[min(28rem,calc(100vw-3rem))] rounded-2xl border border-[var(--ui-border)] bg-white p-4 text-left shadow-xl">
+                              <div className="mb-3">
+                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
+                                  Editar regla
+                                </p>
+                                <p className="mt-1 text-sm font-semibold text-slate-950">
+                                  {rowLabel || "Rol operativo"}
+                                </p>
+                              </div>
+                              <SiteOperationalRoleForm
+                                sites={siteOptions}
+                                areas={areaOptions}
+                                catalog={roleOptions}
+                                action={saveSiteRole}
+                                initialValues={{
+                                  id: matrixIdValue,
+                                  siteId: siteValue,
+                                  areaId: areaValue,
+                                  roleCode: codeValue,
+                                  isDefault: roleMatrixIsDefault(role),
+                                  isActive: active,
+                                }}
+                                submitLabel="Guardar cambios"
+                                compact
+                              />
+                            </div>
+                          </details>
+
+                          <DeleteSiteOperationalRoleForm
+                            id={matrixIdValue}
+                            label={rowLabel || "esta regla"}
+                            action={deleteSiteRole}
+                          />
+                        </div>
                       ) : (
                         "—"
                       )}
