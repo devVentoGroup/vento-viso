@@ -1,14 +1,18 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import Script from "next/script";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
-import { WeeklySchedulePlanner } from "@/components/viso/weekly-schedule-planner";
 import { notifyShiftChange } from "@/lib/anima/shift-notify";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { generateWeeklySuggestion } from "@/lib/planning-ai/generate";
-import type { PlanningAvailability, PlanningGenerationInput, PlanningRequirement, PlanningShiftDraft } from "@/lib/planning-ai/types";
+import type {
+  PlanningAvailability,
+  PlanningGenerationInput,
+  PlanningRequirement,
+  PlanningShiftDraft,
+} from "@/lib/planning-ai/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -201,11 +205,21 @@ function endOfMonth(date: Date) {
 
 function getFortnightRange(date: Date) {
   const day = date.getDate();
-  const start = new Date(date.getFullYear(), date.getMonth(), day <= 15 ? 1 : 16, 12, 0, 0, 0);
+  const start = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    day <= 15 ? 1 : 16,
+    12,
+    0,
+    0,
+    0,
+  );
   const end = new Date(
     date.getFullYear(),
     date.getMonth(),
-    day <= 15 ? 15 : new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate(),
+    day <= 15
+      ? 15
+      : new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate(),
     12,
     0,
     0,
@@ -215,11 +229,20 @@ function getFortnightRange(date: Date) {
 }
 
 function getShiftMinutes(
-  shift: Pick<ShiftRow, "start_time" | "end_time" | "break_minutes" | "shift_kind">,
+  shift: Pick<
+    ShiftRow,
+    "start_time" | "end_time" | "break_minutes" | "shift_kind"
+  >,
 ) {
   if (shift.shift_kind === "descanso") return 0;
-  const [startHours, startMinutes] = shift.start_time.slice(0, 5).split(":").map(Number);
-  const [endHours, endMinutes] = shift.end_time.slice(0, 5).split(":").map(Number);
+  const [startHours, startMinutes] = shift.start_time
+    .slice(0, 5)
+    .split(":")
+    .map(Number);
+  const [endHours, endMinutes] = shift.end_time
+    .slice(0, 5)
+    .split(":")
+    .map(Number);
   const gross = endHours * 60 + endMinutes - (startHours * 60 + startMinutes);
   return Math.max(0, gross - Math.max(0, shift.break_minutes ?? 0));
 }
@@ -251,7 +274,10 @@ function normalizeRole(value: string | null | undefined) {
     .toLowerCase();
 }
 
-function roleMatches(role: string | null | undefined, requiredRole: string | null | undefined) {
+function roleMatches(
+  role: string | null | undefined,
+  requiredRole: string | null | undefined,
+) {
   const normalizedRole = normalizeRole(role);
   const normalizedRequired = normalizeRole(requiredRole);
   if (!normalizedRequired) return true;
@@ -271,10 +297,16 @@ function humanizeRoleCode(value: string | null | undefined) {
     .join(" ");
 }
 
-function getOperationalRoleLabel(value: string | null | undefined, options: OperationalRoleOption[] = []) {
+function getOperationalRoleLabel(
+  value: string | null | undefined,
+  options: OperationalRoleOption[] = [],
+) {
   const code = String(value ?? "").trim();
   if (!code) return "Rol base";
-  return options.find((option) => option.code === code)?.label ?? humanizeRoleCode(code);
+  return (
+    options.find((option) => option.code === code)?.label ??
+    humanizeRoleCode(code)
+  );
 }
 
 const BASE_ROLE_TO_OPERATIONAL_ROLE: Record<string, string> = {
@@ -294,8 +326,12 @@ const BASE_ROLE_TO_OPERATIONAL_ROLE: Record<string, string> = {
   propietario: "propietario_admin",
 };
 
-function getOperationalRoleCandidateFromBaseRole(value: string | null | undefined) {
-  const normalized = normalizeRole(value).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+function getOperationalRoleCandidateFromBaseRole(
+  value: string | null | undefined,
+) {
+  const normalized = normalizeRole(value)
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
   return BASE_ROLE_TO_OPERATIONAL_ROLE[normalized] ?? normalized;
 }
 
@@ -333,7 +369,8 @@ function formatHoursCompact(totalMinutes: number) {
 const BOGOTA_TIME_ZONE = "America/Bogota";
 
 function getBogotaDateTimeParts(dateInput: Date | string) {
-  const parsed = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+  const parsed =
+    typeof dateInput === "string" ? new Date(dateInput) : dateInput;
   if (Number.isNaN(parsed.getTime())) return null;
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: BOGOTA_TIME_ZONE,
@@ -344,7 +381,9 @@ function getBogotaDateTimeParts(dateInput: Date | string) {
     minute: "2-digit",
     hourCycle: "h23",
   }).formatToParts(parsed);
-  const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const lookup = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
   const year = lookup.year;
   const month = lookup.month;
   const day = lookup.day;
@@ -362,7 +401,11 @@ function parseTimeToMinutes(value: string) {
   return hours * 60 + minutes;
 }
 
-function hasShiftEnded(shift: ShiftRow, nowDateIso: string, nowMinutes: number) {
+function hasShiftEnded(
+  shift: ShiftRow,
+  nowDateIso: string,
+  nowMinutes: number,
+) {
   if (nowDateIso > shift.shift_date) return true;
   if (nowDateIso < shift.shift_date) return false;
   return nowMinutes > parseTimeToMinutes(shift.end_time);
@@ -377,7 +420,8 @@ function isLateCheckIn(
   if (!checkInParts) return false;
   if (checkInParts.dateIso > shift.shift_date) return true;
   if (checkInParts.dateIso < shift.shift_date) return false;
-  const toleranceLimit = parseTimeToMinutes(shift.start_time) + Math.max(0, lateToleranceMinutes);
+  const toleranceLimit =
+    parseTimeToMinutes(shift.start_time) + Math.max(0, lateToleranceMinutes);
   return checkInParts.minutes > toleranceLimit;
 }
 
@@ -470,7 +514,7 @@ function buildReturnTo(siteId: string, weekStartIso: string, view?: string) {
   const query = new URLSearchParams();
   if (siteId) query.set("site_id", siteId);
   if (weekStartIso) query.set("week", weekStartIso);
-  if (view && (view === "table" || view === "planner")) query.set("view", view);
+  if (view === "table") query.set("view", view);
   return `/staff/schedule?${query.toString()}`;
 }
 
@@ -493,7 +537,7 @@ function appendReturnParams(
 
 function getEmployeeRef(row: EmployeeSiteLink["employee"]) {
   if (!row) return null;
-  return Array.isArray(row) ? row[0] ?? null : row;
+  return Array.isArray(row) ? (row[0] ?? null) : row;
 }
 
 function cleanOptionalText(value: string | null | undefined) {
@@ -502,14 +546,24 @@ function cleanOptionalText(value: string | null | undefined) {
 }
 
 function uniqueTextValues(values: Array<string | null | undefined>) {
-  return [...new Set(values.map(cleanOptionalText).filter((value): value is string => Boolean(value)))];
+  return [
+    ...new Set(
+      values
+        .map(cleanOptionalText)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
 }
 
-function profileLookupKey(employeeId: string, siteId: string, operationalRole: string) {
+function profileLookupKey(
+  employeeId: string,
+  siteId: string,
+  operationalRole: string,
+) {
   return `${employeeId}::${siteId}::${operationalRole}`;
 }
 
- async function loadShiftOperationalContextIndex(
+async function loadShiftOperationalContextIndex(
   supabase: ReturnType<typeof createAdminClient>,
   seeds: ShiftOperationalContextSeed[],
 ) {
@@ -520,20 +574,31 @@ function profileLookupKey(employeeId: string, siteId: string, operationalRole: s
       operationalRole: cleanOptionalText(seed.operationalRole),
     }))
     .filter(
-      (seed): seed is { employeeId: string; siteId: string; operationalRole: string } =>
-        Boolean(seed.employeeId && seed.siteId && seed.operationalRole),
+      (
+        seed,
+      ): seed is {
+        employeeId: string;
+        siteId: string;
+        operationalRole: string;
+      } => Boolean(seed.employeeId && seed.siteId && seed.operationalRole),
     );
 
   const contextIndex = new Map<string, ShiftOperationalContext>();
   if (normalizedSeeds.length === 0) return contextIndex;
 
-  const employeeIds = uniqueTextValues(normalizedSeeds.map((seed) => seed.employeeId));
+  const employeeIds = uniqueTextValues(
+    normalizedSeeds.map((seed) => seed.employeeId),
+  );
   const siteIds = uniqueTextValues(normalizedSeeds.map((seed) => seed.siteId));
-  const roleCodes = uniqueTextValues(normalizedSeeds.map((seed) => seed.operationalRole));
+  const roleCodes = uniqueTextValues(
+    normalizedSeeds.map((seed) => seed.operationalRole),
+  );
 
   const { data: profileRows, error: profilesError } = await supabase
     .from("employee_site_operational_profiles")
-    .select("employee_id,site_id,default_operational_role,default_checkin_site_id,default_checkout_site_id,is_active")
+    .select(
+      "employee_id,site_id,default_operational_role,default_checkin_site_id,default_checkout_site_id,is_active",
+    )
     .in("employee_id", employeeIds)
     .in("site_id", siteIds)
     .in("default_operational_role", roleCodes)
@@ -541,7 +606,8 @@ function profileLookupKey(employeeId: string, siteId: string, operationalRole: s
 
   if (profilesError) throw new Error(profilesError.message);
 
-  for (const profile of (profileRows ?? []) as EmployeeOperationalProfileRow[]) {
+  for (const profile of (profileRows ??
+    []) as EmployeeOperationalProfileRow[]) {
     const employeeId = cleanOptionalText(profile.employee_id);
     const siteId = cleanOptionalText(profile.site_id);
     const operationalRole = cleanOptionalText(profile.default_operational_role);
@@ -564,7 +630,9 @@ function getShiftOperationalContext(
 ) {
   const roleCode = cleanOptionalText(operationalRole);
   if (!employeeId || !siteId || !roleCode) return null;
-  return contextIndex.get(profileLookupKey(employeeId, siteId, roleCode)) ?? null;
+  return (
+    contextIndex.get(profileLookupKey(employeeId, siteId, roleCode)) ?? null
+  );
 }
 
 function resolveContextSiteId(
@@ -582,12 +650,20 @@ function withShiftOperationalContext<T extends Record<string, unknown>>(
 ) {
   return {
     ...payload,
-    checkin_site_id: shiftKind === "descanso"
-      ? null
-      : resolveContextSiteId(explicitContext?.checkinSiteId, context?.checkinSiteId),
-    checkout_site_id: shiftKind === "descanso"
-      ? null
-      : resolveContextSiteId(explicitContext?.checkoutSiteId, context?.checkoutSiteId),
+    checkin_site_id:
+      shiftKind === "descanso"
+        ? null
+        : resolveContextSiteId(
+            explicitContext?.checkinSiteId,
+            context?.checkinSiteId,
+          ),
+    checkout_site_id:
+      shiftKind === "descanso"
+        ? null
+        : resolveContextSiteId(
+            explicitContext?.checkoutSiteId,
+            context?.checkoutSiteId,
+          ),
   };
 }
 
@@ -596,9 +672,12 @@ function getApplicableOperationalRoleRows(
   areaId: string | null | undefined,
 ) {
   const normalizedAreaId = cleanOptionalText(areaId);
-  const scopedRows = rows.filter((row) => cleanOptionalText(row.area_id) === normalizedAreaId);
+  const scopedRows = rows.filter(
+    (row) => cleanOptionalText(row.area_id) === normalizedAreaId,
+  );
   if (scopedRows.length > 0) return scopedRows;
-  if (normalizedAreaId) return rows.filter((row) => cleanOptionalText(row.area_id) === null);
+  if (normalizedAreaId)
+    return rows.filter((row) => cleanOptionalText(row.area_id) === null);
   return scopedRows;
 }
 
@@ -606,73 +685,162 @@ async function saveShiftAction(formData: FormData) {
   "use server";
   const shiftId = asText(formData.get("shift_id"));
   const employeeId = asText(formData.get("employee_id"));
-  const employeeIds = [...new Set(
-    formData
-      .getAll("employee_ids")
-      .map((value) => asText(value))
-      .filter(Boolean),
-  )];
+  const employeeIds = [
+    ...new Set(
+      formData
+        .getAll("employee_ids")
+        .map((value) => asText(value))
+        .filter(Boolean),
+    ),
+  ];
   const siteId = asText(formData.get("site_id"));
   const areaId = asText(formData.get("area_id")) || null;
   let resolvedAreaId = areaId;
   const explicitCheckinSiteId = asText(formData.get("checkin_site_id")) || null;
-  const explicitCheckoutSiteId = asText(formData.get("checkout_site_id")) || null;
+  const explicitCheckoutSiteId =
+    asText(formData.get("checkout_site_id")) || null;
   const explicitOperationalContext: ShiftOperationalContext = {
     checkinSiteId: explicitCheckinSiteId,
     checkoutSiteId: explicitCheckoutSiteId,
   };
   const shiftDate = asText(formData.get("shift_date"));
-  const blockShiftDates = formData.getAll("block_shift_date").map((value) => asText(value));
+  const blockShiftDates = formData
+    .getAll("block_shift_date")
+    .map((value) => asText(value));
   const startTime = asText(formData.get("start_time"));
   const endTime = asText(formData.get("end_time"));
-  const blockStartTimes = formData.getAll("block_start_time").map((value) => asText(value));
-  const blockEndTimes = formData.getAll("block_end_time").map((value) => asText(value));
-  const blockNotes = formData.getAll("block_notes").map((value) => asText(value));
+  const blockStartTimes = formData
+    .getAll("block_start_time")
+    .map((value) => asText(value));
+  const blockEndTimes = formData
+    .getAll("block_end_time")
+    .map((value) => asText(value));
+  const blockNotes = formData
+    .getAll("block_notes")
+    .map((value) => asText(value));
   const shiftNotes = asText(formData.get("notes"));
   const explicitShiftKind = asText(formData.get("shift_kind"));
   const operationalRole = asText(formData.get("operational_role")) || null;
   const isRestShift = asText(formData.get("rest_shift")) === "1";
   const isFullDayRest = asText(formData.get("full_day_rest")) === "1";
-  const shiftKind = explicitShiftKind === "descanso" || isRestShift || isFullDayRest ? "descanso" : "laboral";
-  const rawShiftBlocks = blockStartTimes
-    .map((blockStart, index) => ({
-      shiftDate: blockShiftDates[index] || shiftDate,
-      startTime: blockStart,
-      endTime: blockEndTimes[index] ?? "",
-      notes: blockNotes[index] ?? "",
-    }))
-    .filter((block) => block.shiftDate || block.startTime || block.endTime);
-  const firstRawShiftBlock = rawShiftBlocks[0] ?? { shiftDate: shiftDate, startTime: "", endTime: "" };
-  const resolvedShiftBlocks = shiftKind === "descanso"
-    ? [
-        {
-          shiftDate: shiftDate || firstRawShiftBlock.shiftDate,
-          startTime: isFullDayRest ? FULL_DAY_REST_START_TIME : startTime || firstRawShiftBlock.startTime,
-          endTime: isFullDayRest ? FULL_DAY_REST_END_TIME : endTime || firstRawShiftBlock.endTime,
-          notes: shiftNotes || firstRawShiftBlock.notes,
-        },
-      ]
-    : rawShiftBlocks.length > 0
-      ? rawShiftBlocks
-      : [{ shiftDate, startTime, endTime, notes: shiftNotes }];
+  const globalShiftKind =
+    explicitShiftKind === "descanso" || isRestShift || isFullDayRest
+      ? "descanso"
+      : "laboral";
+  const blockRestIndexes = new Set(
+    formData
+      .getAll("block_rest_day")
+      .map((value) => Number(asText(value)))
+      .filter((value) => Number.isInteger(value) && value >= 0),
+  );
+  const blockCount = Math.max(
+    blockShiftDates.length,
+    blockStartTimes.length,
+    blockEndTimes.length,
+    blockNotes.length,
+  );
+  const rawShiftBlocks: Array<{
+    shiftDate: string;
+    startTime: string;
+    endTime: string;
+    notes: string;
+    shiftKind: "laboral" | "descanso";
+  }> =
+    blockCount > 0
+      ? Array.from({ length: blockCount })
+          .map((_, index) => {
+            const isRestBlock = blockRestIndexes.has(index);
+            return {
+              shiftDate: blockShiftDates[index] || shiftDate,
+              startTime: isRestBlock
+                ? FULL_DAY_REST_START_TIME
+                : (blockStartTimes[index] ?? ""),
+              endTime: isRestBlock
+                ? FULL_DAY_REST_END_TIME
+                : (blockEndTimes[index] ?? ""),
+              notes: blockNotes[index] ?? "",
+              shiftKind: isRestBlock
+                ? ("descanso" as const)
+                : ("laboral" as const),
+            };
+          })
+          .filter(
+            (block) =>
+              block.shiftDate ||
+              block.startTime ||
+              block.endTime ||
+              block.notes,
+          )
+      : [];
+  const resolvedShiftBlocks: Array<{
+    shiftDate: string;
+    startTime: string;
+    endTime: string;
+    notes: string;
+    shiftKind: "laboral" | "descanso";
+  }> =
+    globalShiftKind === "descanso" && rawShiftBlocks.length === 0
+      ? [
+          {
+            shiftDate,
+            startTime: FULL_DAY_REST_START_TIME,
+            endTime: FULL_DAY_REST_END_TIME,
+            notes: shiftNotes,
+            shiftKind: "descanso",
+          },
+        ]
+      : rawShiftBlocks.length > 0
+        ? rawShiftBlocks
+        : [
+            {
+              shiftDate,
+              startTime,
+              endTime,
+              notes: shiftNotes,
+              shiftKind: "laboral",
+            },
+          ];
   const orderedShiftBlocks = [...resolvedShiftBlocks].sort((first, second) => {
     const dateCompare = first.shiftDate.localeCompare(second.shiftDate, "es");
     if (dateCompare !== 0) return dateCompare;
     const startCompare = first.startTime.localeCompare(second.startTime, "es");
-    return startCompare !== 0 ? startCompare : first.endTime.localeCompare(second.endTime, "es");
+    return startCompare !== 0
+      ? startCompare
+      : first.endTime.localeCompare(second.endTime, "es");
   });
-  const firstShiftBlock = orderedShiftBlocks[0] ?? { startTime: "", endTime: "" };
-  const requestedShiftDates = [...new Set(orderedShiftBlocks.map((block) => block.shiftDate).filter(Boolean))];
+  const firstShiftBlock = orderedShiftBlocks[0] ?? {
+    shiftDate: "",
+    startTime: "",
+    endTime: "",
+    notes: "",
+    shiftKind: "laboral" as const,
+  };
+  const laboralShiftBlocks = orderedShiftBlocks.filter(
+    (block) => block.shiftKind !== "descanso",
+  );
+  const restShiftBlocks = orderedShiftBlocks.filter(
+    (block) => block.shiftKind === "descanso",
+  );
+  const hasLaboralBlocks = laboralShiftBlocks.length > 0;
+  const requestedShiftDates = [
+    ...new Set(
+      orderedShiftBlocks.map((block) => block.shiftDate).filter(Boolean),
+    ),
+  ];
+  const requestedLaboralShiftDates = [
+    ...new Set(
+      laboralShiftBlocks.map((block) => block.shiftDate).filter(Boolean),
+    ),
+  ];
+  const requestedRestShiftDates = [
+    ...new Set(restShiftBlocks.map((block) => block.shiftDate).filter(Boolean)),
+  ];
   const resolvedStartTime = firstShiftBlock.startTime;
   const resolvedEndTime = firstShiftBlock.endTime;
   const showEndAsClose = asText(formData.get("show_end_as_close")) === "1";
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
-  const keepSlot = asText(formData.get("keep_slot")) === "1";
   const keepQuick = asText(formData.get("keep_quick")) === "1";
   const primaryShiftDate = firstShiftBlock.shiftDate || shiftDate;
-  const slotDay = asText(formData.get("slot_day")) || primaryShiftDate;
-  const slotStart = asText(formData.get("slot_start")) || resolvedStartTime;
-  const slotEnd = asText(formData.get("slot_end")) || resolvedEndTime;
   const requestedEmployeeIds =
     employeeIds.length > 0 ? employeeIds : employeeId ? [employeeId] : [];
 
@@ -682,32 +850,52 @@ async function saveShiftAction(formData: FormData) {
   });
   const supabase = createAdminClient();
 
-  if (requestedEmployeeIds.length === 0 || !siteId || requestedShiftDates.length === 0 || orderedShiftBlocks.length === 0) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Completa trabajador, fecha y horario.")}`);
+  if (
+    requestedEmployeeIds.length === 0 ||
+    !siteId ||
+    requestedShiftDates.length === 0 ||
+    orderedShiftBlocks.length === 0
+  ) {
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Completa trabajador, fecha y horario.")}`,
+    );
   }
 
   if (shiftId && requestedEmployeeIds.length !== 1) {
-    redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un trabajador por turno.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("La edición solo admite un trabajador por turno.")}`,
+    );
   }
 
   if (shiftId && requestedShiftDates.length !== 1) {
-    redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un día por turno.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("La edición solo admite un día por turno.")}`,
+    );
   }
 
   if (shiftId && orderedShiftBlocks.length !== 1) {
-    redirect(`${returnTo}&error=${encodeURIComponent("La edición solo admite un bloque horario por turno.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("La edición solo admite un bloque horario por turno.")}`,
+    );
   }
 
-  let selectedRoleRequirements: Pick<SiteOperationalRoleRow, "requires_external_checkin" | "requires_external_checkout"> | null = null;
+  let selectedRoleRequirements: Pick<
+    SiteOperationalRoleRow,
+    "requires_external_checkin" | "requires_external_checkout"
+  > | null = null;
 
-  if (shiftKind !== "descanso") {
+  if (hasLaboralBlocks) {
     if (!operationalRole) {
-      redirect(`${returnTo}&error=${encodeURIComponent("Selecciona un rol operativo de la matriz para este turno.")}`);
+      redirect(
+        `${returnTo}&error=${encodeURIComponent("Selecciona un rol operativo de la matriz para este turno.")}`,
+      );
     }
 
     const { data: matrixRowsData, error: matrixError } = await supabase
       .from("vento_site_operational_role_matrix_v1")
-      .select("site_id,area_id,area_name,area_kind,role_code,role_label,role_family,is_default,requires_external_checkin,requires_external_checkout,is_active")
+      .select(
+        "site_id,area_id,area_name,area_kind,role_code,role_label,role_family,is_default,requires_external_checkin,requires_external_checkout,is_active",
+      )
       .eq("site_id", siteId)
       .eq("is_active", true);
 
@@ -717,14 +905,19 @@ async function saveShiftAction(formData: FormData) {
 
     const matrixRows = (matrixRowsData ?? []) as SiteOperationalRoleRow[];
     if (areaId && !matrixRows.some((row) => row.area_id === areaId)) {
-      redirect(`${returnTo}&error=${encodeURIComponent("El área seleccionada no pertenece a la matriz activa de esta sede.")}`);
+      redirect(
+        `${returnTo}&error=${encodeURIComponent("El área seleccionada no pertenece a la matriz activa de esta sede.")}`,
+      );
     }
 
     const applicableRows = getApplicableOperationalRoleRows(matrixRows, areaId);
-    let selectedRoleRow = applicableRows.find((row) => row.role_code === operationalRole) ?? null;
+    let selectedRoleRow =
+      applicableRows.find((row) => row.role_code === operationalRole) ?? null;
 
     if (!selectedRoleRow && !areaId) {
-      const uniqueRoleAreaRows = matrixRows.filter((row) => row.role_code === operationalRole);
+      const uniqueRoleAreaRows = matrixRows.filter(
+        (row) => row.role_code === operationalRole,
+      );
       if (uniqueRoleAreaRows.length === 1) {
         selectedRoleRow = uniqueRoleAreaRows[0] ?? null;
         resolvedAreaId = selectedRoleRow?.area_id ?? null;
@@ -732,29 +925,43 @@ async function saveShiftAction(formData: FormData) {
     }
 
     if (!selectedRoleRow) {
-      redirect(`${returnTo}&error=${encodeURIComponent("El rol operativo seleccionado no está permitido para la sede y área del turno.")}`);
+      redirect(
+        `${returnTo}&error=${encodeURIComponent("El rol operativo seleccionado no está permitido para la sede y área del turno.")}`,
+      );
     }
 
     selectedRoleRequirements = selectedRoleRow;
   }
 
-  const incompleteBlocks = orderedShiftBlocks.some((block) => !block.shiftDate || !block.startTime || !block.endTime);
+  const incompleteBlocks = orderedShiftBlocks.some(
+    (block) => !block.shiftDate || !block.startTime || !block.endTime,
+  );
   if (incompleteBlocks) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Completa día, inicio y fin de cada bloque horario.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Completa día, inicio y fin de cada bloque horario.")}`,
+    );
   }
 
-  if (shiftKind !== "descanso") {
-    const invalidBlocks = orderedShiftBlocks.filter((block) => block.endTime <= block.startTime);
+  if (hasLaboralBlocks) {
+    const invalidBlocks = laboralShiftBlocks.filter(
+      (block) => block.endTime <= block.startTime,
+    );
     if (invalidBlocks.length > 0) {
-      redirect(`${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio en todos los bloques.")}`);
+      redirect(
+        `${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio en todos los bloques.")}`,
+      );
     }
 
-    for (let i = 0; i < orderedShiftBlocks.length; i += 1) {
-      for (let j = i + 1; j < orderedShiftBlocks.length; j += 1) {
-        const first = orderedShiftBlocks[i];
-        const second = orderedShiftBlocks[j];
+    for (let i = 0; i < laboralShiftBlocks.length; i += 1) {
+      for (let j = i + 1; j < laboralShiftBlocks.length; j += 1) {
+        const first = laboralShiftBlocks[i];
+        const second = laboralShiftBlocks[j];
         if (!first || !second) continue;
-        if (first.shiftDate === second.shiftDate && first.startTime < second.endTime && second.startTime < first.endTime) {
+        if (
+          first.shiftDate === second.shiftDate &&
+          first.startTime < second.endTime &&
+          second.startTime < first.endTime
+        ) {
           redirect(
             `${returnTo}&error=${encodeURIComponent(
               `Los bloques del turno partido se solapan (${first.startTime.slice(0, 5)} - ${first.endTime.slice(0, 5)} y ${second.startTime.slice(0, 5)} - ${second.endTime.slice(0, 5)}).`,
@@ -765,13 +972,47 @@ async function saveShiftAction(formData: FormData) {
     }
   }
 
+  const restShiftDateSet = new Set(requestedRestShiftDates);
+  if (
+    hasLaboralBlocks &&
+    laboralShiftBlocks.some((block) => restShiftDateSet.has(block.shiftDate))
+  ) {
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("No mezcles descanso de día completo con bloques laborales del mismo día para el mismo trabajador.")}`,
+    );
+  }
+
+  if (requestedRestShiftDates.length > 0) {
+    let restConflictQuery = supabase
+      .from("employee_shifts")
+      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,status")
+      .in("employee_id", requestedEmployeeIds)
+      .in("shift_date", requestedRestShiftDates)
+      .neq("status", "cancelled");
+    if (shiftId) {
+      restConflictQuery = restConflictQuery.neq("id", shiftId);
+    }
+    const { data: restConflicts, error: restConflictError } =
+      await restConflictQuery;
+    if (restConflictError) {
+      redirect(
+        `${returnTo}&error=${encodeURIComponent(restConflictError.message)}`,
+      );
+    }
+    if ((restConflicts ?? []).length > 0) {
+      redirect(
+        `${returnTo}&error=${encodeURIComponent("Ese trabajador ya tiene turnos en uno de los días que estás marcando como descanso. Elimina o ajusta esos turnos primero.")}`,
+      );
+    }
+  }
+
   // Validar solapamiento: mismo empleado, misma fecha, rangos que se cruzan
-  if (shiftKind !== "descanso") {
+  if (hasLaboralBlocks) {
     let overlapQuery = supabase
       .from("employee_shifts")
       .select("id, employee_id, shift_date, start_time, end_time")
       .in("employee_id", requestedEmployeeIds)
-      .in("shift_date", requestedShiftDates)
+      .in("shift_date", requestedLaboralShiftDates)
       .neq("shift_kind", "descanso");
     if (shiftId) {
       overlapQuery = overlapQuery.neq("id", shiftId);
@@ -781,13 +1022,23 @@ async function saveShiftAction(formData: FormData) {
       redirect(`${returnTo}&error=${encodeURIComponent(overlapErr.message)}`);
     }
     const overlaps = (sameDayShifts ?? []).filter(
-      (s: { employee_id: string; shift_date: string; start_time: string; end_time: string }) =>
-        orderedShiftBlocks.some(
-          (block) => block.shiftDate === s.shift_date && block.startTime < s.end_time && s.start_time < block.endTime,
+      (s: {
+        employee_id: string;
+        shift_date: string;
+        start_time: string;
+        end_time: string;
+      }) =>
+        laboralShiftBlocks.some(
+          (block) =>
+            block.shiftDate === s.shift_date &&
+            block.startTime < s.end_time &&
+            s.start_time < block.endTime,
         ),
     );
     if (overlaps.length > 0) {
-      const conflictingIds = [...new Set(overlaps.map((shift) => shift.employee_id))];
+      const conflictingIds = [
+        ...new Set(overlaps.map((shift) => shift.employee_id)),
+      ];
       const { data: conflictEmployees } = await supabase
         .from("employees")
         .select("id,full_name,alias")
@@ -813,84 +1064,107 @@ async function saveShiftAction(formData: FormData) {
     }
   }
 
-  const basePayload = {
-    site_id: siteId,
-    area_id: shiftKind === "descanso" ? null : resolvedAreaId,
-    shift_kind: shiftKind,
-    operational_role: shiftKind === "descanso" ? null : operationalRole,
-    break_minutes: shiftKind === "descanso" ? 0 : Math.max(0, asNumber(formData.get("break_minutes"), 0)),
-    status: asText(formData.get("status")) || "scheduled",
-    notes: shiftNotes || orderedShiftBlocks[0]?.notes || null,
-    published_at: null,
-    published_by: null,
-  };
-  const closeBlockIndex = shiftKind === "descanso" || !showEndAsClose ? -1 : orderedShiftBlocks.length - 1;
+  const closeBlockIndex =
+    !hasLaboralBlocks || !showEndAsClose
+      ? -1
+      : orderedShiftBlocks.reduce(
+          (lastIndex, block, index) =>
+            block.shiftKind === "descanso" ? lastIndex : index,
+          -1,
+        );
   const operationalContextIndex = await loadShiftOperationalContextIndex(
     supabase,
-    shiftKind === "descanso"
-      ? []
-      : requestedEmployeeIds.map((id) => ({
+    hasLaboralBlocks
+      ? requestedEmployeeIds.map((id) => ({
           employeeId: id,
           siteId,
           operationalRole,
-        })),
+        }))
+      : [],
   );
 
-  if (shiftKind !== "descanso" && selectedRoleRequirements) {
+  if (hasLaboralBlocks && selectedRoleRequirements) {
     const missingExternalContext = requestedEmployeeIds.filter((id) => {
-      const profileContext = getShiftOperationalContext(operationalContextIndex, id, siteId, operationalRole);
-      const checkinSiteId = resolveContextSiteId(explicitOperationalContext.checkinSiteId, profileContext?.checkinSiteId);
-      const checkoutSiteId = resolveContextSiteId(explicitOperationalContext.checkoutSiteId, profileContext?.checkoutSiteId);
+      const profileContext = getShiftOperationalContext(
+        operationalContextIndex,
+        id,
+        siteId,
+        operationalRole,
+      );
+      const checkinSiteId = resolveContextSiteId(
+        explicitOperationalContext.checkinSiteId,
+        profileContext?.checkinSiteId,
+      );
+      const checkoutSiteId = resolveContextSiteId(
+        explicitOperationalContext.checkoutSiteId,
+        profileContext?.checkoutSiteId,
+      );
 
-      return (Boolean(selectedRoleRequirements?.requires_external_checkin) && !checkinSiteId)
-        || (Boolean(selectedRoleRequirements?.requires_external_checkout) && !checkoutSiteId);
+      return (
+        (Boolean(selectedRoleRequirements?.requires_external_checkin) &&
+          !checkinSiteId) ||
+        (Boolean(selectedRoleRequirements?.requires_external_checkout) &&
+          !checkoutSiteId)
+      );
     });
 
     if (missingExternalContext.length > 0) {
-      redirect(`${returnTo}&error=${encodeURIComponent("Este rol operativo exige punto físico de entrada y salida. Selecciona puntos de marcación o configura el perfil operativo del trabajador.")}`);
+      redirect(
+        `${returnTo}&error=${encodeURIComponent("Este rol operativo exige punto físico de entrada y salida. Selecciona puntos de marcación o configura el perfil operativo del trabajador.")}`,
+      );
     }
   }
 
+  const buildShiftPayload = (
+    id: string,
+    block: (typeof orderedShiftBlocks)[number],
+    index: number,
+  ) => {
+    const blockShiftKind = block.shiftKind;
+    const isRestBlock = blockShiftKind === "descanso";
+    return withShiftOperationalContext(
+      {
+        site_id: siteId,
+        area_id: isRestBlock ? null : resolvedAreaId,
+        shift_kind: blockShiftKind,
+        operational_role: isRestBlock ? null : operationalRole,
+        break_minutes: isRestBlock
+          ? 0
+          : Math.max(0, asNumber(formData.get("break_minutes"), 0)),
+        status: asText(formData.get("status")) || "scheduled",
+        notes: block.notes || shiftNotes || null,
+        published_at: null,
+        published_by: null,
+        employee_id: id,
+        shift_date: block.shiftDate,
+        start_time: isRestBlock ? FULL_DAY_REST_START_TIME : block.startTime,
+        end_time: isRestBlock ? FULL_DAY_REST_END_TIME : block.endTime,
+        show_end_as_close: !isRestBlock && index === closeBlockIndex,
+      },
+      isRestBlock
+        ? null
+        : getShiftOperationalContext(
+            operationalContextIndex,
+            id,
+            siteId,
+            operationalRole,
+          ),
+      blockShiftKind,
+      isRestBlock ? null : explicitOperationalContext,
+    );
+  };
+
   const insertPayload = requestedEmployeeIds.flatMap((id) =>
     orderedShiftBlocks.map((block, index) =>
-      withShiftOperationalContext(
-        {
-          ...basePayload,
-          employee_id: id,
-          shift_date: block.shiftDate,
-          start_time: block.startTime,
-          end_time: block.endTime,
-          notes: block.notes || null,
-          show_end_as_close: index === closeBlockIndex,
-        },
-        getShiftOperationalContext(operationalContextIndex, id, siteId, operationalRole),
-        shiftKind,
-        explicitOperationalContext,
-      ),
+      buildShiftPayload(id, block, index),
     ),
   );
 
-  const updateContext = requestedEmployeeIds[0]
-    ? getShiftOperationalContext(operationalContextIndex, requestedEmployeeIds[0], siteId, operationalRole)
-    : null;
+  const updateBlock = firstShiftBlock;
   const query = shiftId
     ? supabase
         .from("employee_shifts")
-        .update(
-          withShiftOperationalContext(
-            {
-              ...basePayload,
-              employee_id: requestedEmployeeIds[0],
-              shift_date: primaryShiftDate,
-              start_time: resolvedStartTime,
-              end_time: resolvedEndTime,
-              show_end_as_close: shiftKind === "descanso" ? false : showEndAsClose,
-            },
-            updateContext,
-            shiftKind,
-            explicitOperationalContext,
-          ),
-        )
+        .update(buildShiftPayload(requestedEmployeeIds[0], updateBlock, 0))
         .eq("id", shiftId)
     : supabase.from("employee_shifts").insert(insertPayload);
 
@@ -907,38 +1181,19 @@ async function saveShiftAction(formData: FormData) {
       ? "turnos_creados_borrador"
       : "turno_creado_borrador";
   const nextReturnTo =
-    !shiftId && keepSlot
+    !shiftId && keepQuick
       ? appendReturnParams(returnTo, {
-          slot_keep: "1",
-          slot_day: slotDay,
-          slot_start: slotStart,
-          slot_end: slotEnd,
-          quick_keep: keepQuick ? "1" : null,
-          quick_employee_id: keepQuick ? requestedEmployeeIds[0] ?? null : null,
-          quick_shift_date: keepQuick ? primaryShiftDate : null,
+          quick_keep: "1",
+          quick_employee_id: requestedEmployeeIds[0] ?? null,
+          quick_shift_date: primaryShiftDate,
           edit_shift: null,
         })
-      : !shiftId && keepQuick
-        ? appendReturnParams(returnTo, {
-            slot_keep: null,
-            slot_day: null,
-            slot_start: null,
-            slot_end: null,
-            quick_keep: "1",
-            quick_employee_id: requestedEmployeeIds[0] ?? null,
-            quick_shift_date: primaryShiftDate,
-            edit_shift: null,
-          })
-        : appendReturnParams(returnTo, {
-            slot_keep: null,
-            slot_day: null,
-            slot_start: null,
-            slot_end: null,
-            quick_keep: null,
-            quick_employee_id: null,
-            quick_shift_date: null,
-            edit_shift: null,
-          });
+      : appendReturnParams(returnTo, {
+          quick_keep: null,
+          quick_employee_id: null,
+          quick_shift_date: null,
+          edit_shift: null,
+        });
   redirect(`${nextReturnTo}&ok=${encodeURIComponent(successCode)}`);
 }
 
@@ -957,7 +1212,10 @@ async function deleteShiftAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent("Turno inválido.")}`);
   }
 
-  const { error } = await supabase.from("employee_shifts").delete().eq("id", shiftId);
+  const { error } = await supabase
+    .from("employee_shifts")
+    .delete()
+    .eq("id", shiftId);
   if (error) {
     redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
   }
@@ -982,10 +1240,15 @@ async function deleteManyShiftAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (shiftIds.length === 0) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Selecciona al menos un turno para eliminar.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Selecciona al menos un turno para eliminar.")}`,
+    );
   }
 
-  const { error } = await supabase.from("employee_shifts").delete().in("id", shiftIds);
+  const { error } = await supabase
+    .from("employee_shifts")
+    .delete()
+    .in("id", shiftIds);
   if (error) {
     redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
   }
@@ -1008,7 +1271,9 @@ async function deleteDraftWeekAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (!siteId || !weekStartIso) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Faltan datos para descartar los borradores.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Faltan datos para descartar los borradores.")}`,
+    );
   }
 
   const weekStart = parseWeekStart(weekStartIso);
@@ -1037,12 +1302,14 @@ async function assignManyShiftAction(formData: FormData) {
     .getAll("shift_ids")
     .map((value) => asText(value))
     .filter(Boolean);
-  const targetEmployeeIds = [...new Set(
-    formData
-      .getAll("employee_ids")
-      .map((value) => asText(value))
-      .filter(Boolean),
-  )];
+  const targetEmployeeIds = [
+    ...new Set(
+      formData
+        .getAll("employee_ids")
+        .map((value) => asText(value))
+        .filter(Boolean),
+    ),
+  ];
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
 
   await requireAppAccess({
@@ -1052,12 +1319,16 @@ async function assignManyShiftAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (sourceShiftIds.length === 0 || targetEmployeeIds.length === 0) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Selecciona bloques y trabajadores para aplicar la edición masiva.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Selecciona bloques y trabajadores para aplicar la edición masiva.")}`,
+    );
   }
 
   const { data: sourceShifts, error: sourceError } = await supabase
     .from("employee_shifts")
-    .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,area_id,checkin_site_id,checkout_site_id,published_at")
+    .select(
+      "id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,area_id,checkin_site_id,checkout_site_id,published_at",
+    )
     .in("id", sourceShiftIds);
 
   if (sourceError) {
@@ -1066,26 +1337,31 @@ async function assignManyShiftAction(formData: FormData) {
 
   const shiftRows = (sourceShifts ?? []) as ShiftRow[];
   if (shiftRows.length === 0) {
-    redirect(`${returnTo}&error=${encodeURIComponent("No se encontraron los bloques seleccionados.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("No se encontraron los bloques seleccionados.")}`,
+    );
   }
 
   const requestedRanges = shiftRows
     .filter((shift) => shift.shift_kind !== "descanso")
     .map((shift) => ({
-    shift_date: shift.shift_date,
-    start_time: shift.start_time,
-    end_time: shift.end_time,
-  }));
-  const requestedDates = [...new Set(requestedRanges.map((item) => item.shift_date))];
+      shift_date: shift.shift_date,
+      start_time: shift.start_time,
+      end_time: shift.end_time,
+    }));
+  const requestedDates = [
+    ...new Set(requestedRanges.map((item) => item.shift_date)),
+  ];
 
-  const { data: existingShifts, error: existingError } = requestedRanges.length > 0
-    ? await supabase
-        .from("employee_shifts")
-        .select("employee_id,shift_date,start_time,end_time")
-        .neq("shift_kind", "descanso")
-        .in("employee_id", targetEmployeeIds)
-        .in("shift_date", requestedDates)
-    : { data: [], error: null };
+  const { data: existingShifts, error: existingError } =
+    requestedRanges.length > 0
+      ? await supabase
+          .from("employee_shifts")
+          .select("employee_id,shift_date,start_time,end_time")
+          .neq("shift_kind", "descanso")
+          .in("employee_id", targetEmployeeIds)
+          .in("shift_date", requestedDates)
+      : { data: [], error: null };
 
   if (existingError) {
     redirect(`${returnTo}&error=${encodeURIComponent(existingError.message)}`);
@@ -1101,7 +1377,9 @@ async function assignManyShiftAction(formData: FormData) {
   );
 
   if (overlaps.length > 0) {
-    const conflictingIds = [...new Set(overlaps.map((shift) => shift.employee_id))];
+    const conflictingIds = [
+      ...new Set(overlaps.map((shift) => shift.employee_id)),
+    ];
     const { data: conflictEmployees } = await supabase
       .from("employees")
       .select("id,full_name,alias")
@@ -1128,7 +1406,8 @@ async function assignManyShiftAction(formData: FormData) {
 
   const existingExact = new Set(
     (existingShifts ?? []).map(
-      (shift) => `${shift.employee_id}|${shift.shift_date}|${shift.start_time}|${shift.end_time}`,
+      (shift) =>
+        `${shift.employee_id}|${shift.shift_date}|${shift.start_time}|${shift.end_time}`,
     ),
   );
 
@@ -1148,7 +1427,9 @@ async function assignManyShiftAction(formData: FormData) {
       .filter((shift) => shift.employee_id !== employeeId)
       .filter(
         (shift) =>
-          !existingExact.has(`${employeeId}|${shift.shift_date}|${shift.start_time}|${shift.end_time}`),
+          !existingExact.has(
+            `${employeeId}|${shift.shift_date}|${shift.start_time}|${shift.end_time}`,
+          ),
       )
       .map((shift) => {
         const shiftKind = shift.shift_kind ?? "laboral";
@@ -1169,7 +1450,12 @@ async function assignManyShiftAction(formData: FormData) {
             published_at: null,
             published_by: null,
           },
-          getShiftOperationalContext(operationalContextIndex, employeeId, shift.site_id, shift.operational_role),
+          getShiftOperationalContext(
+            operationalContextIndex,
+            employeeId,
+            shift.site_id,
+            shift.operational_role,
+          ),
           shiftKind,
           {
             checkinSiteId: shift.checkin_site_id ?? null,
@@ -1180,7 +1466,9 @@ async function assignManyShiftAction(formData: FormData) {
   );
 
   if (payload.length === 0) {
-    redirect(`${returnTo}&error=${encodeURIComponent("No hubo nuevos turnos por crear para los trabajadores seleccionados.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("No hubo nuevos turnos por crear para los trabajadores seleccionados.")}`,
+    );
   }
 
   const { error } = await supabase.from("employee_shifts").insert(payload);
@@ -1206,7 +1494,9 @@ async function copyPreviousWeekAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (!siteId || !weekStartIso) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Faltan datos para copiar la semana.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Faltan datos para copiar la semana.")}`,
+    );
   }
 
   const weekStart = parseWeekStart(weekStartIso);
@@ -1215,7 +1505,9 @@ async function copyPreviousWeekAction(formData: FormData) {
 
   const { data: previousRows, error: previousError } = await supabase
     .from("employee_shifts")
-    .select("employee_id,site_id,area_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,checkin_site_id,checkout_site_id")
+    .select(
+      "employee_id,site_id,area_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,checkin_site_id,checkout_site_id",
+    )
     .eq("site_id", siteId)
     .gte("shift_date", isoDate(prevStart))
     .lte("shift_date", isoDate(prevEnd));
@@ -1242,7 +1534,9 @@ async function copyPreviousWeekAction(formData: FormData) {
   }>;
 
   if (rows.length === 0) {
-    redirect(`${returnTo}&error=${encodeURIComponent("No hay turnos en la semana anterior para copiar.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("No hay turnos en la semana anterior para copiar.")}`,
+    );
   }
 
   const operationalContextIndex = await loadShiftOperationalContextIndex(
@@ -1268,8 +1562,14 @@ async function copyPreviousWeekAction(formData: FormData) {
     return {
       ...row,
       shift_date: isoDate(baseDate),
-      checkin_site_id: shiftKind === "descanso" ? null : profileContext?.checkinSiteId ?? row.checkin_site_id ?? null,
-      checkout_site_id: shiftKind === "descanso" ? null : profileContext?.checkoutSiteId ?? row.checkout_site_id ?? null,
+      checkin_site_id:
+        shiftKind === "descanso"
+          ? null
+          : (profileContext?.checkinSiteId ?? row.checkin_site_id ?? null),
+      checkout_site_id:
+        shiftKind === "descanso"
+          ? null
+          : (profileContext?.checkoutSiteId ?? row.checkout_site_id ?? null),
       published_at: null,
       published_by: null,
     };
@@ -1297,7 +1597,8 @@ async function copyDayToOtherDaysAction(formData: FormData) {
   const targetDaysRaw = formData.getAll("target_days");
   const targetDays = Array.from(targetDaysRaw)
     .filter(
-      (v): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.trim()),
+      (v): v is string =>
+        typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.trim()),
     )
     .filter((iso) => iso !== sourceDayIso);
 
@@ -1308,12 +1609,16 @@ async function copyDayToOtherDaysAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (!siteId || !sourceDayIso || !employeeId || targetDays.length === 0) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Elige el día, la persona y al menos un día destino.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Elige el día, la persona y al menos un día destino.")}`,
+    );
   }
 
   const query = supabase
     .from("employee_shifts")
-    .select("employee_id,site_id,area_id,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,checkin_site_id,checkout_site_id")
+    .select(
+      "employee_id,site_id,area_id,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,checkin_site_id,checkout_site_id",
+    )
     .eq("site_id", siteId)
     .eq("shift_date", sourceDayIso)
     .eq("employee_id", employeeId);
@@ -1341,7 +1646,9 @@ async function copyDayToOtherDaysAction(formData: FormData) {
   }>;
 
   if (rows.length === 0) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Ese día no tiene turnos de esa persona para copiar.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Ese día no tiene turnos de esa persona para copiar.")}`,
+    );
   }
 
   const operationalContextIndex = await loadShiftOperationalContextIndex(
@@ -1376,8 +1683,14 @@ async function copyDayToOtherDaysAction(formData: FormData) {
         break_minutes: row.break_minutes,
         status: row.status,
         notes: row.notes,
-        checkin_site_id: shiftKind === "descanso" ? null : profileContext?.checkinSiteId ?? row.checkin_site_id ?? null,
-        checkout_site_id: shiftKind === "descanso" ? null : profileContext?.checkoutSiteId ?? row.checkout_site_id ?? null,
+        checkin_site_id:
+          shiftKind === "descanso"
+            ? null
+            : (profileContext?.checkinSiteId ?? row.checkin_site_id ?? null),
+        checkout_site_id:
+          shiftKind === "descanso"
+            ? null
+            : (profileContext?.checkoutSiteId ?? row.checkout_site_id ?? null),
         published_at: null,
         published_by: null,
       };
@@ -1392,7 +1705,10 @@ async function copyDayToOtherDaysAction(formData: FormData) {
       .eq("employee_id", employeeId)
       .eq("shift_date", shiftDate);
     const ranges = [
-      ...((existingRows ?? []) as Array<{ start_time: string; end_time: string }>),
+      ...((existingRows ?? []) as Array<{
+        start_time: string;
+        end_time: string;
+      }>),
       ...rows.map((r) => ({ start_time: r.start_time, end_time: r.end_time })),
     ];
     for (let i = 0; i < ranges.length; i++) {
@@ -1417,7 +1733,9 @@ async function copyDayToOtherDaysAction(formData: FormData) {
 
   revalidatePath("/staff");
   revalidatePath("/staff/schedule");
-  redirect(`${returnTo}&ok=${encodeURIComponent("Día aplicado a los días seleccionados.")}`);
+  redirect(
+    `${returnTo}&ok=${encodeURIComponent("Día aplicado a los días seleccionados.")}`,
+  );
 }
 
 async function publishWeekAction(formData: FormData) {
@@ -1433,7 +1751,9 @@ async function publishWeekAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (!siteId || !weekStartIso) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Faltan datos para publicar la semana.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Faltan datos para publicar la semana.")}`,
+    );
   }
 
   const weekStart = parseWeekStart(weekStartIso);
@@ -1461,10 +1781,14 @@ async function publishWeekAction(formData: FormData) {
   const draftRows = shiftRows.filter((row) => !row.published_at);
 
   if (shiftRows.length === 0) {
-    redirect(`${returnTo}&error=${encodeURIComponent("No hay turnos en esta semana para publicar.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("No hay turnos en esta semana para publicar.")}`,
+    );
   }
   if (draftRows.length === 0) {
-    redirect(`${returnTo}&ok=${encodeURIComponent("sin_borradores_por_publicar")}`);
+    redirect(
+      `${returnTo}&ok=${encodeURIComponent("sin_borradores_por_publicar")}`,
+    );
   }
 
   const publishedAt = new Date().toISOString();
@@ -1513,7 +1837,9 @@ async function suggestDraftWeekAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (!siteId || !weekStartIso) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Faltan datos para generar el borrador sugerido.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Faltan datos para generar el borrador sugerido.")}`,
+    );
   }
 
   const weekStart = parseWeekStart(weekStartIso);
@@ -1537,26 +1863,34 @@ async function suggestDraftWeekAction(formData: FormData) {
       .order("full_name", { ascending: true }),
     supabase
       .from("employee_sites")
-      .select("employee_id,is_active,employee:employees(id,full_name,alias,role,is_active,site_id)")
+      .select(
+        "employee_id,is_active,employee:employees(id,full_name,alias,role,is_active,site_id)",
+      )
       .eq("site_id", siteId)
       .eq("is_active", true),
     supabase
       .from("employee_shifts")
-      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,area_id,checkin_site_id,checkout_site_id,published_at")
+      .select(
+        "id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,area_id,checkin_site_id,checkout_site_id,published_at",
+      )
       .eq("site_id", siteId)
       .gte("shift_date", weekStartIso)
       .lte("shift_date", weekEndIso),
     supabase
       .schema("viso")
       .from("site_staffing_requirements")
-      .select("site_id,day_of_week,start_time,end_time,min_headcount,required_role_code")
+      .select(
+        "site_id,day_of_week,start_time,end_time,min_headcount,required_role_code",
+      )
       .eq("site_id", siteId)
       .order("day_of_week", { ascending: true })
       .order("start_time", { ascending: true }),
     supabase
       .schema("viso")
       .from("employee_availability")
-      .select("employee_id,site_id,day_of_week,available_from,available_to,is_available,availability_kind")
+      .select(
+        "employee_id,site_id,day_of_week,available_from,available_to,is_available,availability_kind",
+      )
       .or(`site_id.is.null,site_id.eq.${siteId}`),
     supabase
       .schema("viso")
@@ -1566,15 +1900,20 @@ async function suggestDraftWeekAction(formData: FormData) {
     supabase
       .schema("viso")
       .from("employee_shift_preferences")
-      .select("employee_id,prefers_morning,prefers_afternoon,prefers_evening,avoid_opening,avoid_closing")
+      .select(
+        "employee_id,prefers_morning,prefers_afternoon,prefers_evening,avoid_opening,avoid_closing",
+      )
       .or(`site_id.is.null,site_id.eq.${siteId}`),
   ]);
 
   if (staffingRequirementsRes.error) {
-    redirect(`${returnTo}&error=${encodeURIComponent(staffingRequirementsRes.error.message)}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(staffingRequirementsRes.error.message)}`,
+    );
   }
 
-  const staffingRequirements = (staffingRequirementsRes.data ?? []) as StaffingRequirementRow[];
+  const staffingRequirements = (staffingRequirementsRes.data ??
+    []) as StaffingRequirementRow[];
   if (staffingRequirements.length === 0) {
     redirect(
       `${returnTo}&error=${encodeURIComponent(
@@ -1596,7 +1935,9 @@ async function suggestDraftWeekAction(formData: FormData) {
   const employees = [...employeeMap.values()];
 
   if (employees.length === 0) {
-    redirect(`${returnTo}&error=${encodeURIComponent("No hay trabajadores activos en esta sede para sugerir horarios.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("No hay trabajadores activos en esta sede para sugerir horarios.")}`,
+    );
   }
 
   const existingShifts = ((existingShiftsRes.data ?? []) as ShiftRow[])
@@ -1614,7 +1955,9 @@ async function suggestDraftWeekAction(formData: FormData) {
   const requirements: PlanningRequirement[] = [];
   for (const day of weekDays) {
     const dayOfWeek = getDayOfWeek(day.iso);
-    const dayRequirements = staffingRequirements.filter((row) => row.day_of_week === dayOfWeek);
+    const dayRequirements = staffingRequirements.filter(
+      (row) => row.day_of_week === dayOfWeek,
+    );
 
     for (const row of dayRequirements) {
       const coveredCount = existingShifts.filter(
@@ -1622,7 +1965,10 @@ async function suggestDraftWeekAction(formData: FormData) {
           shift.shiftDate === day.iso &&
           shift.startTime === row.start_time &&
           shift.endTime === row.end_time &&
-          roleMatches(employeeMap.get(shift.employeeId)?.role ?? null, row.required_role_code),
+          roleMatches(
+            employeeMap.get(shift.employeeId)?.role ?? null,
+            row.required_role_code,
+          ),
       ).length;
       const missingHeadcount = Math.max(0, row.min_headcount - coveredCount);
 
@@ -1724,7 +2070,9 @@ async function suggestDraftWeekAction(formData: FormData) {
     .single();
 
   if (runError || !runRow) {
-    redirect(`${returnTo}&error=${encodeURIComponent(runError?.message ?? "No se pudo registrar la corrida de sugerencia.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(runError?.message ?? "No se pudo registrar la corrida de sugerencia.")}`,
+    );
   }
 
   const explanation = {
@@ -1750,7 +2098,9 @@ async function suggestDraftWeekAction(formData: FormData) {
     .single();
 
   if (candidateError || !candidateRow) {
-    redirect(`${returnTo}&error=${encodeURIComponent(candidateError?.message ?? "No se pudo registrar el candidato sugerido.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(candidateError?.message ?? "No se pudo registrar el candidato sugerido.")}`,
+    );
   }
 
   if (suggestion.shifts.length > 0) {
@@ -1788,7 +2138,8 @@ async function suggestDraftWeekAction(formData: FormData) {
 
     const draftRows = suggestion.shifts.map((shift) => {
       const shiftKind = shift.shiftKind;
-      const operationalRole = shiftKind === "descanso" ? null : shift.requiredRoleCode ?? null;
+      const operationalRole =
+        shiftKind === "descanso" ? null : (shift.requiredRoleCode ?? null);
       return withShiftOperationalContext(
         {
           employee_id: shift.employeeId,
@@ -1806,14 +2157,23 @@ async function suggestDraftWeekAction(formData: FormData) {
           published_at: null,
           published_by: null,
         },
-        getShiftOperationalContext(operationalContextIndex, shift.employeeId, shift.siteId, operationalRole),
+        getShiftOperationalContext(
+          operationalContextIndex,
+          shift.employeeId,
+          shift.siteId,
+          operationalRole,
+        ),
         shiftKind,
       );
     });
 
-    const { error: insertDraftError } = await supabase.from("employee_shifts").insert(draftRows);
+    const { error: insertDraftError } = await supabase
+      .from("employee_shifts")
+      .insert(draftRows);
     if (insertDraftError) {
-      redirect(`${returnTo}&error=${encodeURIComponent(insertDraftError.message)}`);
+      redirect(
+        `${returnTo}&error=${encodeURIComponent(insertDraftError.message)}`,
+      );
     }
   }
 
@@ -1821,7 +2181,9 @@ async function suggestDraftWeekAction(formData: FormData) {
   revalidatePath("/staff/schedule");
   redirect(
     `${returnTo}&ok=${encodeURIComponent(
-      suggestion.shifts.length > 0 ? "sugerencia_generada_borrador" : "sugerencia_sin_resultado",
+      suggestion.shifts.length > 0
+        ? "sugerencia_generada_borrador"
+        : "sugerencia_sin_resultado",
     )}`,
   );
 }
@@ -1835,7 +2197,10 @@ async function saveCoverageRequirementAction(formData: FormData) {
   const startTime = asText(formData.get("start_time"));
   const endTime = asText(formData.get("end_time"));
   const minHeadcount = asNumber(formData.get("min_headcount"), 0);
-  const idealHeadcount = asNumber(formData.get("ideal_headcount"), minHeadcount);
+  const idealHeadcount = asNumber(
+    formData.get("ideal_headcount"),
+    minHeadcount,
+  );
   const requiredRoleCode = asText(formData.get("required_role_code")) || null;
 
   await requireAppAccess({
@@ -1844,16 +2209,29 @@ async function saveCoverageRequirementAction(formData: FormData) {
   });
   const supabase = createAdminClient();
 
-  if (!siteId || !weekStartIso || dayOfWeek < 0 || dayOfWeek > 6 || !startTime || !endTime) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Completa día, franja y sede para guardar la cobertura.")}`);
+  if (
+    !siteId ||
+    !weekStartIso ||
+    dayOfWeek < 0 ||
+    dayOfWeek > 6 ||
+    !startTime ||
+    !endTime
+  ) {
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Completa día, franja y sede para guardar la cobertura.")}`,
+    );
   }
 
   if (endTime <= startTime) {
-    redirect(`${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("La hora de fin debe ser posterior a la hora de inicio.")}`,
+    );
   }
 
   if (minHeadcount < 1 || idealHeadcount < minHeadcount) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Define un mínimo válido y un ideal mayor o igual al mínimo.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Define un mínimo válido y un ideal mayor o igual al mínimo.")}`,
+    );
   }
 
   const { error } = await supabase
@@ -1890,7 +2268,9 @@ async function deleteCoverageRequirementAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (!id) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Regla de cobertura inválida.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Regla de cobertura inválida.")}`,
+    );
   }
 
   const { error } = await supabase
@@ -1917,7 +2297,10 @@ async function saveAvailabilityAction(formData: FormData) {
   const dayOfWeek = asNumber(formData.get("day_of_week"), -1);
   const availableFrom = asText(formData.get("available_from"));
   const availableTo = asText(formData.get("available_to"));
-  const availabilityKind = asText(formData.get("availability_kind")) as "preferred" | "allowed" | "blocked";
+  const availabilityKind = asText(formData.get("availability_kind")) as
+    | "preferred"
+    | "allowed"
+    | "blocked";
 
   await requireAppAccess({
     appId: "viso",
@@ -1925,16 +2308,30 @@ async function saveAvailabilityAction(formData: FormData) {
   });
   const supabase = createAdminClient();
 
-  if (!siteId || !weekStartIso || !employeeId || dayOfWeek < 0 || dayOfWeek > 6 || !availableFrom || !availableTo) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Completa trabajador, día y horario para guardar la disponibilidad.")}`);
+  if (
+    !siteId ||
+    !weekStartIso ||
+    !employeeId ||
+    dayOfWeek < 0 ||
+    dayOfWeek > 6 ||
+    !availableFrom ||
+    !availableTo
+  ) {
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Completa trabajador, día y horario para guardar la disponibilidad.")}`,
+    );
   }
 
   if (availableTo <= availableFrom) {
-    redirect(`${returnTo}&error=${encodeURIComponent("La hora final debe ser posterior a la inicial.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("La hora final debe ser posterior a la inicial.")}`,
+    );
   }
 
   if (!["preferred", "allowed", "blocked"].includes(availabilityKind)) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Tipo de disponibilidad inválido.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Tipo de disponibilidad inválido.")}`,
+    );
   }
 
   const { error } = await supabase
@@ -1971,7 +2368,9 @@ async function deleteAvailabilityAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (!id) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Disponibilidad inválida.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Disponibilidad inválida.")}`,
+    );
   }
 
   const { error } = await supabase
@@ -1994,7 +2393,10 @@ async function saveWorkerRulesAction(formData: FormData) {
   const siteId = asText(formData.get("site_id"));
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
   const employeeId = asText(formData.get("employee_id"));
-  const targetWeeklyMinutes = asNumber(formData.get("target_weekly_minutes"), 2400);
+  const targetWeeklyMinutes = asNumber(
+    formData.get("target_weekly_minutes"),
+    2400,
+  );
   const maxWeeklyMinutes = asNumber(formData.get("max_weekly_minutes"), 2880);
   const prefersMorning = asText(formData.get("prefers_morning")) === "1";
   const prefersAfternoon = asText(formData.get("prefers_afternoon")) === "1";
@@ -2009,11 +2411,15 @@ async function saveWorkerRulesAction(formData: FormData) {
   const supabase = createAdminClient();
 
   if (!siteId || !employeeId) {
-    redirect(`${returnTo}&error=${encodeURIComponent("Selecciona un trabajador para guardar sus reglas.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("Selecciona un trabajador para guardar sus reglas.")}`,
+    );
   }
 
   if (targetWeeklyMinutes < 0 || maxWeeklyMinutes < targetWeeklyMinutes) {
-    redirect(`${returnTo}&error=${encodeURIComponent("El máximo semanal debe ser mayor o igual al objetivo semanal.")}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent("El máximo semanal debe ser mayor o igual al objetivo semanal.")}`,
+    );
   }
 
   const { error: limitsError } = await supabase
@@ -2044,12 +2450,16 @@ async function saveWorkerRulesAction(formData: FormData) {
     });
 
   if (preferencesError) {
-    redirect(`${returnTo}&error=${encodeURIComponent(preferencesError.message)}`);
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(preferencesError.message)}`,
+    );
   }
 
   revalidatePath("/staff");
   revalidatePath("/staff/schedule");
-  redirect(`${returnTo}&ok=${encodeURIComponent("reglas_trabajador_guardadas")}`);
+  redirect(
+    `${returnTo}&ok=${encodeURIComponent("reglas_trabajador_guardadas")}`,
+  );
 }
 
 function safeDecode(value: string | null | undefined) {
@@ -2117,10 +2527,6 @@ export default async function StaffSchedulePage({
     quick_keep?: string;
     quick_employee_id?: string;
     quick_shift_date?: string;
-    slot_keep?: string;
-    slot_day?: string;
-    slot_start?: string;
-    slot_end?: string;
   }>;
 }) {
   const sp = (await searchParams) ?? {};
@@ -2139,14 +2545,15 @@ export default async function StaffSchedulePage({
     .order("name", { ascending: true });
 
   const sites = (sitesData ?? []) as SiteRow[];
-  const selectedSiteId = sp.site_id && sites.some((site) => site.id === sp.site_id)
-    ? String(sp.site_id)
-    : sites[0]?.id ?? "";
+  const selectedSiteId =
+    sp.site_id && sites.some((site) => site.id === sp.site_id)
+      ? String(sp.site_id)
+      : (sites[0]?.id ?? "");
 
   const weekStart = parseWeekStart(sp.week);
   const weekStartIso = isoDate(weekStart);
   const weekEndIso = isoDate(addDays(weekStart, 6));
-  const viewMode = sp.view === "planner" ? "planner" : "table";
+  const viewMode = "table";
   const editShiftId = safeDecode(sp.edit_shift);
   const monthStartIso = isoDate(startOfMonth(weekStart));
   const monthEndIso = isoDate(endOfMonth(weekStart));
@@ -2154,7 +2561,9 @@ export default async function StaffSchedulePage({
   const fortnightStartIso = isoDate(fortnightRange.start);
   const fortnightEndIso = isoDate(fortnightRange.end);
   const returnTo = buildReturnTo(selectedSiteId, weekStartIso, viewMode);
-  const returnToWithoutEdit = appendReturnParams(returnTo, { edit_shift: null });
+  const returnToWithoutEdit = appendReturnParams(returnTo, {
+    edit_shift: null,
+  });
 
   const [
     directEmployeesRes,
@@ -2178,14 +2587,18 @@ export default async function StaffSchedulePage({
     selectedSiteId
       ? supabase
           .from("employee_sites")
-          .select("employee_id,is_active,employee:employees(id,full_name,alias,role,is_active,site_id)")
+          .select(
+            "employee_id,is_active,employee:employees(id,full_name,alias,role,is_active,site_id)",
+          )
           .eq("site_id", selectedSiteId)
           .eq("is_active", true)
       : Promise.resolve({ data: [], error: null }),
     selectedSiteId
       ? supabase
           .from("employee_shifts")
-          .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,area_id,checkin_site_id,checkout_site_id,published_at")
+          .select(
+            "id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,area_id,checkin_site_id,checkout_site_id,published_at",
+          )
           .eq("site_id", selectedSiteId)
           .gte("shift_date", weekStartIso)
           .lte("shift_date", weekEndIso)
@@ -2196,7 +2609,9 @@ export default async function StaffSchedulePage({
       ? supabase
           .schema("viso")
           .from("site_staffing_requirements")
-          .select("id,site_id,day_of_week,start_time,end_time,min_headcount,ideal_headcount,max_headcount,required_role_code")
+          .select(
+            "id,site_id,day_of_week,start_time,end_time,min_headcount,ideal_headcount,max_headcount,required_role_code",
+          )
           .eq("site_id", selectedSiteId)
           .order("day_of_week", { ascending: true })
           .order("start_time", { ascending: true })
@@ -2205,7 +2620,9 @@ export default async function StaffSchedulePage({
       ? supabase
           .schema("viso")
           .from("employee_availability")
-          .select("id,employee_id,site_id,day_of_week,available_from,available_to,is_available,availability_kind")
+          .select(
+            "id,employee_id,site_id,day_of_week,available_from,available_to,is_available,availability_kind",
+          )
           .eq("site_id", selectedSiteId)
           .order("day_of_week", { ascending: true })
           .order("available_from", { ascending: true })
@@ -2221,13 +2638,17 @@ export default async function StaffSchedulePage({
       ? supabase
           .schema("viso")
           .from("employee_shift_preferences")
-          .select("employee_id,prefers_morning,prefers_afternoon,prefers_evening,avoid_opening,avoid_closing")
+          .select(
+            "employee_id,prefers_morning,prefers_afternoon,prefers_evening,avoid_opening,avoid_closing",
+          )
           .eq("site_id", selectedSiteId)
       : Promise.resolve({ data: [], error: null }),
     selectedSiteId
       ? supabase
           .from("vento_site_operational_role_matrix_v1")
-          .select("site_id,area_id,area_name,area_kind,role_code,role_label,role_family,is_default,requires_external_checkin,requires_external_checkout,is_active")
+          .select(
+            "site_id,area_id,area_name,area_kind,role_code,role_label,role_family,is_default,requires_external_checkin,requires_external_checkout,is_active",
+          )
           .eq("site_id", selectedSiteId)
           .eq("is_active", true)
           .order("area_name", { ascending: true })
@@ -2236,7 +2657,9 @@ export default async function StaffSchedulePage({
     selectedSiteId
       ? supabase
           .from("employee_site_operational_profiles")
-          .select("employee_id,site_id,default_operational_role,default_checkin_site_id,default_checkout_site_id,is_active")
+          .select(
+            "employee_id,site_id,default_operational_role,default_checkin_site_id,default_checkout_site_id,is_active",
+          )
           .eq("site_id", selectedSiteId)
           .neq("is_active", false)
       : Promise.resolve({ data: [], error: null }),
@@ -2254,16 +2677,25 @@ export default async function StaffSchedulePage({
   }
 
   const employees = [...employeeMap.values()].sort((a, b) =>
-    (a.full_name ?? a.alias ?? a.id).localeCompare(b.full_name ?? b.alias ?? b.id, "es"),
+    (a.full_name ?? a.alias ?? a.id).localeCompare(
+      b.full_name ?? b.alias ?? b.id,
+      "es",
+    ),
   );
-  const configuredOperationalRoleRows = (siteOperationalRolesRes.data ?? []) as SiteOperationalRoleRow[];
-  const employeeOperationalProfiles = (employeeOperationalProfilesRes.data ?? []) as EmployeeOperationalProfileRow[];
-  const operationalProfilesByEmployee = new Map<string, EmployeeOperationalProfileRow[]>();
+  const configuredOperationalRoleRows = (siteOperationalRolesRes.data ??
+    []) as SiteOperationalRoleRow[];
+  const employeeOperationalProfiles = (employeeOperationalProfilesRes.data ??
+    []) as EmployeeOperationalProfileRow[];
+  const operationalProfilesByEmployee = new Map<
+    string,
+    EmployeeOperationalProfileRow[]
+  >();
 
   for (const profile of employeeOperationalProfiles) {
     if (profile.site_id !== selectedSiteId) continue;
 
-    const current = operationalProfilesByEmployee.get(profile.employee_id) ?? [];
+    const current =
+      operationalProfilesByEmployee.get(profile.employee_id) ?? [];
     current.push(profile);
     operationalProfilesByEmployee.set(profile.employee_id, current);
   }
@@ -2284,29 +2716,37 @@ export default async function StaffSchedulePage({
       }, new Map<string, OperationalAreaOption>())
       .values(),
   ).sort((a, b) => a.label.localeCompare(b.label, "es"));
-
-  const operationalRoleSelectOptions = configuredOperationalRoleRows.reduce<OperationalRoleOption[]>(
-    (options, row) => {
-      const code = cleanOptionalText(row.role_code);
-      if (!code) return options;
-
-      const areaLabel = cleanOptionalText(row.area_name) ?? "General";
-
-      options.push({
-        code,
-        label: `${cleanOptionalText(row.role_label) ?? humanizeRoleCode(row.role_code)} · ${areaLabel}`,
-        areaId: cleanOptionalText(row.area_id),
-        areaLabel,
-        areaKind: cleanOptionalText(row.area_kind),
-        isDefault: Boolean(row.is_default),
-        requiresExternalCheckin: Boolean(row.requires_external_checkin),
-        requiresExternalCheckout: Boolean(row.requires_external_checkout),
-      });
-
-      return options;
-    },
-    [],
+  const operationalAreaLabelById = new Map(
+    operationalAreaOptions.map((area) => [
+      area.id,
+      area.kind ? `${area.label} · ${area.kind}` : area.label,
+    ]),
   );
+  const siteLabelById = new Map(
+    sites.map((site) => [site.id, site.name ?? site.code ?? site.id]),
+  );
+
+  const operationalRoleSelectOptions = configuredOperationalRoleRows.reduce<
+    OperationalRoleOption[]
+  >((options, row) => {
+    const code = cleanOptionalText(row.role_code);
+    if (!code) return options;
+
+    const areaLabel = cleanOptionalText(row.area_name) ?? "General";
+
+    options.push({
+      code,
+      label: `${cleanOptionalText(row.role_label) ?? humanizeRoleCode(row.role_code)} · ${areaLabel}`,
+      areaId: cleanOptionalText(row.area_id),
+      areaLabel,
+      areaKind: cleanOptionalText(row.area_kind),
+      isDefault: Boolean(row.is_default),
+      requiresExternalCheckin: Boolean(row.requires_external_checkin),
+      requiresExternalCheckout: Boolean(row.requires_external_checkout),
+    });
+
+    return options;
+  }, []);
 
   const operationalRoleOptions: OperationalRoleOption[] = Array.from(
     configuredOperationalRoleRows
@@ -2323,7 +2763,8 @@ export default async function StaffSchedulePage({
           areaLabels: [] as string[],
         };
 
-        const areaLabel = String(row.area_name ?? "General").trim() || "General";
+        const areaLabel =
+          String(row.area_name ?? "General").trim() || "General";
         if (!current.areaLabels.includes(areaLabel)) {
           current.areaLabels.push(areaLabel);
         }
@@ -2341,7 +2782,8 @@ export default async function StaffSchedulePage({
       }, new Map<string, OperationalRoleOption & { areaLabels: string[] }>())
       .values(),
   ).map((role) => {
-    const areaSummary = role.areaLabels.length > 0 ? role.areaLabels.join(", ") : "General";
+    const areaSummary =
+      role.areaLabels.length > 0 ? role.areaLabels.join(", ") : "General";
     return {
       code: role.code,
       label: `${role.label} · ${areaSummary}`,
@@ -2351,7 +2793,9 @@ export default async function StaffSchedulePage({
     };
   });
 
-  const getOperationalRoleOptionsForArea = (areaId: string | null | undefined) => {
+  const getOperationalRoleOptionsForArea = (
+    areaId: string | null | undefined,
+  ) => {
     const normalizedAreaId = cleanOptionalText(areaId);
     const scopedOptions = operationalRoleSelectOptions.filter(
       (role) => cleanOptionalText(role.areaId) === normalizedAreaId,
@@ -2359,25 +2803,33 @@ export default async function StaffSchedulePage({
 
     if (scopedOptions.length > 0) return scopedOptions;
     if (normalizedAreaId) {
-      return operationalRoleSelectOptions.filter((role) => cleanOptionalText(role.areaId) === null);
+      return operationalRoleSelectOptions.filter(
+        (role) => cleanOptionalText(role.areaId) === null,
+      );
     }
 
     return scopedOptions;
   };
 
-  const getSiteDefaultOperationalRoleForArea = (areaId: string | null | undefined) => {
+  const getSiteDefaultOperationalRoleForArea = (
+    areaId: string | null | undefined,
+  ) => {
     const options = getOperationalRoleOptionsForArea(areaId);
     if (options.length === 1) return options[0]?.code ?? "";
 
     const defaultOptions = options.filter((role) => role.isDefault);
-    return defaultOptions.length === 1 ? defaultOptions[0]?.code ?? "" : "";
+    return defaultOptions.length === 1 ? (defaultOptions[0]?.code ?? "") : "";
   };
 
-  const operationalRoleCodes = new Set(operationalRoleOptions.map((role) => role.code));
+  const operationalRoleCodes = new Set(
+    operationalRoleOptions.map((role) => role.code),
+  );
   const siteDefaultOperationalRole = getSiteDefaultOperationalRoleForArea(null);
   const employeeIds = employees.map((employee) => employee.id);
-  const staffingRequirements = (staffingRequirementsRes.data ?? []) as StaffingRequirementRow[];
-  const availabilityConfigRows = (availabilityConfigRes.data ?? []) as (AvailabilityRow & { id: string })[];
+  const staffingRequirements = (staffingRequirementsRes.data ??
+    []) as StaffingRequirementRow[];
+  const availabilityConfigRows = (availabilityConfigRes.data ??
+    []) as (AvailabilityRow & { id: string })[];
   const planningLimitsRows = (planningLimitsRes.data ?? []) as Array<{
     employee_id: string;
     target_weekly_minutes: number;
@@ -2396,7 +2848,9 @@ export default async function StaffSchedulePage({
   if (employeeIds.length > 0 && selectedSiteId) {
     const { data: monthShiftRows } = await supabase
       .from("employee_shifts")
-      .select("id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,area_id,checkin_site_id,checkout_site_id")
+      .select(
+        "id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,area_id,checkin_site_id,checkout_site_id",
+      )
       .in("employee_id", employeeIds)
       .eq("site_id", selectedSiteId)
       .gte("shift_date", monthStartIso)
@@ -2418,7 +2872,10 @@ export default async function StaffSchedulePage({
       if (shift.shift_date >= weekStartIso && shift.shift_date <= weekEndIso) {
         totals.weekMinutes += minutes;
       }
-      if (shift.shift_date >= fortnightStartIso && shift.shift_date <= fortnightEndIso) {
+      if (
+        shift.shift_date >= fortnightStartIso &&
+        shift.shift_date <= fortnightEndIso
+      ) {
         totals.fortnightMinutes += minutes;
       }
     }
@@ -2426,7 +2883,9 @@ export default async function StaffSchedulePage({
 
   const weekDays = buildWeekDays(weekStart);
   const weekShifts = (shiftsRes.data ?? []) as ShiftRow[];
-  const draftWeekCount = weekShifts.filter((shift) => !shift.published_at).length;
+  const draftWeekCount = weekShifts.filter(
+    (shift) => !shift.published_at,
+  ).length;
   const { data: attendancePolicyRow } = await supabase
     .from("attendance_policy")
     .select("late_tolerance_minutes")
@@ -2434,12 +2893,17 @@ export default async function StaffSchedulePage({
     .maybeSingle();
   const lateToleranceMinutes = Math.max(
     0,
-    Number((attendancePolicyRow as { late_tolerance_minutes?: number } | null)?.late_tolerance_minutes ?? 15),
+    Number(
+      (attendancePolicyRow as { late_tolerance_minutes?: number } | null)
+        ?.late_tolerance_minutes ?? 15,
+    ),
   );
 
   const shiftAttendanceById = new Map<string, ShiftAttendanceInfo>();
   if (selectedSiteId && weekShifts.length > 0) {
-    const employeeIdsSet = new Set(weekShifts.map((shift) => shift.employee_id));
+    const employeeIdsSet = new Set(
+      weekShifts.map((shift) => shift.employee_id),
+    );
     const shiftIds = weekShifts.map((shift) => shift.id);
     const dayBuckets = new Map<string, ShiftAttendanceInfo>();
     const nextWeekStartIso = isoDate(addDays(weekStart, 7));
@@ -2456,11 +2920,20 @@ export default async function StaffSchedulePage({
     const shiftIdsSet = new Set(shiftIds);
     for (const row of (attendanceLogsData ?? []) as AttendanceLogRow[]) {
       if (row.shift_id && shiftIdsSet.has(row.shift_id)) {
-        const current = shiftAttendanceById.get(row.shift_id) ?? { checkInAt: null, checkOutAt: null };
-        if (row.action === "check_in" && (!current.checkInAt || row.occurred_at < current.checkInAt)) {
+        const current = shiftAttendanceById.get(row.shift_id) ?? {
+          checkInAt: null,
+          checkOutAt: null,
+        };
+        if (
+          row.action === "check_in" &&
+          (!current.checkInAt || row.occurred_at < current.checkInAt)
+        ) {
           current.checkInAt = row.occurred_at;
         }
-        if (row.action === "check_out" && (!current.checkOutAt || row.occurred_at > current.checkOutAt)) {
+        if (
+          row.action === "check_out" &&
+          (!current.checkOutAt || row.occurred_at > current.checkOutAt)
+        ) {
           current.checkOutAt = row.occurred_at;
         }
         shiftAttendanceById.set(row.shift_id, current);
@@ -2469,11 +2942,20 @@ export default async function StaffSchedulePage({
       const occurred = getBogotaDateTimeParts(row.occurred_at);
       if (!occurred) continue;
       const dayKey = `${row.employee_id}__${row.site_id}__${occurred.dateIso}`;
-      const dayInfo = dayBuckets.get(dayKey) ?? { checkInAt: null, checkOutAt: null };
-      if (row.action === "check_in" && (!dayInfo.checkInAt || row.occurred_at < dayInfo.checkInAt)) {
+      const dayInfo = dayBuckets.get(dayKey) ?? {
+        checkInAt: null,
+        checkOutAt: null,
+      };
+      if (
+        row.action === "check_in" &&
+        (!dayInfo.checkInAt || row.occurred_at < dayInfo.checkInAt)
+      ) {
         dayInfo.checkInAt = row.occurred_at;
       }
-      if (row.action === "check_out" && (!dayInfo.checkOutAt || row.occurred_at > dayInfo.checkOutAt)) {
+      if (
+        row.action === "check_out" &&
+        (!dayInfo.checkOutAt || row.occurred_at > dayInfo.checkOutAt)
+      ) {
         dayInfo.checkOutAt = row.occurred_at;
       }
       dayBuckets.set(dayKey, dayInfo);
@@ -2511,26 +2993,34 @@ export default async function StaffSchedulePage({
     rows.sort((a, b) => a.start_time.localeCompare(b.start_time, "es"));
   }
   const selectedSite = sites.find((site) => site.id === selectedSiteId) ?? null;
-  const prevWeekHref = buildReturnTo(selectedSiteId, isoDate(addDays(weekStart, -7)), viewMode);
-  const nextWeekHref = buildReturnTo(selectedSiteId, isoDate(addDays(weekStart, 7)), viewMode);
-  const currentWeekHref = buildReturnTo(selectedSiteId, isoDate(toMonday(new Date())), viewMode);
-  const initialSlot =
-    sp.slot_keep === "1" && sp.slot_day && sp.slot_start && sp.slot_end
-      ? {
-          dayIso: safeDecode(sp.slot_day),
-          startTime: safeDecode(sp.slot_start),
-          endTime: safeDecode(sp.slot_end),
-        }
-      : null;
+  const prevWeekHref = buildReturnTo(
+    selectedSiteId,
+    isoDate(addDays(weekStart, -7)),
+    viewMode,
+  );
+  const nextWeekHref = buildReturnTo(
+    selectedSiteId,
+    isoDate(addDays(weekStart, 7)),
+    viewMode,
+  );
+  const currentWeekHref = buildReturnTo(
+    selectedSiteId,
+    isoDate(toMonday(new Date())),
+    viewMode,
+  );
   const quickEmployeeId = (() => {
     const candidate = safeDecode(sp.quick_employee_id);
     if (!candidate) return "";
-    return employees.some((employee) => employee.id === candidate) ? candidate : "";
+    return employees.some((employee) => employee.id === candidate)
+      ? candidate
+      : "";
   })();
   const quickShiftDate = (() => {
     const candidate = safeDecode(sp.quick_shift_date);
     if (!candidate) return weekDays[0]?.iso ?? "";
-    return weekDays.some((day) => day.iso === candidate) ? candidate : weekDays[0]?.iso ?? "";
+    return weekDays.some((day) => day.iso === candidate)
+      ? candidate
+      : (weekDays[0]?.iso ?? "");
   })();
   const resolveDefaultOperationalRole = (
     targetEmployeeIds: string[],
@@ -2538,16 +3028,21 @@ export default async function StaffSchedulePage({
     areaId?: string | null,
   ) => {
     const existingCode = String(existingRole ?? "").trim();
-    if (existingCode && operationalRoleCodes.has(existingCode)) return existingCode;
+    if (existingCode && operationalRoleCodes.has(existingCode))
+      return existingCode;
 
-    const areaRoleCodes = new Set(getOperationalRoleOptionsForArea(areaId).map((role) => role.code));
+    const areaRoleCodes = new Set(
+      getOperationalRoleOptionsForArea(areaId).map((role) => role.code),
+    );
 
     const profileRoles = [
       ...new Set(
         targetEmployeeIds.flatMap((id) =>
           (operationalProfilesByEmployee.get(id) ?? [])
             .map((profile) => profile.default_operational_role)
-            .filter((role): role is string => Boolean(role && areaRoleCodes.has(role))),
+            .filter((role): role is string =>
+              Boolean(role && areaRoleCodes.has(role)),
+            ),
         ),
       ),
     ];
@@ -2557,7 +3052,9 @@ export default async function StaffSchedulePage({
     const candidateRoles = [
       ...new Set(
         targetEmployeeIds
-          .map((id) => getOperationalRoleCandidateFromBaseRole(employeeMap.get(id)?.role))
+          .map((id) =>
+            getOperationalRoleCandidateFromBaseRole(employeeMap.get(id)?.role),
+          )
           .filter((role) => role && areaRoleCodes.has(role)),
       ),
     ];
@@ -2573,10 +3070,12 @@ export default async function StaffSchedulePage({
   );
   const selectedShift =
     editShiftId && viewMode === "table"
-      ? weekShifts.find((shift) => shift.id === editShiftId) ?? null
+      ? (weekShifts.find((shift) => shift.id === editShiftId) ?? null)
       : null;
   const selectedShiftEmployee = selectedShift
-    ? employees.find((employee) => employee.id === selectedShift.employee_id) ?? null
+    ? (employees.find(
+        (employee) => employee.id === selectedShift.employee_id,
+      ) ?? null)
     : null;
   const selectedShiftAreaId = selectedShift?.area_id ?? "";
   const selectedShiftOperationalRole = resolveDefaultOperationalRole(
@@ -2584,6 +3083,49 @@ export default async function StaffSchedulePage({
     selectedShift?.operational_role,
     selectedShiftAreaId,
   );
+  const scheduleOperationalAlerts = weekShifts
+    .filter((shift) => shift.shift_kind !== "descanso")
+    .flatMap((shift) => {
+      const employee = employeeMap.get(shift.employee_id);
+      const employeeLabel = employee?.full_name ?? employee?.alias ?? "Trabajador";
+      const shiftLabel = `${employeeLabel} · ${shift.shift_date} · ${formatShiftRange(
+        shift.start_time,
+        shift.end_time,
+        shift.show_end_as_close,
+        shift.shift_kind,
+      )}`;
+
+      if (!shift.operational_role) {
+        return [`${shiftLabel}: falta rol operativo.`];
+      }
+
+      const matrixRow =
+        getApplicableOperationalRoleRows(
+          configuredOperationalRoleRows,
+          shift.area_id,
+        ).find((row) => row.role_code === shift.operational_role) ?? null;
+
+      if (!matrixRow) {
+        return [
+          `${shiftLabel}: rol fuera de la matriz activa para su área.`,
+        ];
+      }
+
+      const missingPoints = [
+        matrixRow.requires_external_checkin && !shift.checkin_site_id
+          ? "check-in"
+          : null,
+        matrixRow.requires_external_checkout && !shift.checkout_site_id
+          ? "check-out"
+          : null,
+      ].filter(Boolean);
+
+      return missingPoints.length > 0
+        ? [
+            `${shiftLabel}: falta punto externo de ${missingPoints.join(" y ")}.`,
+          ]
+        : [];
+    });
   const employeesGroupedByArea = (() => {
     const groups = new Map<string, EmployeeRow[]>();
     for (const employee of employees) {
@@ -2594,7 +3136,10 @@ export default async function StaffSchedulePage({
     }
     for (const rows of groups.values()) {
       rows.sort((a, b) =>
-        (a.full_name ?? a.alias ?? a.id).localeCompare(b.full_name ?? b.alias ?? b.id, "es"),
+        (a.full_name ?? a.alias ?? a.id).localeCompare(
+          b.full_name ?? b.alias ?? b.id,
+          "es",
+        ),
       );
     }
     return AREA_ORDER.map((label) => ({
@@ -2617,7 +3162,10 @@ export default async function StaffSchedulePage({
     })),
     { key: "total", label: "Total semana", width: 128, minWidth: 104 },
   ];
-  const scheduleTableInitialWidth = scheduleTableColumns.reduce((total, column) => total + column.width, 0);
+  const scheduleTableInitialWidth = scheduleTableColumns.reduce(
+    (total, column) => total + column.width,
+    0,
+  );
 
   return (
     <div className="space-y-6">
@@ -2629,8 +3177,14 @@ export default async function StaffSchedulePage({
             <Link href="/staff" className="ui-btn ui-btn--ghost">
               Ver trabajadores
             </Link>
-            <Link href={appendReturnParams(buildReturnTo(selectedSiteId, weekStartIso), { view: null }).replace("/staff/schedule", "/staff/schedule/settings")} className="ui-btn ui-btn--ghost">
-              Configuración planner
+            <Link
+              href={appendReturnParams(
+                buildReturnTo(selectedSiteId, weekStartIso),
+                { view: null },
+              ).replace("/staff/schedule", "/staff/schedule/settings")}
+              className="ui-btn ui-btn--ghost"
+            >
+              Configuración de horarios
             </Link>
             <Link href="/staff/new" className="ui-btn ui-btn--ghost">
               Invitar trabajador
@@ -2649,6 +3203,22 @@ export default async function StaffSchedulePage({
           {okMsg}
         </div>
       ) : null}
+      {scheduleOperationalAlerts.length > 0 ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="font-semibold">Revisión operativa pendiente</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {scheduleOperationalAlerts.slice(0, 6).map((alert) => (
+              <li key={alert}>{alert}</li>
+            ))}
+          </ul>
+          {scheduleOperationalAlerts.length > 6 ? (
+            <p className="mt-2 text-xs font-medium">
+              Hay {scheduleOperationalAlerts.length - 6} alertas adicionales
+              en esta semana.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="ui-panel space-y-4">
         <div className="grid gap-3 xl:grid-cols-[minmax(320px,1fr)_minmax(280px,360px)]">
@@ -2659,7 +3229,8 @@ export default async function StaffSchedulePage({
             </div>
             {selectedSiteId ? (
               <p className="mt-1 text-sm text-[var(--ui-muted)]">
-                Solo se muestran trabajadores y turnos de esta sede. Cambia la sede abajo si necesitas otra.
+                Solo se muestran trabajadores y turnos de esta sede. Cambia la
+                sede abajo si necesitas otra.
               </p>
             ) : null}
           </div>
@@ -2667,7 +3238,11 @@ export default async function StaffSchedulePage({
           <form method="get" className="space-y-2">
             <label className="ui-label">Cambiar sede</label>
             <div className="flex gap-2">
-              <select name="site_id" className="ui-input" defaultValue={selectedSiteId}>
+              <select
+                name="site_id"
+                className="ui-input"
+                defaultValue={selectedSiteId}
+              >
                 {sites.map((site) => (
                   <option key={site.id} value={site.id}>
                     {site.name ?? site.code ?? site.id}
@@ -2686,23 +3261,9 @@ export default async function StaffSchedulePage({
             <div className="mr-1 flex items-center gap-1 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1">
               <Link
                 href={buildReturnTo(selectedSiteId, weekStartIso, "table")}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  viewMode === "table"
-                    ? "bg-[var(--ui-brand)] text-white"
-                    : "text-[var(--ui-muted)] hover:bg-[var(--ui-surface-2)]"
-                }`}
+                className="rounded-lg bg-[var(--ui-brand)] px-3 py-1.5 text-xs font-semibold text-white transition"
               >
                 Tabla semanal
-              </Link>
-              <Link
-                href={buildReturnTo(selectedSiteId, weekStartIso, "planner")}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  viewMode === "planner"
-                    ? "bg-[var(--ui-brand)] text-white"
-                    : "text-[var(--ui-muted)] hover:bg-[var(--ui-surface-2)]"
-                }`}
-              >
-                Planner
               </Link>
             </div>
             <div className="flex flex-wrap items-center gap-2 xl:ml-auto">
@@ -2725,7 +3286,10 @@ export default async function StaffSchedulePage({
                   ›
                 </Link>
               </div>
-              <Link href={currentWeekHref} className="ui-btn ui-btn--ghost whitespace-nowrap">
+              <Link
+                href={currentWeekHref}
+                className="ui-btn ui-btn--ghost whitespace-nowrap"
+              >
                 Hoy
               </Link>
               {draftWeekCount > 0 ? (
@@ -2733,7 +3297,10 @@ export default async function StaffSchedulePage({
                   <input type="hidden" name="site_id" value={selectedSiteId} />
                   <input type="hidden" name="week_start" value={weekStartIso} />
                   <input type="hidden" name="return_to" value={returnTo} />
-                  <button type="submit" className="ui-btn ui-btn--ghost whitespace-nowrap text-[var(--ui-danger)]">
+                  <button
+                    type="submit"
+                    className="ui-btn ui-btn--ghost whitespace-nowrap text-[var(--ui-danger)]"
+                  >
                     Descartar borradores
                   </button>
                 </form>
@@ -2753,16 +3320,20 @@ export default async function StaffSchedulePage({
 
       {!selectedSiteId ? (
         <div className="ui-panel">
-          <div className="ui-empty">No hay sedes disponibles para planificar.</div>
+          <div className="ui-empty">
+            No hay sedes disponibles para planificar.
+          </div>
         </div>
       ) : employees.length === 0 ? (
         <div className="ui-panel">
           <div className="ui-empty">
             <p className="font-semibold text-[var(--ui-text)]">
-              No hay trabajadores en {selectedSite?.name ?? selectedSite?.code ?? "esta sede"}.
+              No hay trabajadores en{" "}
+              {selectedSite?.name ?? selectedSite?.code ?? "esta sede"}.
             </p>
             <p className="mt-2 text-sm text-[var(--ui-muted)]">
-              Ve a &quot;Ver trabajadores&quot; o &quot;Invitar trabajador&quot; para asignar gente a la sede y luego planificar turnos aquí.
+              Ve a &quot;Ver trabajadores&quot; o &quot;Invitar trabajador&quot;
+              para asignar gente a la sede y luego planificar turnos aquí.
             </p>
           </div>
         </div>
@@ -2770,41 +3341,347 @@ export default async function StaffSchedulePage({
         <div className="space-y-3">
           <div className="flex justify-end">
             <Link
-              href={appendReturnParams(buildReturnTo(selectedSiteId, weekStartIso), { view: null }).replace("/staff/schedule", "/staff/schedule/settings")}
+              href={appendReturnParams(
+                buildReturnTo(selectedSiteId, weekStartIso),
+                { view: null },
+              ).replace("/staff/schedule", "/staff/schedule/settings")}
               className="text-sm text-[var(--ui-muted)] underline-offset-4 transition hover:text-[var(--ui-text)] hover:underline"
             >
               Configurar cobertura, disponibilidad y reglas del planificador
             </Link>
           </div>
-        {viewMode === "table" ? (
-          <div className="space-y-3" data-schedule-table-shell>
-            {selectedShift ? (
+          {viewMode === "table" ? (
+            <div className="space-y-3" data-schedule-table-shell>
+              {selectedShift ? (
+                <div className="ui-panel">
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="ui-h3">Editar turno seleccionado</div>
+                      <p className="text-xs text-[var(--ui-muted)]">
+                        {selectedShiftEmployee?.full_name ??
+                          selectedShiftEmployee?.alias ??
+                          selectedShift.employee_id}{" "}
+                        · {selectedShift.shift_date} ·{" "}
+                        {formatShiftRange(
+                          selectedShift.start_time,
+                          selectedShift.end_time,
+                          selectedShift.show_end_as_close,
+                          selectedShift.shift_kind,
+                        )}
+                      </p>
+                    </div>
+                    <Link
+                      href={returnToWithoutEdit}
+                      className="ui-btn ui-btn--ghost ui-btn--sm"
+                    >
+                      Cerrar edición
+                    </Link>
+                  </div>
+                  <form
+                    action={saveShiftAction}
+                    className="grid gap-3 md:grid-cols-8"
+                    data-operational-context-form
+                  >
+                    <input
+                      type="hidden"
+                      name="shift_id"
+                      value={selectedShift.id}
+                    />
+                    <input
+                      type="hidden"
+                      name="site_id"
+                      value={selectedSiteId}
+                    />
+                    <input
+                      type="hidden"
+                      name="return_to"
+                      value={returnToWithoutEdit}
+                    />
+
+                    <label className="flex flex-col gap-1 md:col-span-2">
+                      <span className="ui-label">Trabajador</span>
+                      <select
+                        name="employee_id"
+                        className="ui-input"
+                        required
+                        defaultValue={selectedShift.employee_id}
+                      >
+                        {employees.map((employee) => (
+                          <option
+                            key={employee.id}
+                            value={employee.id}
+                            data-operational-role={getOperationalRoleCandidateFromBaseRole(
+                              employee.role,
+                            )}
+                          >
+                            {employee.full_name ??
+                              employee.alias ??
+                              employee.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 md:col-span-2">
+                      <span className="ui-label">Área del turno</span>
+                      <select
+                        name="area_id"
+                        className="ui-input"
+                        defaultValue={selectedShiftAreaId}
+                        data-operational-area-select
+                      >
+                        <option value="">General / sin área</option>
+                        {operationalAreaOptions.map((area) => (
+                          <option key={area.id} value={area.id}>
+                            {area.label}
+                            {area.kind ? ` · ${area.kind}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 md:col-span-2">
+                      <span className="ui-label">Rol operativo del turno</span>
+                      <select
+                        name="operational_role"
+                        className="ui-input"
+                        defaultValue={selectedShiftOperationalRole}
+                        data-operational-role-select
+                        data-site-default-role={getSiteDefaultOperationalRoleForArea(
+                          selectedShiftAreaId,
+                        )}
+                        data-preserve-initial-role="1"
+                      >
+                        <option value="">Seleccionar rol operativo</option>
+                        {selectedShiftOperationalRole &&
+                        !operationalRoleCodes.has(
+                          selectedShiftOperationalRole,
+                        ) ? (
+                          <option
+                            value={selectedShiftOperationalRole}
+                            data-area-id={selectedShiftAreaId}
+                          >
+                            {getOperationalRoleLabel(
+                              selectedShiftOperationalRole,
+                              operationalRoleOptions,
+                            )}
+                          </option>
+                        ) : null}
+                        {operationalRoleSelectOptions.map((role) => (
+                          <option
+                            key={`${role.areaId ?? "general"}-${role.code}`}
+                            value={role.code}
+                            data-area-id={role.areaId ?? ""}
+                            data-is-default={role.isDefault ? "1" : "0"}
+                            data-requires-checkin={
+                              role.requiresExternalCheckin ? "1" : "0"
+                            }
+                            data-requires-checkout={
+                              role.requiresExternalCheckout ? "1" : "0"
+                            }
+                          >
+                            {role.label}
+                            {role.requiresExternalCheckin ||
+                            role.requiresExternalCheckout
+                              ? " · punto externo"
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label
+                      className="flex flex-col gap-1 md:col-span-2"
+                      data-external-checkin-row
+                    >
+                      <span className="ui-label">Punto check-in</span>
+                      <select
+                        name="checkin_site_id"
+                        className="ui-input"
+                        defaultValue={selectedShift.checkin_site_id ?? ""}
+                        data-external-checkin-select
+                      >
+                        <option value="">Usar perfil / sede</option>
+                        {sites.map((site) => (
+                          <option key={site.id} value={site.id}>
+                            {site.name ?? site.code ?? site.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label
+                      className="flex flex-col gap-1 md:col-span-2"
+                      data-external-checkout-row
+                    >
+                      <span className="ui-label">Punto check-out</span>
+                      <select
+                        name="checkout_site_id"
+                        className="ui-input"
+                        defaultValue={selectedShift.checkout_site_id ?? ""}
+                        data-external-checkout-select
+                      >
+                        <option value="">Usar perfil / sede</option>
+                        {sites.map((site) => (
+                          <option key={site.id} value={site.id}>
+                            {site.name ?? site.code ?? site.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Día</span>
+                      <input
+                        name="shift_date"
+                        type="date"
+                        className="ui-input"
+                        required
+                        defaultValue={selectedShift.shift_date}
+                        min={weekDays[0]?.iso ?? undefined}
+                        max={weekDays[6]?.iso ?? undefined}
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Inicio</span>
+                      <input
+                        name="start_time"
+                        type="time"
+                        className="ui-input"
+                        required
+                        defaultValue={selectedShift.start_time.slice(0, 5)}
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Fin</span>
+                      <input
+                        name="end_time"
+                        type="time"
+                        className="ui-input"
+                        required
+                        defaultValue={selectedShift.end_time.slice(0, 5)}
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Descanso (min)</span>
+                      <input
+                        name="break_minutes"
+                        type="number"
+                        min={0}
+                        className="ui-input"
+                        defaultValue={selectedShift.break_minutes ?? 0}
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="ui-label">Estado</span>
+                      <select
+                        name="status"
+                        className="ui-input"
+                        defaultValue={selectedShift.status}
+                      >
+                        <option value="scheduled">Programado</option>
+                        <option value="confirmed">Confirmado</option>
+                        <option value="completed">Completado</option>
+                        <option value="cancelled">Cancelado</option>
+                        <option value="no_show">No asistió</option>
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 md:col-span-6">
+                      <span className="ui-label">Nota</span>
+                      <input
+                        name="notes"
+                        className="ui-input"
+                        defaultValue={selectedShift.notes ?? ""}
+                      />
+                    </label>
+
+                    <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                      <input
+                        type="checkbox"
+                        name="show_end_as_close"
+                        value="1"
+                        defaultChecked={Boolean(
+                          selectedShift.show_end_as_close,
+                        )}
+                        className="rounded border-[var(--ui-border)]"
+                      />
+                      Mostrar la salida de este bloque como &quot;Cierre&quot;
+                      al empleado
+                    </label>
+
+                    <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                      <input
+                        type="checkbox"
+                        name="full_day_rest"
+                        value="1"
+                        defaultChecked={selectedShift.shift_kind === "descanso"}
+                        className="rounded border-[var(--ui-border)]"
+                      />
+                      Marcar este día como descanso
+                    </label>
+
+                    <div className="flex items-end md:col-span-1">
+                      <button
+                        type="submit"
+                        className="ui-btn ui-btn--brand w-full"
+                      >
+                        Guardar cambios
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : null}
+
               <div className="ui-panel">
-                <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <div className="ui-h3">Editar turno seleccionado</div>
+                    <div className="ui-h3">Agregar turno por horas</div>
                     <p className="text-xs text-[var(--ui-muted)]">
-                      {selectedShiftEmployee?.full_name ?? selectedShiftEmployee?.alias ?? selectedShift.employee_id} ·{" "}
-                      {selectedShift.shift_date} · {formatShiftRange(selectedShift.start_time, selectedShift.end_time, selectedShift.show_end_as_close, selectedShift.shift_kind)}
+                      Flujo rápido: eliges persona, día y uno o varios bloques
+                      horarios. Cada bloque se guarda como una fila
+                      independiente.
                     </p>
                   </div>
-                  <Link href={returnToWithoutEdit} className="ui-btn ui-btn--ghost ui-btn--sm">
-                    Cerrar edición
-                  </Link>
                 </div>
-                <form action={saveShiftAction} className="grid gap-3 md:grid-cols-8" data-operational-context-form>
-                  <input type="hidden" name="shift_id" value={selectedShift.id} />
+                <form
+                  action={saveShiftAction}
+                  className="grid gap-3 md:grid-cols-6"
+                  data-quick-shift-form
+                  data-operational-context-form
+                >
                   <input type="hidden" name="site_id" value={selectedSiteId} />
-                  <input type="hidden" name="return_to" value={returnToWithoutEdit} />
+                  <input
+                    type="hidden"
+                    name="return_to"
+                    value={returnToWithoutEdit}
+                  />
+                  <input type="hidden" name="break_minutes" value="0" />
+                  <input type="hidden" name="status" value="scheduled" />
+                  <input type="hidden" name="keep_quick" value="1" />
 
                   <label className="flex flex-col gap-1 md:col-span-2">
                     <span className="ui-label">Trabajador</span>
-                    <select name="employee_id" className="ui-input" required defaultValue={selectedShift.employee_id}>
+                    <select
+                      name="employee_id"
+                      className="ui-input"
+                      required
+                      defaultValue={quickEmployeeId}
+                    >
+                      <option value="" disabled>
+                        Seleccionar
+                      </option>
                       {employees.map((employee) => (
                         <option
                           key={employee.id}
                           value={employee.id}
-                          data-operational-role={getOperationalRoleCandidateFromBaseRole(employee.role)}
+                          data-operational-role={getOperationalRoleCandidateFromBaseRole(
+                            employee.role,
+                          )}
                         >
                           {employee.full_name ?? employee.alias ?? employee.id}
                         </option>
@@ -2814,50 +3691,66 @@ export default async function StaffSchedulePage({
 
                   <label className="flex flex-col gap-1 md:col-span-2">
                     <span className="ui-label">Área del turno</span>
-                    <select name="area_id" className="ui-input" defaultValue={selectedShiftAreaId} data-operational-area-select>
+                    <select
+                      name="area_id"
+                      className="ui-input"
+                      defaultValue={quickShiftAreaId}
+                      data-operational-area-select
+                    >
                       <option value="">General / sin área</option>
                       {operationalAreaOptions.map((area) => (
                         <option key={area.id} value={area.id}>
-                          {area.label}{area.kind ? ` · ${area.kind}` : ""}
+                          {area.label}
+                          {area.kind ? ` · ${area.kind}` : ""}
                         </option>
                       ))}
                     </select>
                   </label>
 
                   <label className="flex flex-col gap-1 md:col-span-2">
-                    <span className="ui-label">Rol operativo del turno</span>
+                    <span className="ui-label">Rol operativo</span>
                     <select
                       name="operational_role"
                       className="ui-input"
-                      defaultValue={selectedShiftOperationalRole}
+                      defaultValue={quickShiftOperationalRole}
                       data-operational-role-select
-                      data-site-default-role={getSiteDefaultOperationalRoleForArea(selectedShiftAreaId)}
-                      data-preserve-initial-role="1"
+                      data-site-default-role={siteDefaultOperationalRole}
                     >
                       <option value="">Seleccionar rol operativo</option>
-                      {selectedShiftOperationalRole && !operationalRoleCodes.has(selectedShiftOperationalRole) ? (
-                        <option value={selectedShiftOperationalRole} data-area-id={selectedShiftAreaId}>
-                          {getOperationalRoleLabel(selectedShiftOperationalRole, operationalRoleOptions)}
-                        </option>
-                      ) : null}
                       {operationalRoleSelectOptions.map((role) => (
                         <option
                           key={`${role.areaId ?? "general"}-${role.code}`}
                           value={role.code}
                           data-area-id={role.areaId ?? ""}
                           data-is-default={role.isDefault ? "1" : "0"}
-                          data-requires-checkin={role.requiresExternalCheckin ? "1" : "0"}
-                          data-requires-checkout={role.requiresExternalCheckout ? "1" : "0"}
+                          data-requires-checkin={
+                            role.requiresExternalCheckin ? "1" : "0"
+                          }
+                          data-requires-checkout={
+                            role.requiresExternalCheckout ? "1" : "0"
+                          }
                         >
-                          {role.label}{role.requiresExternalCheckin || role.requiresExternalCheckout ? " · punto externo" : ""}
+                          {role.label}
+                          {role.requiresExternalCheckin ||
+                          role.requiresExternalCheckout
+                            ? " · punto externo"
+                            : ""}
                         </option>
                       ))}
                     </select>
                   </label>
 
-                  <label className="flex flex-col gap-1 md:col-span-2" data-external-checkin-row>
+                  <label
+                    className="flex flex-col gap-1 md:col-span-3"
+                    data-external-checkin-row
+                  >
                     <span className="ui-label">Punto check-in</span>
-                    <select name="checkin_site_id" className="ui-input" defaultValue={selectedShift.checkin_site_id ?? ""} data-external-checkin-select>
+                    <select
+                      name="checkin_site_id"
+                      className="ui-input"
+                      defaultValue=""
+                      data-external-checkin-select
+                    >
                       <option value="">Usar perfil / sede</option>
                       {sites.map((site) => (
                         <option key={site.id} value={site.id}>
@@ -2867,9 +3760,17 @@ export default async function StaffSchedulePage({
                     </select>
                   </label>
 
-                  <label className="flex flex-col gap-1 md:col-span-2" data-external-checkout-row>
+                  <label
+                    className="flex flex-col gap-1 md:col-span-3"
+                    data-external-checkout-row
+                  >
                     <span className="ui-label">Punto check-out</span>
-                    <select name="checkout_site_id" className="ui-input" defaultValue={selectedShift.checkout_site_id ?? ""} data-external-checkout-select>
+                    <select
+                      name="checkout_site_id"
+                      className="ui-input"
+                      defaultValue=""
+                      data-external-checkout-select
+                    >
                       <option value="">Usar perfil / sede</option>
                       {sites.map((site) => (
                         <option key={site.id} value={site.id}>
@@ -2879,265 +3780,121 @@ export default async function StaffSchedulePage({
                     </select>
                   </label>
 
-                  <label className="flex flex-col gap-1">
-                    <span className="ui-label">Día</span>
+                  <label
+                    className="flex flex-col gap-1"
+                    data-quick-shift-time-control
+                  >
+                    <span className="ui-label">Día bloque 1</span>
                     <input
-                      name="shift_date"
+                      name="block_shift_date"
                       type="date"
                       className="ui-input"
                       required
-                      defaultValue={selectedShift.shift_date}
+                      defaultValue={quickShiftDate}
                       min={weekDays[0]?.iso ?? undefined}
                       max={weekDays[6]?.iso ?? undefined}
                     />
                   </label>
 
-                  <label className="flex flex-col gap-1">
-                    <span className="ui-label">Inicio</span>
+                  <label
+                    className="flex flex-col gap-1"
+                    data-quick-shift-time-control
+                  >
+                    <span className="ui-label">Inicio bloque 1</span>
                     <input
-                      name="start_time"
+                      name="block_start_time"
                       type="time"
                       className="ui-input"
                       required
-                      defaultValue={selectedShift.start_time.slice(0, 5)}
+                      defaultValue="06:00"
+                      data-quick-shift-time-input
                     />
                   </label>
 
-                  <label className="flex flex-col gap-1">
-                    <span className="ui-label">Fin</span>
+                  <label
+                    className="flex flex-col gap-1"
+                    data-quick-shift-time-control
+                  >
+                    <span className="ui-label">Fin bloque 1</span>
                     <input
-                      name="end_time"
+                      name="block_end_time"
                       type="time"
                       className="ui-input"
                       required
-                      defaultValue={selectedShift.end_time.slice(0, 5)}
+                      defaultValue="14:00"
+                      data-quick-shift-time-input
                     />
-                  </label>
-
-                  <label className="flex flex-col gap-1">
-                    <span className="ui-label">Descanso (min)</span>
-                    <input
-                      name="break_minutes"
-                      type="number"
-                      min={0}
-                      className="ui-input"
-                      defaultValue={selectedShift.break_minutes ?? 0}
-                    />
-                  </label>
-
-                  <label className="flex flex-col gap-1">
-                    <span className="ui-label">Estado</span>
-                    <select name="status" className="ui-input" defaultValue={selectedShift.status}>
-                      <option value="scheduled">Programado</option>
-                      <option value="confirmed">Confirmado</option>
-                      <option value="completed">Completado</option>
-                      <option value="cancelled">Cancelado</option>
-                      <option value="no_show">No asistió</option>
-                    </select>
                   </label>
 
                   <label className="flex flex-col gap-1 md:col-span-6">
-                    <span className="ui-label">Nota</span>
-                    <input name="notes" className="ui-input" defaultValue={selectedShift.notes ?? ""} />
+                    <span className="ui-label">Nota bloque 1</span>
+                    <input
+                      name="block_notes"
+                      className="ui-input"
+                      placeholder="Ej. Cajero, apoyo barra, cierre"
+                      maxLength={240}
+                    />
                   </label>
 
                   <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                    <input
+                      type="checkbox"
+                      name="block_rest_day"
+                      value="0"
+                      className="rounded border-[var(--ui-border)]"
+                      data-block-rest-day-toggle
+                    />
+                    Marcar este día como descanso completo
+                  </label>
+
+                  <div className="contents" data-quick-shift-extra-blocks />
+
+                  <div
+                    className="flex flex-wrap items-center gap-2 md:col-span-6"
+                    data-quick-shift-add-row
+                  >
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn--ghost ui-btn--sm"
+                      data-add-shift-block
+                    >
+                      + Agregar otro bloque o día
+                    </button>
+                    <span className="text-xs text-[var(--ui-muted)]">
+                      Úsalo para cargar varios bloques o varios días del mismo
+                      trabajador.
+                    </span>
+                  </div>
+
+                  <label
+                    className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]"
+                    data-quick-shift-close-row
+                  >
                     <input
                       type="checkbox"
                       name="show_end_as_close"
                       value="1"
-                      defaultChecked={Boolean(selectedShift.show_end_as_close)}
                       className="rounded border-[var(--ui-border)]"
+                      data-quick-shift-close-input
                     />
-                    Mostrar la salida de este bloque como &quot;Cierre&quot; al empleado
+                    Mostrar la salida del último bloque como &quot;Cierre&quot;
+                    al empleado
                   </label>
 
-                  <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                    <input
-                      type="checkbox"
-                      name="full_day_rest"
-                      value="1"
-                      defaultChecked={selectedShift.shift_kind === "descanso"}
-                      className="rounded border-[var(--ui-border)]"
-                    />
-                    Marcar este día como descanso
-                  </label>
-
-                  <div className="flex items-end md:col-span-1">
-                    <button type="submit" className="ui-btn ui-btn--brand w-full">
-                      Guardar cambios
+                  <div className="flex items-end">
+                    <button
+                      type="submit"
+                      className="ui-btn ui-btn--brand w-full"
+                    >
+                      Guardar turno
                     </button>
                   </div>
                 </form>
-              </div>
-            ) : null}
-
-            <div className="ui-panel">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="ui-h3">Agregar turno por horas</div>
-                  <p className="text-xs text-[var(--ui-muted)]">
-                    Flujo rápido: eliges persona, día y uno o varios bloques horarios. Cada bloque se guarda como una fila independiente.
-                  </p>
-                </div>
-              </div>
-              <form action={saveShiftAction} className="grid gap-3 md:grid-cols-6" data-quick-shift-form data-operational-context-form>
-                <input type="hidden" name="site_id" value={selectedSiteId} />
-                <input type="hidden" name="return_to" value={returnToWithoutEdit} />
-                <input type="hidden" name="break_minutes" value="0" />
-                <input type="hidden" name="status" value="scheduled" />
-                <input type="hidden" name="keep_quick" value="1" />
-
-                <label className="flex flex-col gap-1 md:col-span-2">
-                  <span className="ui-label">Trabajador</span>
-                  <select name="employee_id" className="ui-input" required defaultValue={quickEmployeeId}>
-                    <option value="" disabled>Seleccionar</option>
-                    {employees.map((employee) => (
-                      <option
-                        key={employee.id}
-                        value={employee.id}
-                        data-operational-role={getOperationalRoleCandidateFromBaseRole(employee.role)}
-                      >
-                        {employee.full_name ?? employee.alias ?? employee.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="flex flex-col gap-1 md:col-span-2">
-                  <span className="ui-label">Área del turno</span>
-                  <select name="area_id" className="ui-input" defaultValue={quickShiftAreaId} data-operational-area-select>
-                    <option value="">General / sin área</option>
-                    {operationalAreaOptions.map((area) => (
-                      <option key={area.id} value={area.id}>
-                        {area.label}{area.kind ? ` · ${area.kind}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="flex flex-col gap-1 md:col-span-2">
-                  <span className="ui-label">Rol operativo</span>
-                  <select
-                    name="operational_role"
-                    className="ui-input"
-                    defaultValue={quickShiftOperationalRole}
-                    data-operational-role-select
-                    data-site-default-role={siteDefaultOperationalRole}
-                  >
-                    <option value="">Seleccionar rol operativo</option>
-                    {operationalRoleSelectOptions.map((role) => (
-                      <option
-                        key={`${role.areaId ?? "general"}-${role.code}`}
-                        value={role.code}
-                        data-area-id={role.areaId ?? ""}
-                        data-is-default={role.isDefault ? "1" : "0"}
-                        data-requires-checkin={role.requiresExternalCheckin ? "1" : "0"}
-                        data-requires-checkout={role.requiresExternalCheckout ? "1" : "0"}
-                      >
-                        {role.label}{role.requiresExternalCheckin || role.requiresExternalCheckout ? " · punto externo" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="flex flex-col gap-1 md:col-span-3" data-external-checkin-row>
-                  <span className="ui-label">Punto check-in</span>
-                  <select name="checkin_site_id" className="ui-input" defaultValue="" data-external-checkin-select>
-                    <option value="">Usar perfil / sede</option>
-                    {sites.map((site) => (
-                      <option key={site.id} value={site.id}>
-                        {site.name ?? site.code ?? site.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="flex flex-col gap-1 md:col-span-3" data-external-checkout-row>
-                  <span className="ui-label">Punto check-out</span>
-                  <select name="checkout_site_id" className="ui-input" defaultValue="" data-external-checkout-select>
-                    <option value="">Usar perfil / sede</option>
-                    {sites.map((site) => (
-                      <option key={site.id} value={site.id}>
-                        {site.name ?? site.code ?? site.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="flex flex-col gap-1" data-quick-shift-time-control>
-                  <span className="ui-label">Día bloque 1</span>
-                  <input
-                    name="block_shift_date"
-                    type="date"
-                    className="ui-input"
-                    required
-                    defaultValue={quickShiftDate}
-                    min={weekDays[0]?.iso ?? undefined}
-                    max={weekDays[6]?.iso ?? undefined}
-                  />
-                </label>
-
-                <label className="flex flex-col gap-1" data-quick-shift-time-control>
-                  <span className="ui-label">Inicio bloque 1</span>
-                  <input name="block_start_time" type="time" className="ui-input" required defaultValue="06:00" data-quick-shift-time-input />
-                </label>
-
-                <label className="flex flex-col gap-1" data-quick-shift-time-control>
-                  <span className="ui-label">Fin bloque 1</span>
-                  <input name="block_end_time" type="time" className="ui-input" required defaultValue="14:00" data-quick-shift-time-input />
-                </label>
-
-                <label className="flex flex-col gap-1 md:col-span-6">
-                  <span className="ui-label">Nota bloque 1</span>
-                  <input name="block_notes" className="ui-input" placeholder="Ej. Cajero, apoyo barra, cierre" maxLength={240} />
-                </label>
-
-                <div className="contents" data-quick-shift-extra-blocks />
-
-                <div className="flex flex-wrap items-center gap-2 md:col-span-6" data-quick-shift-add-row>
-                  <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" data-add-shift-block>
-                    + Agregar otro bloque o día
-                  </button>
-                  <span className="text-xs text-[var(--ui-muted)]">
-                    Úsalo para cargar varios bloques o varios días del mismo trabajador.
-                  </span>
-                </div>
-
-                <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]" data-quick-shift-close-row>
-                  <input
-                    type="checkbox"
-                    name="show_end_as_close"
-                    value="1"
-                    className="rounded border-[var(--ui-border)]"
-                    data-quick-shift-close-input
-                  />
-                  Mostrar la salida del último bloque como &quot;Cierre&quot; al empleado
-                </label>
-
-                <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]" data-quick-shift-rest-row>
-                  <input
-                    type="checkbox"
-                    name="full_day_rest"
-                    value="1"
-                    className="rounded border-[var(--ui-border)]"
-                    data-full-day-rest-toggle
-                  />
-                  Marcar este día como descanso
-                </label>
-
-                <p className="hidden text-xs text-[var(--ui-muted)] md:col-span-6" data-quick-shift-rest-help>
-                  Se guardará un único registro de descanso para todo el día. No se crearán bloques horarios laborales.
-                </p>
-
-                <div className="flex items-end">
-                  <button type="submit" className="ui-btn ui-btn--brand w-full">
-                    Guardar turno
-                  </button>
-                </div>
-              </form>
-              <Script id="viso-quick-shift-blocks" strategy="afterInteractive">
-                {`
+                <Script
+                  id="viso-quick-shift-blocks"
+                  strategy="afterInteractive"
+                >
+                  {`
                   (function () {
                     var draftKey = "viso:quick-shift-draft:" + window.location.pathname + ":" + (new URLSearchParams(window.location.search).get("site_id") || "site");
 
@@ -3182,8 +3939,18 @@ export default async function StaffSchedulePage({
                             '<span class="ui-label">Nota bloque ' + index + '</span>' +
                             '<input name="block_notes" class="ui-input" placeholder="Opcional" maxLength="240" />' +
                           '</label>' +
+                          '<label class="inline-flex items-center gap-2 text-sm text-[var(--ui-text)] md:col-span-3">' +
+                            '<input type="checkbox" name="block_rest_day" value="' + (index - 1) + '" class="rounded border-[var(--ui-border)]" data-block-rest-day-toggle />' +
+                            '<span>Marcar este día como descanso completo</span>' +
+                          '</label>' +
                         '</div>';
                       return block;
+                    }
+
+                    function syncBlockRestIndexes(form) {
+                      Array.from(form.querySelectorAll('[data-block-rest-day-toggle]')).forEach(function (input, index) {
+                        input.value = String(index);
+                      });
                     }
 
                     function getBlockRows(form) {
@@ -3191,12 +3958,14 @@ export default async function StaffSchedulePage({
                       var starts = Array.from(form.querySelectorAll('input[name="block_start_time"]'));
                       var ends = Array.from(form.querySelectorAll('input[name="block_end_time"]'));
                       var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
+                      var restInputs = Array.from(form.querySelectorAll('[data-block-rest-day-toggle]'));
                       return dates.map(function (dateInput, index) {
                         return {
                           date: dateInput.value || "",
                           start: starts[index] ? starts[index].value || "" : "",
                           end: ends[index] ? ends[index].value || "" : "",
                           note: notes[index] ? notes[index].value || "" : "",
+                          restDay: Boolean(restInputs[index] && restInputs[index].checked),
                         };
                       });
                     }
@@ -3214,12 +3983,15 @@ export default async function StaffSchedulePage({
                       var starts = Array.from(form.querySelectorAll('input[name="block_start_time"]'));
                       var ends = Array.from(form.querySelectorAll('input[name="block_end_time"]'));
                       var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
+                      var restInputs = Array.from(form.querySelectorAll('[data-block-rest-day-toggle]'));
                       rows.forEach(function (row, index) {
                         if (dates[index]) dates[index].value = row.date || "";
                         if (starts[index]) starts[index].value = row.start || "";
                         if (ends[index]) ends[index].value = row.end || "";
                         if (notes[index]) notes[index].value = row.note || "";
+                        if (restInputs[index]) restInputs[index].checked = Boolean(row.restDay);
                       });
+                      syncBlockRestIndexes(form);
                     }
 
                     function saveDraft(form) {
@@ -3230,7 +4002,6 @@ export default async function StaffSchedulePage({
                         var checkinSelect = form.querySelector("[data-external-checkin-select]");
                         var checkoutSelect = form.querySelector("[data-external-checkout-select]");
                         var closeInput = form.querySelector("[data-quick-shift-close-input]");
-                        var restInput = form.querySelector("[data-full-day-rest-toggle]");
                         window.sessionStorage.setItem(draftKey, JSON.stringify({
                           employeeId: employee ? employee.value || "" : "",
                           areaId: areaSelect ? areaSelect.value || "" : "",
@@ -3238,7 +4009,6 @@ export default async function StaffSchedulePage({
                           checkinSiteId: checkinSelect ? checkinSelect.value || "" : "",
                           checkoutSiteId: checkoutSelect ? checkoutSelect.value || "" : "",
                           showEndAsClose: Boolean(closeInput && closeInput.checked),
-                          fullDayRest: Boolean(restInput && restInput.checked),
                           rows: getBlockRows(form),
                         }));
                       } catch (error) {
@@ -3264,7 +4034,6 @@ export default async function StaffSchedulePage({
                         var checkinSelect = form.querySelector("[data-external-checkin-select]");
                         var checkoutSelect = form.querySelector("[data-external-checkout-select]");
                         var closeInput = form.querySelector("[data-quick-shift-close-input]");
-                        var restInput = form.querySelector("[data-full-day-rest-toggle]");
                         if (employee && draft.employeeId) employee.value = draft.employeeId;
                         if (areaSelect && typeof draft.areaId === "string") areaSelect.value = draft.areaId;
                         if (checkinSelect && typeof draft.checkinSiteId === "string") checkinSelect.value = draft.checkinSiteId;
@@ -3274,7 +4043,6 @@ export default async function StaffSchedulePage({
                           operationalRoleSelect.setAttribute("data-user-changed", "1");
                         }
                         if (closeInput) closeInput.checked = Boolean(draft.showEndAsClose);
-                        if (restInput) restInput.checked = Boolean(draft.fullDayRest);
                         writeRows(form, draft.rows);
                       } catch (error) {
                         try { window.sessionStorage.removeItem(draftKey); } catch (storageError) {}
@@ -3282,8 +4050,7 @@ export default async function StaffSchedulePage({
                     }
 
                     function isRestDay(form) {
-                      var restToggle = form.querySelector("[data-full-day-rest-toggle]");
-                      return Boolean(restToggle && restToggle.checked);
+                      return false;
                     }
 
                     function setElementHidden(element, hidden) {
@@ -3433,39 +4200,11 @@ export default async function StaffSchedulePage({
                     }
 
                     function refreshBlockControls(form) {
-                      var restDay = isRestDay(form);
-                      var optionalBlocks = Array.from(form.querySelectorAll('[data-quick-shift-block="optional"]'));
                       var addButton = form.querySelector("[data-add-shift-block]");
-                      var closeInput = form.querySelector("[data-quick-shift-close-input]");
-                      var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
-
-                      if (restDay) {
-                        optionalBlocks.forEach(function (block) {
-                          block.remove();
-                        });
-                        if (closeInput) closeInput.checked = false;
-                      }
-
-                      form.querySelectorAll("[data-quick-shift-time-control]").forEach(function (element) {
-                        setElementHidden(element, restDay);
-                      });
-                      form.querySelectorAll("[data-quick-shift-time-input]").forEach(function (input) {
-                        input.disabled = restDay;
-                      });
-                      form.querySelectorAll("[data-quick-shift-add-row], [data-quick-shift-close-row]").forEach(function (element) {
-                        setElementHidden(element, restDay);
-                      });
-                      form.querySelectorAll("[data-quick-shift-rest-help]").forEach(function (element) {
-                        setElementHidden(element, !restDay);
-                      });
-
-                      if (operationalRoleSelect) {
-                        operationalRoleSelect.disabled = restDay;
-                      }
 
                       if (addButton) {
-                        addButton.disabled = restDay;
-                        addButton.setAttribute("aria-disabled", restDay ? "true" : "false");
+                        addButton.disabled = false;
+                        addButton.setAttribute("aria-disabled", "false");
                       }
 
                       refreshExternalPointControls(form);
@@ -3475,15 +4214,17 @@ export default async function StaffSchedulePage({
                       if (!form || form.getAttribute("data-quick-shift-ready") === "1") return;
                       form.setAttribute("data-quick-shift-ready", "1");
 
-                      form.querySelectorAll("[data-full-day-rest-toggle]").forEach(function (input) {
-                        input.addEventListener("change", function () {
+                      form.addEventListener("change", function (event) {
+                        var target = event.target;
+                        if (target && target.matches && target.matches("[data-block-rest-day-toggle]")) {
                           refreshBlockControls(form);
-                        });
+                        }
                       });
 
                       initOperationalContextForm(form);
 
                       form.addEventListener("submit", function () {
+                        syncBlockRestIndexes(form);
                         saveDraft(form);
                       });
 
@@ -3504,10 +4245,11 @@ export default async function StaffSchedulePage({
                         var addButton = event.target && event.target.closest ? event.target.closest("[data-add-shift-block]") : null;
                         if (addButton) {
                           var form = addButton.closest("[data-quick-shift-form]");
-                          if (!form || isRestDay(form)) return;
+                          if (!form) return;
                           var container = form.querySelector("[data-quick-shift-extra-blocks]");
                           if (!container) return;
                           container.appendChild(createBlock(form));
+                          syncBlockRestIndexes(form);
                           refreshBlockControls(form);
                           return;
                         }
@@ -3518,6 +4260,7 @@ export default async function StaffSchedulePage({
                         var quickForm = removeButton.closest("[data-quick-shift-form]");
                         if (!block || !quickForm) return;
                         block.remove();
+                        syncBlockRestIndexes(quickForm);
                         refreshBlockControls(quickForm);
                       });
                     }
@@ -3529,85 +4272,93 @@ export default async function StaffSchedulePage({
                     }
                   })();
                 `}
-              </Script>
-            </div>
+                </Script>
+              </div>
 
-            <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-[var(--ui-muted)]">
-                  Ajusta la tabla: arrastra bordes de columnas, arrastra filas desde la línea inferior del trabajador, usa clic derecho en encabezados para ocultar columnas y cambia la densidad visual.
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1 text-xs">
-                    <button
-                      type="button"
-                      data-schedule-density="compact"
-                      className="rounded-lg px-2.5 py-1 font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface)]"
-                    >
-                      Compacta
-                    </button>
-                    <button
-                      type="button"
-                      data-schedule-density="normal"
-                      className="rounded-lg px-2.5 py-1 font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface)]"
-                    >
-                      Normal
-                    </button>
-                    <button
-                      type="button"
-                      data-schedule-density="comfortable"
-                      className="rounded-lg px-2.5 py-1 font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface)]"
-                    >
-                      Cómoda
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    data-schedule-reset-layout
-                    className="ui-btn ui-btn--ghost ui-btn--sm"
-                  >
-                    Restablecer tabla
-                  </button>
-                  <details className="relative" data-schedule-column-menu>
-                    <summary className="ui-btn ui-btn--ghost ui-btn--sm cursor-pointer list-none">
-                      Columnas
-                    </summary>
-                    <div className="absolute right-0 z-30 mt-2 w-72 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 text-sm shadow-xl">
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
-                          Mostrar / ocultar
-                        </span>
-                        <span className="text-[11px] text-[var(--ui-muted)]">1 mínimo visible</span>
-                      </div>
-                      <div className="grid gap-1.5">
-                        {scheduleTableColumns.map((column) => (
-                          <label
-                            key={column.key}
-                            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-[var(--ui-text)] transition hover:bg-[var(--ui-surface-2)]"
-                          >
-                            <input
-                              type="checkbox"
-                              data-schedule-column-toggle={column.key}
-                              defaultChecked
-                              className="rounded border-[var(--ui-border)]"
-                            />
-                            <span className="min-w-0 flex-1 truncate">
-                              {column.subLabel ? `${column.label} · ${column.subLabel}` : column.label}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                      <p className="mt-2 text-[11px] leading-snug text-[var(--ui-muted)]">
-                        También puedes ocultar una columna con clic derecho sobre su encabezado.
-                      </p>
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-[var(--ui-muted)]">
+                    Ajusta la tabla: arrastra bordes de columnas, arrastra filas
+                    desde la línea inferior del trabajador, usa clic derecho en
+                    encabezados para ocultar columnas y cambia la densidad
+                    visual.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1 text-xs">
+                      <button
+                        type="button"
+                        data-schedule-density="compact"
+                        className="rounded-lg px-2.5 py-1 font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface)]"
+                      >
+                        Compacta
+                      </button>
+                      <button
+                        type="button"
+                        data-schedule-density="normal"
+                        className="rounded-lg px-2.5 py-1 font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface)]"
+                      >
+                        Normal
+                      </button>
+                      <button
+                        type="button"
+                        data-schedule-density="comfortable"
+                        className="rounded-lg px-2.5 py-1 font-semibold text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface)]"
+                      >
+                        Cómoda
+                      </button>
                     </div>
-                  </details>
+                    <button
+                      type="button"
+                      data-schedule-reset-layout
+                      className="ui-btn ui-btn--ghost ui-btn--sm"
+                    >
+                      Restablecer tabla
+                    </button>
+                    <details className="relative" data-schedule-column-menu>
+                      <summary className="ui-btn ui-btn--ghost ui-btn--sm cursor-pointer list-none">
+                        Columnas
+                      </summary>
+                      <div className="absolute right-0 z-30 mt-2 w-72 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 text-sm shadow-xl">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+                            Mostrar / ocultar
+                          </span>
+                          <span className="text-[11px] text-[var(--ui-muted)]">
+                            1 mínimo visible
+                          </span>
+                        </div>
+                        <div className="grid gap-1.5">
+                          {scheduleTableColumns.map((column) => (
+                            <label
+                              key={column.key}
+                              className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-[var(--ui-text)] transition hover:bg-[var(--ui-surface-2)]"
+                            >
+                              <input
+                                type="checkbox"
+                                data-schedule-column-toggle={column.key}
+                                defaultChecked
+                                className="rounded border-[var(--ui-border)]"
+                              />
+                              <span className="min-w-0 flex-1 truncate">
+                                {column.subLabel
+                                  ? `${column.label} · ${column.subLabel}`
+                                  : column.label}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-[11px] leading-snug text-[var(--ui-muted)]">
+                          También puedes ocultar una columna con clic derecho
+                          sobre su encabezado.
+                        </p>
+                      </div>
+                    </details>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="ui-panel p-0 overflow-hidden">
-              <style>{`
+              <div className="ui-panel p-0 overflow-hidden">
+                <style>{`
                 [data-schedule-table] {
                   --schedule-cell-y: 0.625rem;
                   --schedule-shift-y: 0.375rem;
@@ -3693,162 +4444,260 @@ export default async function StaffSchedulePage({
                   display: none;
                 }
               `}</style>
-              <div className="overflow-auto ui-scrollbar-subtle">
-                <table
-                  className="w-full border-collapse text-sm"
-                  data-schedule-table
-                  data-storage-key={`viso:schedule-table:v2:${selectedSiteId || "global"}`}
-                  style={{ minWidth: scheduleTableInitialWidth }}
-                >
-                  <colgroup>
-                    {scheduleTableColumns.map((column) => (
-                      <col
-                        key={column.key}
-                        data-schedule-column={column.key}
-                        data-default-width={column.width}
-                        data-min-width={column.minWidth}
-                        style={{ width: column.width }}
-                      />
-                    ))}
-                  </colgroup>
-                  <thead className="bg-[var(--ui-surface-2)] text-xs uppercase tracking-wide text-[var(--ui-muted)]">
-                    <tr>
+                <div className="overflow-auto ui-scrollbar-subtle">
+                  <table
+                    className="w-full border-collapse text-sm"
+                    data-schedule-table
+                    data-storage-key={`viso:schedule-table:v2:${selectedSiteId || "global"}`}
+                    style={{ minWidth: scheduleTableInitialWidth }}
+                  >
+                    <colgroup>
                       {scheduleTableColumns.map((column) => (
-                        <th
+                        <col
                           key={column.key}
                           data-schedule-column={column.key}
-                          data-schedule-cell
-                          className="relative border-b border-r border-[var(--ui-border)] px-3 text-left last:border-r-0"
-                          title="Arrastra el borde derecho para cambiar ancho. Clic derecho para ocultar columna."
-                        >
-                          <div className="min-w-0 pr-3">
-                            <div className="truncate">{column.label}</div>
-                            {column.subLabel ? (
-                              <div className="mt-0.5 text-[11px] normal-case tracking-normal">
-                                {column.subLabel}
-                              </div>
-                            ) : null}
-                          </div>
-                          <button
-                            type="button"
-                            data-schedule-resize-handle={column.key}
-                            aria-label={`Cambiar ancho de columna ${column.label}`}
-                          />
-                        </th>
+                          data-default-width={column.width}
+                          data-min-width={column.minWidth}
+                          style={{ width: column.width }}
+                        />
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {employeesGroupedByArea.flatMap((group) => [
-                      <tr key={`area-${group.label}`} className={group.visual.rowClass}>
-                        <td
-                          colSpan={scheduleTableColumns.length}
-                          data-schedule-area-row
-                          data-schedule-cell
-                          className="border-b border-t border-[var(--ui-border)] px-3 text-sm font-bold uppercase tracking-wide text-[var(--ui-text)]"
-                        >
-                          {group.label}
-                        </td>
-                      </tr>,
-                      ...group.employees.map((employee) => {
-                        const employeeName = employee.full_name ?? employee.alias ?? employee.id;
-                        const weekMinutes = totalsByEmployee[employee.id]?.weekMinutes ?? 0;
-                        const areaVisual = getAreaVisualFromRole(employee.role);
-                        return (
-                          <tr
-                            key={employee.id}
-                            data-schedule-row={employee.id}
-                            className={`align-top ${areaVisual.rowClass}`}
+                    </colgroup>
+                    <thead className="bg-[var(--ui-surface-2)] text-xs uppercase tracking-wide text-[var(--ui-muted)]">
+                      <tr>
+                        {scheduleTableColumns.map((column) => (
+                          <th
+                            key={column.key}
+                            data-schedule-column={column.key}
+                            data-schedule-cell
+                            className="relative border-b border-r border-[var(--ui-border)] px-3 text-left last:border-r-0"
+                            title="Arrastra el borde derecho para cambiar ancho. Clic derecho para ocultar columna."
                           >
-                            <td
-                              data-schedule-column="area"
-                              data-schedule-cell
-                              className="border-b border-r border-[var(--ui-border)] px-3"
+                            <div className="min-w-0 pr-3">
+                              <div className="truncate">{column.label}</div>
+                              {column.subLabel ? (
+                                <div className="mt-0.5 text-[11px] normal-case tracking-normal">
+                                  {column.subLabel}
+                                </div>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              data-schedule-resize-handle={column.key}
+                              aria-label={`Cambiar ancho de columna ${column.label}`}
+                            />
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {employeesGroupedByArea.flatMap((group) => [
+                        <tr
+                          key={`area-${group.label}`}
+                          className={group.visual.rowClass}
+                        >
+                          <td
+                            colSpan={scheduleTableColumns.length}
+                            data-schedule-area-row
+                            data-schedule-cell
+                            className="border-b border-t border-[var(--ui-border)] px-3 text-sm font-bold uppercase tracking-wide text-[var(--ui-text)]"
+                          >
+                            {group.label}
+                          </td>
+                        </tr>,
+                        ...group.employees.map((employee) => {
+                          const employeeName =
+                            employee.full_name ?? employee.alias ?? employee.id;
+                          const weekMinutes =
+                            totalsByEmployee[employee.id]?.weekMinutes ?? 0;
+                          const areaVisual = getAreaVisualFromRole(
+                            employee.role,
+                          );
+                          return (
+                            <tr
+                              key={employee.id}
+                              data-schedule-row={employee.id}
+                              className={`align-top ${areaVisual.rowClass}`}
                             >
-                              <span className={`inline-flex max-w-full rounded-full border px-2 py-0.5 text-[11px] font-semibold ${areaVisual.chipClass}`}>
-                                {areaVisual.label}
-                              </span>
-                            </td>
-                            <td
-                              data-schedule-column="worker"
-                              data-schedule-cell
-                              className="relative border-b border-r border-[var(--ui-border)] px-3 font-semibold text-[var(--ui-text)]"
-                            >
-                              <div className="min-w-0 leading-snug">{employeeName}</div>
-                              <button
-                                type="button"
-                                data-schedule-row-resizer={employee.id}
-                                aria-label={`Cambiar alto de fila de ${employeeName}`}
-                              />
-                            </td>
-                            <td
-                              data-schedule-column="role"
-                              data-schedule-cell
-                              className="border-b border-r border-[var(--ui-border)] px-3 text-[var(--ui-muted)]"
-                            >
-                              {employee.role ?? "Sin rol"}
-                            </td>
-                            {weekDays.map((day, dayIndex) => {
-                              const dayRows = shiftsByEmployeeDay.get(`${employee.id}__${day.iso}`) ?? [];
-                              return (
-                                <td
-                                  key={`${employee.id}-${day.iso}`}
-                                  data-schedule-column={`day-${dayIndex}`}
-                                  data-schedule-cell
-                                  className="border-b border-r border-[var(--ui-border)] px-2.5 align-top"
+                              <td
+                                data-schedule-column="area"
+                                data-schedule-cell
+                                className="border-b border-r border-[var(--ui-border)] px-3"
+                              >
+                                <span
+                                  className={`inline-flex max-w-full rounded-full border px-2 py-0.5 text-[11px] font-semibold ${areaVisual.chipClass}`}
                                 >
-                                  {dayRows.length === 0 ? (
-                                    <span className="text-xs text-[var(--ui-muted)]">—</span>
-                                  ) : (
-                                    <div className="flex flex-wrap items-stretch gap-1.5">
-                                      {dayRows.map((shift) => (
-                                        <Link
-                                          key={shift.id}
-                                          href={appendReturnParams(returnTo, { edit_shift: shift.id })}
-                                          data-schedule-shift-card
-                                          className={`flex min-w-[78px] flex-1 basis-[78px] flex-col rounded-lg border px-2 no-underline ${areaVisual.shiftClass} ${
-                                            shift.published_at ? "ring-1 ring-emerald-300/70" : "ring-1 ring-amber-300/70"
-                                          } ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
-                                          title={shift.notes ?? ""}
-                                        >
-                                          <div className="text-xs font-semibold leading-snug text-[var(--ui-text)]">
-                                            {formatShiftRange(shift.start_time, shift.end_time, shift.show_end_as_close, shift.shift_kind)}
-                                          </div>
-                                          <div className="mt-0.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] leading-tight text-[var(--ui-muted)]">
-                                            {shift.shift_kind === "descanso" ? (
-                                              <span>Día libre</span>
-                                            ) : (
-                                              <>
-                                                <span>{visibleStatusByShiftId[shift.id] ?? "Programado"}</span>
-                                                <span>{shift.operational_role ? getOperationalRoleLabel(shift.operational_role, operationalRoleOptions) : formatHoursCompact(getShiftMinutes(shift))}</span>
-                                              </>
-                                            )}
-                                          </div>
-                                        </Link>
-                                      ))}
-                                    </div>
-                                  )}
-                                </td>
-                              );
-                            })}
-                            <td
-                              data-schedule-column="total"
-                              data-schedule-cell
-                              className="border-b border-[var(--ui-border)] px-3"
-                            >
-                              <span className="inline-flex max-w-full rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-xs font-semibold text-[var(--ui-text)]">
-                                {formatHoursCompact(weekMinutes)}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      }),
-                    ])}
-                  </tbody>
-                </table>
-              </div>
-              <Script id="viso-schedule-table-tools" strategy="afterInteractive">
-                {`
+                                  {areaVisual.label}
+                                </span>
+                              </td>
+                              <td
+                                data-schedule-column="worker"
+                                data-schedule-cell
+                                className="relative border-b border-r border-[var(--ui-border)] px-3 font-semibold text-[var(--ui-text)]"
+                              >
+                                <div className="min-w-0 leading-snug">
+                                  {employeeName}
+                                </div>
+                                <button
+                                  type="button"
+                                  data-schedule-row-resizer={employee.id}
+                                  aria-label={`Cambiar alto de fila de ${employeeName}`}
+                                />
+                              </td>
+                              <td
+                                data-schedule-column="role"
+                                data-schedule-cell
+                                className="border-b border-r border-[var(--ui-border)] px-3 text-[var(--ui-muted)]"
+                              >
+                                {employee.role ?? "Sin rol"}
+                              </td>
+                              {weekDays.map((day, dayIndex) => {
+                                const dayRows =
+                                  shiftsByEmployeeDay.get(
+                                    `${employee.id}__${day.iso}`,
+                                  ) ?? [];
+                                return (
+                                  <td
+                                    key={`${employee.id}-${day.iso}`}
+                                    data-schedule-column={`day-${dayIndex}`}
+                                    data-schedule-cell
+                                    className="border-b border-r border-[var(--ui-border)] px-2.5 align-top"
+                                  >
+                                    {dayRows.length === 0 ? (
+                                      <span className="text-xs text-[var(--ui-muted)]">
+                                        —
+                                      </span>
+                                    ) : (
+                                      <div className="flex flex-wrap items-stretch gap-1.5">
+                                        {dayRows.map((shift) => {
+                                          const shiftAreaLabel = shift.area_id
+                                            ? (operationalAreaLabelById.get(
+                                                shift.area_id,
+                                              ) ?? "Área operativa")
+                                            : "General";
+                                          const checkinLabel =
+                                            shift.checkin_site_id &&
+                                            shift.checkin_site_id !==
+                                              shift.site_id
+                                              ? siteLabelById.get(
+                                                  shift.checkin_site_id,
+                                                )
+                                              : null;
+                                          const checkoutLabel =
+                                            shift.checkout_site_id &&
+                                            shift.checkout_site_id !==
+                                              shift.site_id
+                                              ? siteLabelById.get(
+                                                  shift.checkout_site_id,
+                                                )
+                                              : null;
+                                          const externalPointLabel =
+                                            checkinLabel && checkoutLabel
+                                              ? checkinLabel === checkoutLabel
+                                                ? `Marcación: ${checkinLabel}`
+                                                : `Entrada: ${checkinLabel} · Salida: ${checkoutLabel}`
+                                              : checkinLabel
+                                                ? `Entrada: ${checkinLabel}`
+                                                : checkoutLabel
+                                                  ? `Salida: ${checkoutLabel}`
+                                                  : null;
+                                          const roleLabel =
+                                            shift.operational_role
+                                              ? getOperationalRoleLabel(
+                                                  shift.operational_role,
+                                                  operationalRoleOptions,
+                                                )
+                                              : formatHoursCompact(
+                                                  getShiftMinutes(shift),
+                                                );
+                                          const cardTitle = [
+                                            shiftAreaLabel,
+                                            roleLabel,
+                                            externalPointLabel,
+                                            shift.notes,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(" · ");
+
+                                          return (
+                                            <Link
+                                              key={shift.id}
+                                              href={appendReturnParams(
+                                                returnTo,
+                                                {
+                                                  edit_shift: shift.id,
+                                                },
+                                              )}
+                                              data-schedule-shift-card
+                                              className={`flex min-w-[78px] flex-1 basis-[78px] flex-col rounded-lg border px-2 no-underline ${areaVisual.shiftClass} ${
+                                                shift.published_at
+                                                  ? "ring-1 ring-emerald-300/70"
+                                                  : "ring-1 ring-amber-300/70"
+                                              } ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
+                                              title={cardTitle}
+                                            >
+                                              <div className="text-xs font-semibold leading-snug text-[var(--ui-text)]">
+                                                {formatShiftRange(
+                                                  shift.start_time,
+                                                  shift.end_time,
+                                                  shift.show_end_as_close,
+                                                  shift.shift_kind,
+                                                )}
+                                              </div>
+                                              <div className="mt-0.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] leading-tight text-[var(--ui-muted)]">
+                                                {shift.shift_kind ===
+                                                "descanso" ? (
+                                                  <span>Día libre</span>
+                                                ) : (
+                                                  <>
+                                                    <span>
+                                                      {visibleStatusByShiftId[
+                                                        shift.id
+                                                      ] ?? "Programado"}
+                                                    </span>
+                                                    <span>{roleLabel}</span>
+                                                  </>
+                                                )}
+                                              </div>
+                                              {shift.shift_kind !==
+                                              "descanso" ? (
+                                                <div className="mt-0.5 truncate text-[10px] font-medium leading-tight text-[var(--ui-muted)]">
+                                                  {shiftAreaLabel}
+                                                </div>
+                                              ) : null}
+                                              {externalPointLabel ? (
+                                                <div className="mt-0.5 truncate text-[10px] font-semibold leading-tight text-[var(--ui-brand)]">
+                                                  {externalPointLabel}
+                                                </div>
+                                              ) : null}
+                                            </Link>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td
+                                data-schedule-column="total"
+                                data-schedule-cell
+                                className="border-b border-[var(--ui-border)] px-3"
+                              >
+                                <span className="inline-flex max-w-full rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-xs font-semibold text-[var(--ui-text)]">
+                                  {formatHoursCompact(weekMinutes)}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        }),
+                      ])}
+                    </tbody>
+                  </table>
+                </div>
+                <Script
+                  id="viso-schedule-table-tools"
+                  strategy="afterInteractive"
+                >
+                  {`
                   (function () {
                     function readState(storageKey) {
                       try {
@@ -4102,33 +4951,14 @@ export default async function StaffSchedulePage({
                     }
                   })();
                 `}
-              </Script>
+                </Script>
+              </div>
+              <p className="text-xs text-[var(--ui-muted)]">
+                Vista tabla para planear rápido equipos grandes con edición por
+                trabajador, área y bloque.
+              </p>
             </div>
-            <p className="text-xs text-[var(--ui-muted)]">
-              Vista tabla para planear rápido equipos grandes. Usa la vista <strong>Planner</strong> para edición detallada por bloque.
-            </p>
-          </div>
-        ) : (
-          <WeeklySchedulePlanner
-            employees={employees}
-            shifts={weekShifts}
-            days={weekDays}
-            siteId={selectedSiteId}
-            returnTo={returnTo}
-            initialSlot={initialSlot}
-            totalsByEmployee={totalsByEmployee}
-            visibleStatusByShiftId={visibleStatusByShiftId}
-            operationalRoleOptions={operationalRoleOptions}
-            saveAction={saveShiftAction}
-            deleteAction={deleteShiftAction}
-            deleteManyAction={deleteManyShiftAction}
-            assignManyAction={assignManyShiftAction}
-            copyPreviousWeekAction={copyPreviousWeekAction}
-            copyDayToOtherDaysAction={copyDayToOtherDaysAction}
-            suggestDraftAction={suggestDraftWeekAction}
-            publishWeekAction={publishWeekAction}
-          />
-        )}
+          ) : null}
         </div>
       )}
     </div>
