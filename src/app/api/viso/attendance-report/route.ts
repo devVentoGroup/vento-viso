@@ -203,6 +203,10 @@ type ReportSummary = {
   punctualityRate: number
 }
 
+type IncidentBuildOptions = {
+  unlinkedAttendanceIncidentCutoffMs: number | null
+}
+
 const ALLOWED_GLOBAL_ROLES = new Set(["propietario", "gerente_general"])
 const MANAGER_ROLE = "gerente"
 const MANAGER_ALLOWED_SITE_TYPES = new Set(["satellite", "production_center"])
@@ -223,6 +227,9 @@ const DEFAULT_AUTO_CLOSE_GRACE_MINUTES = 30
 const MATCH_WINDOW_BEFORE_MINUTES = 360
 const MATCH_WINDOW_AFTER_MINUTES = 720
 const QUERY_BUFFER_HOURS = 36
+const DEFAULT_UNLINKED_ATTENDANCE_INCIDENT_LOOKBACK_DAYS = 14
+const UNLINKED_ATTENDANCE_INCIDENT_START_DATE_ENV = "VISO_ATTENDANCE_UNLINKED_INCIDENT_START_DATE"
+const UNLINKED_ATTENDANCE_INCIDENT_LOOKBACK_DAYS_ENV = "VISO_ATTENDANCE_UNLINKED_INCIDENT_LOOKBACK_DAYS"
 
 const jsonHeaders = {
   "Content-Type": "application/json",
@@ -298,6 +305,33 @@ function unwrapRelation<T>(value: T | T[] | null | undefined): T | null {
 function safeMinutes(value: number): number {
   if (!Number.isFinite(value)) return 0
   return Math.max(0, Math.round(value))
+}
+
+function getOptionalEnvDateMs(value: string | undefined): number | null {
+  const candidate = String(value ?? "").trim()
+  if (!candidate) return null
+  const parsed = new Date(candidate.includes("T") ? candidate : `${candidate}T00:00:00-05:00`)
+  const parsedMs = parsed.getTime()
+  return Number.isFinite(parsedMs) ? parsedMs : null
+}
+
+function getPositiveIntegerEnv(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(String(value ?? ""), 10)
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback
+  return parsed
+}
+
+function getUnlinkedAttendanceIncidentCutoffMs(reportEnd: Date): number | null {
+  const configuredStartMs = getOptionalEnvDateMs(process.env[UNLINKED_ATTENDANCE_INCIDENT_START_DATE_ENV])
+  if (configuredStartMs != null) return configuredStartMs
+
+  const lookbackDays = getPositiveIntegerEnv(
+    process.env[UNLINKED_ATTENDANCE_INCIDENT_LOOKBACK_DAYS_ENV],
+    DEFAULT_UNLINKED_ATTENDANCE_INCIDENT_LOOKBACK_DAYS,
+  )
+
+  if (lookbackDays <= 0) return null
+  return reportEnd.getTime() - lookbackDays * 86400000
 }
 
 function normalizeShiftStatus(value: string | null | undefined): string {
@@ -1036,6 +1070,7 @@ function buildIncidentRows(
   sessions: AttendanceSession[],
   usedSessionKeys: Set<string>,
   timeZone: string,
+  options: IncidentBuildOptions,
 ): IncidentRow[] {
   const incidents: IncidentRow[] = []
 
@@ -1125,6 +1160,21 @@ function buildIncidentRows(
 
   for (const session of sessions) {
     if (usedSessionKeys.has(session.key)) continue
+
+    // Si el log ya tiene shift_id pero la sesión no se consolidó en este rango,
+    // no debe reportarse como "sin turno"; normalmente es un efecto del buffer
+    // de consulta o de un turno fuera del rango visual.
+    if (session.shiftId) continue
+
+    const sessionStartMs = new Date(session.checkInAt).getTime()
+    if (
+      options.unlinkedAttendanceIncidentCutoffMs != null &&
+      Number.isFinite(sessionStartMs) &&
+      sessionStartMs < options.unlinkedAttendanceIncidentCutoffMs
+    ) {
+      continue
+    }
+
     incidents.push({
       category: "Asistencia sin turno",
       shiftDate: session.checkInAt.slice(0, 10),
@@ -1133,7 +1183,7 @@ function buildIncidentRows(
       scheduledRange: "-",
       actualRange: `${formatTime(session.checkInAt, timeZone)}-${session.checkOutAt ? formatTime(session.checkOutAt, timeZone) : "Abierto"}`,
       status: session.status,
-      detail: "Existe asistencia registrada que no pudo vincularse a un turno publicado del rango.",
+      detail: "Existe asistencia reciente registrada que no pudo vincularse a un turno publicado del rango.",
     })
   }
 
@@ -1865,6 +1915,7 @@ export async function GET(request: NextRequest) {
     const scheduledShifts = (shiftData ?? []) as ScheduledShiftRow[]
 
     const sessions = buildAttendanceSessions(attendanceRows, breakRows, eventRows, endIso, reportTimeZone)
+    const unlinkedAttendanceIncidentCutoffMs = getUnlinkedAttendanceIncidentCutoffMs(end)
     const consolidated = buildConsolidatedShiftRecords(
       scheduledShifts,
       sessions,
@@ -1876,7 +1927,9 @@ export async function GET(request: NextRequest) {
     const rows = consolidated.rows
     const employeeSummaryRows = buildEmployeeSummary(rows)
     const siteSummaryRows = buildSiteSummary(rows)
-    const incidentRows = buildIncidentRows(rows, sessions, consolidated.usedSessionKeys, reportTimeZone)
+    const incidentRows = buildIncidentRows(rows, sessions, consolidated.usedSessionKeys, reportTimeZone, {
+      unlinkedAttendanceIncidentCutoffMs,
+    })
     const summary = buildReportSummary(rows)
 
     if (responseFormat === "json") {
@@ -1910,6 +1963,17 @@ export async function GET(request: NextRequest) {
           topSites,
           incidents: incidentRows.slice(0, 12),
           incidentCountTotal: incidentRows.length,
+          incidentPolicy: {
+            unlinkedAttendanceIncidentStartAt: unlinkedAttendanceIncidentCutoffMs != null
+              ? new Date(unlinkedAttendanceIncidentCutoffMs).toISOString()
+              : null,
+            unlinkedAttendanceIncidentLookbackDays: process.env[UNLINKED_ATTENDANCE_INCIDENT_START_DATE_ENV]
+              ? null
+              : getPositiveIntegerEnv(
+                  process.env[UNLINKED_ATTENDANCE_INCIDENT_LOOKBACK_DAYS_ENV],
+                  DEFAULT_UNLINKED_ATTENDANCE_INCIDENT_LOOKBACK_DAYS,
+                ),
+          },
         }),
         {
           status: 200,
