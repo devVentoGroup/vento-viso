@@ -28,6 +28,7 @@ export type DocumentTypeOption = {
   name: string | null;
   requires_expiry: boolean | null;
   validity_months: number | null;
+  allow_multiple: boolean | null;
 };
 
 type StaffDocumentsPanelProps = {
@@ -180,10 +181,17 @@ function UploadDocumentForm({
           <option value="">Selecciona un tipo</option>
           {documentTypes.map((dt) => (
             <option key={dt.id} value={dt.id}>
-              {dt.name ?? dt.id}
+              {dt.name ?? dt.id}{dt.allow_multiple ? " · permite historial" : ""}
             </option>
           ))}
         </select>
+        {selectedType ? (
+          <p className="ui-caption mt-1">
+            {selectedType.allow_multiple
+              ? "Puedes subir varias versiones de este documento."
+              : "Si ya existe uno, la nueva carga reemplazará el documento anterior."}
+          </p>
+        ) : null}
       </div>
 
       {needsExpiry && (

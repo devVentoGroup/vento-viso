@@ -730,8 +730,9 @@ async function uploadStaffDocument(formData: FormData) {
 
   const { data: docType } = await supabase
     .from("document_types")
-    .select("id,name,requires_expiry,validity_months")
+    .select("id,name,requires_expiry,validity_months,allow_multiple")
     .eq("id", documentTypeId)
+    .eq("is_active", true)
     .maybeSingle();
 
   if (!docType) {
@@ -797,11 +798,58 @@ async function uploadStaffDocument(formData: FormData) {
     status: "approved",
   };
 
-  const { error: insertError } = await supabase.from("documents").insert(insertPayload);
+  const { data: insertedDocument, error: insertError } = await supabase
+    .from("documents")
+    .insert(insertPayload)
+    .select("id")
+    .single();
 
   if (insertError) {
     await supabase.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
     return { ok: false, error: "Error al registrar el documento: " + insertError.message };
+  }
+
+  if (docType.allow_multiple !== true) {
+    const { data: previousDocs, error: previousDocsError } = await supabase
+      .from("documents")
+      .select("id,storage_path")
+      .eq("target_employee_id", employeeId)
+      .eq("document_type_id", documentTypeId)
+      .neq("id", insertedDocument.id);
+
+    if (previousDocsError) {
+      return { ok: false, error: "Documento subido, pero no se pudo revisar duplicados: " + previousDocsError.message };
+    }
+
+    const previousIds = (previousDocs ?? []).map((doc) => doc.id).filter(Boolean);
+    const previousStoragePaths = (previousDocs ?? [])
+      .map((doc) => (typeof doc.storage_path === "string" ? doc.storage_path : ""))
+      .filter((path) => path && isSafeStaffDocumentPath(path, employeeId));
+
+    if (previousIds.length > 0) {
+      const { error: deletePreviousError } = await supabase
+        .from("documents")
+        .delete()
+        .in("id", previousIds)
+        .eq("target_employee_id", employeeId);
+
+      if (deletePreviousError) {
+        return { ok: false, error: "Documento subido, pero no se pudo reemplazar el anterior: " + deletePreviousError.message };
+      }
+    }
+
+    if (previousStoragePaths.length > 0) {
+      const { error: removePreviousFilesError } = await supabase.storage
+        .from(DOCUMENT_BUCKET)
+        .remove(previousStoragePaths);
+
+      if (removePreviousFilesError) {
+        return {
+          ok: false,
+          error: "Documento reemplazado, pero no se pudo borrar el archivo anterior: " + removePreviousFilesError.message,
+        };
+      }
+    }
   }
 
   revalidatePath(`/staff/${employeeId}`);
@@ -1320,7 +1368,12 @@ export default async function StaffDetailPage({
       .eq("target_employee_id", id)
       .order("updated_at", { ascending: false }),
     supabase.rpc("employee_wallet_eligibility", { p_employee_id: id }).maybeSingle(),
-    supabase.from("document_types").select("id,name,requires_expiry,validity_months").eq("is_active", true).order("name", { ascending: true }),
+    supabase
+      .from("document_types")
+      .select("id,name,requires_expiry,validity_months,allow_multiple")
+      .eq("is_active", true)
+      .eq("scope", "employee")
+      .order("name", { ascending: true }),
     supabase
       .from("app_permissions")
       .select("id,code,name,app:apps(code)")
@@ -1514,10 +1567,10 @@ export default async function StaffDetailPage({
 
   const docsResult = restResults[0] as { data?: unknown[] | null } | undefined;
   const eligibilityResult = restResults[1] as { data?: unknown } | undefined;
-  const documentTypesResult = restResults[2] as { data?: { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null }[] | null } | undefined;
+  const documentTypesResult = restResults[2] as { data?: { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null; allow_multiple: boolean | null }[] | null } | undefined;
   const availablePermissionsResult = restResults[3] as { data?: unknown[] | null } | undefined;
   const employeePermissionsResult = restResults[4] as { data?: unknown[] | null } | undefined;
-  const documentTypesForSelect = (documentTypesResult?.data ?? []) as { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null }[];
+  const documentTypesForSelect = (documentTypesResult?.data ?? []) as { id: string; name: string | null; requires_expiry: boolean | null; validity_months: number | null; allow_multiple: boolean | null }[];
   type RawPermissionOption = {
     id: string;
     code: string;
