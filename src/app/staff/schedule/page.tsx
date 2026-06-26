@@ -21,6 +21,9 @@ type SiteRow = {
   id: string;
   name: string | null;
   code: string | null;
+  site_type?: string | null;
+  type?: string | null;
+  operational_visibility?: string | null;
 };
 
 type EmployeeRow = {
@@ -156,6 +159,8 @@ type ShiftOperationalContext = {
   checkoutSiteId: string | null;
 };
 
+const OPERATIONAL_SITE_TYPES = new Set(["satellite", "production_center"]);
+
 const FULL_DAY_REST_START_TIME = "00:00";
 const FULL_DAY_REST_END_TIME = "23:59";
 
@@ -167,6 +172,13 @@ function asNumber(value: FormDataEntryValue | null, fallback = 0) {
   if (typeof value !== "string" || value.trim() === "") return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function isOperationalSite(site: SiteRow) {
+  if (site.operational_visibility === "hidden") return false;
+  if (site.type === "checkin_point") return false;
+  if (!site.site_type) return true;
+  return OPERATIONAL_SITE_TYPES.has(site.site_type);
 }
 
 function toMonday(date: Date) {
@@ -2541,14 +2553,15 @@ export default async function StaffSchedulePage({
 
   const { data: sitesData } = await supabase
     .from("sites")
-    .select("id,name,code")
+    .select("id,name,code,site_type,type,operational_visibility")
     .order("name", { ascending: true });
 
   const sites = (sitesData ?? []) as SiteRow[];
+  const operationalSites = sites.filter(isOperationalSite);
   const selectedSiteId =
-    sp.site_id && sites.some((site) => site.id === sp.site_id)
+    sp.site_id && operationalSites.some((site) => site.id === sp.site_id)
       ? String(sp.site_id)
-      : (sites[0]?.id ?? "");
+      : (operationalSites[0]?.id ?? "");
 
   const weekStart = parseWeekStart(sp.week);
   const weekStartIso = isoDate(weekStart);
@@ -3239,7 +3252,7 @@ export default async function StaffSchedulePage({
                 className="ui-input"
                 defaultValue={selectedSiteId}
               >
-                {sites.map((site) => (
+                {operationalSites.map((site) => (
                   <option key={site.id} value={site.id}>
                     {site.name ?? site.code ?? site.id}
                   </option>
