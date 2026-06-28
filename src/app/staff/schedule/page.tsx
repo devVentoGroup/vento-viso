@@ -99,6 +99,15 @@ type StaffingRequirementRow = {
   required_role_code: string | null;
 };
 
+type HistoricalShiftPatternRow = {
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  operational_role?: string | null;
+  employee_role?: string | null;
+  count: number;
+};
+
 type AvailabilityRow = {
   employee_id: string;
   site_id: string | null;
@@ -299,6 +308,44 @@ function roleMatches(
     normalizedRole.includes(normalizedRequired) ||
     normalizedRequired.includes(normalizedRole)
   );
+}
+
+function buildHistoricalRequirements(
+  weekDays: ReturnType<typeof buildWeekDays>,
+  rows: HistoricalShiftPatternRow[],
+  siteId: string,
+) {
+  const byDay = new Map<number, HistoricalShiftPatternRow[]>();
+  for (const row of rows) {
+    const dayOfWeek = getDayOfWeek(row.shift_date);
+    if (dayOfWeek < 0) continue;
+    const list = byDay.get(dayOfWeek) ?? [];
+    list.push(row);
+    byDay.set(dayOfWeek, list);
+  }
+
+  const requirements: PlanningRequirement[] = [];
+  for (const day of weekDays) {
+    const patterns = [...(byDay.get(getDayOfWeek(day.iso)) ?? [])]
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+
+    for (const pattern of patterns) {
+      const headcount = Math.min(4, Math.max(1, Math.round(pattern.count / 4)));
+      for (let index = 0; index < headcount; index += 1) {
+        requirements.push({
+          siteId,
+          shiftDate: day.iso,
+          startTime: pattern.start_time,
+          endTime: pattern.end_time,
+          requiredHeadcount: 1,
+          roleCode: pattern.operational_role ?? pattern.employee_role ?? null,
+        });
+      }
+    }
+  }
+
+  return requirements;
 }
 
 function humanizeRoleCode(value: string | null | undefined) {
@@ -1863,6 +1910,7 @@ async function suggestDraftWeekAction(formData: FormData) {
     linkedEmployeesRes,
     existingShiftsRes,
     staffingRequirementsRes,
+    historicalShiftsRes,
     availabilityRes,
     planningLimitsRes,
     shiftPreferencesRes,
@@ -1898,6 +1946,16 @@ async function suggestDraftWeekAction(formData: FormData) {
       .order("day_of_week", { ascending: true })
       .order("start_time", { ascending: true }),
     supabase
+      .from("employee_shifts")
+      .select(
+        "shift_date,start_time,end_time,operational_role,status,shift_kind,employees!employee_shifts_employee_id_fkey(role)",
+      )
+      .eq("site_id", siteId)
+      .gte("shift_date", isoDate(addDays(weekStart, -180)))
+      .lt("shift_date", weekStartIso)
+      .neq("status", "cancelled")
+      .order("shift_date", { ascending: false }),
+    supabase
       .schema("viso")
       .from("employee_availability")
       .select(
@@ -1926,13 +1984,14 @@ async function suggestDraftWeekAction(formData: FormData) {
 
   const staffingRequirements = (staffingRequirementsRes.data ??
     []) as StaffingRequirementRow[];
-  if (staffingRequirements.length === 0) {
-    redirect(
-      `${returnTo}&error=${encodeURIComponent(
-        "Primero configura la cobertura minima por franja en viso.site_staffing_requirements para esta sede.",
-      )}`,
-    );
-  }
+  const historicalShiftRows = (historicalShiftsRes.data ?? []) as Array<{
+    shift_date: string;
+    start_time: string;
+    end_time: string;
+    operational_role: string | null;
+    shift_kind: string | null;
+    employees?: { role: string | null } | { role: string | null }[] | null;
+  }>;
 
   const employeeMap = new Map<string, EmployeeRow>();
   for (const row of (directEmployeesRes.data ?? []) as EmployeeRow[]) {
@@ -1964,37 +2023,78 @@ async function suggestDraftWeekAction(formData: FormData) {
       notes: shift.notes,
     }));
 
-  const requirements: PlanningRequirement[] = [];
-  for (const day of weekDays) {
-    const dayOfWeek = getDayOfWeek(day.iso);
-    const dayRequirements = staffingRequirements.filter(
-      (row) => row.day_of_week === dayOfWeek,
-    );
+  let requirements: PlanningRequirement[] = [];
+  if (staffingRequirements.length > 0) {
+    for (const day of weekDays) {
+      const dayOfWeek = getDayOfWeek(day.iso);
+      const dayRequirements = staffingRequirements.filter(
+        (row) => row.day_of_week === dayOfWeek,
+      );
 
-    for (const row of dayRequirements) {
-      const coveredCount = existingShifts.filter(
-        (shift) =>
-          shift.shiftDate === day.iso &&
-          shift.startTime === row.start_time &&
-          shift.endTime === row.end_time &&
-          roleMatches(
-            employeeMap.get(shift.employeeId)?.role ?? null,
-            row.required_role_code,
-          ),
-      ).length;
-      const missingHeadcount = Math.max(0, row.min_headcount - coveredCount);
+      for (const row of dayRequirements) {
+        const coveredCount = existingShifts.filter(
+          (shift) =>
+            shift.shiftDate === day.iso &&
+            shift.startTime === row.start_time &&
+            shift.endTime === row.end_time &&
+            roleMatches(
+              employeeMap.get(shift.employeeId)?.role ?? null,
+              row.required_role_code,
+            ),
+        ).length;
+        const missingHeadcount = Math.max(0, row.min_headcount - coveredCount);
 
-      for (let index = 0; index < missingHeadcount; index += 1) {
-        requirements.push({
-          siteId,
-          shiftDate: day.iso,
-          startTime: row.start_time,
-          endTime: row.end_time,
-          requiredHeadcount: 1,
-          roleCode: row.required_role_code,
-        });
+        for (let index = 0; index < missingHeadcount; index += 1) {
+          requirements.push({
+            siteId,
+            shiftDate: day.iso,
+            startTime: row.start_time,
+            endTime: row.end_time,
+            requiredHeadcount: 1,
+            roleCode: row.required_role_code,
+          });
+        }
       }
     }
+  } else {
+    const patternCounts = new Map<string, HistoricalShiftPatternRow>();
+    for (const row of historicalShiftRows) {
+      if (row.shift_kind === "descanso") continue;
+      const employeeRef = Array.isArray(row.employees)
+        ? row.employees[0]
+        : row.employees;
+      const role = row.operational_role ?? employeeRef?.role ?? null;
+      const key = [
+        getDayOfWeek(row.shift_date),
+        row.start_time,
+        row.end_time,
+        role ?? "",
+      ].join("|");
+      const current = patternCounts.get(key) ?? {
+        shift_date: row.shift_date,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        operational_role: row.operational_role,
+        employee_role: employeeRef?.role ?? null,
+        count: 0,
+      };
+      current.count += 1;
+      patternCounts.set(key, current);
+    }
+
+    requirements = buildHistoricalRequirements(
+      weekDays,
+      [...patternCounts.values()].filter((row) => row.count >= 2),
+      siteId,
+    );
+  }
+
+  if (requirements.length === 0 && staffingRequirements.length === 0) {
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(
+        "No hay reglas ni suficiente historico repetido para sugerir un borrador en esta sede.",
+      )}`,
+    );
   }
 
   if (requirements.length === 0) {
@@ -2070,11 +2170,15 @@ async function suggestDraftWeekAction(formData: FormData) {
       site_id: siteId,
       week_start: weekStartIso,
       status: suggestion.shifts.length > 0 ? "completed" : "failed",
-      strategy: "heuristic_v1",
+      strategy: staffingRequirements.length > 0 ? "heuristic_v1" : "historical_v1",
       input_snapshot: {
         requirementsCount: requirements.length,
         employeeCount: employees.length,
         existingShiftCount: existingShifts.length,
+        source:
+          staffingRequirements.length > 0
+            ? "configured_requirements"
+            : "historical_shift_patterns",
       },
       warnings: suggestion.warnings,
     })
@@ -3185,6 +3289,9 @@ export default async function StaffSchedulePage({
           <div className="flex flex-wrap items-center gap-2">
             <Link href="/staff" className="ui-btn ui-btn--ghost">
               Ver trabajadores
+            </Link>
+            <Link href="/staff/schedule/metrics" className="ui-btn ui-btn--ghost">
+              Métricas
             </Link>
             <Link
               href={appendReturnParams(
