@@ -3426,6 +3426,22 @@ export default async function StaffSchedulePage({
                   </button>
                 </form>
               ) : null}
+              <form action={suggestDraftWeekAction}>
+                <input type="hidden" name="site_id" value={selectedSiteId} />
+                <input type="hidden" name="week_start" value={weekStartIso} />
+                <input type="hidden" name="return_to" value={returnTo} />
+                <button type="submit" className="ui-btn ui-btn--ghost whitespace-nowrap">
+                  Sugerir horarios
+                </button>
+              </form>
+              <form action={copyPreviousWeekAction}>
+                <input type="hidden" name="site_id" value={selectedSiteId} />
+                <input type="hidden" name="week_start" value={weekStartIso} />
+                <input type="hidden" name="return_to" value={returnTo} />
+                <button type="submit" className="ui-btn ui-btn--ghost whitespace-nowrap">
+                  Copiar semana anterior
+                </button>
+              </form>
               <form action={publishWeekAction}>
                 <input type="hidden" name="site_id" value={selectedSiteId} />
                 <input type="hidden" name="week_start" value={weekStartIso} />
