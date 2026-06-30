@@ -19,6 +19,7 @@ type SiteRow = {
   site_type?: string | null;
   type?: string | null;
   operational_visibility?: string | null;
+  site_operational_capabilities?: { can_schedule_staff: boolean | null } | { can_schedule_staff: boolean | null }[] | null;
 };
 
 type EmployeeRow = {
@@ -59,14 +60,18 @@ type MetricBucket = {
   lateMinutes: number;
 };
 
-const OPERATIONAL_SITE_TYPES = new Set(["satellite", "production_center"]);
+const STAFF_SCHEDULE_SITE_TYPES = new Set(["satellite", "production_center", "admin"]);
 const LATE_GRACE_MINUTES = 5;
 
 function isOperationalSite(site: SiteRow) {
   if (site.operational_visibility === "hidden") return false;
   if (site.type === "checkin_point") return false;
+  const capability = Array.isArray(site.site_operational_capabilities)
+    ? site.site_operational_capabilities[0]
+    : site.site_operational_capabilities;
+  if (typeof capability?.can_schedule_staff === "boolean") return capability.can_schedule_staff;
   if (!site.site_type) return true;
-  return OPERATIONAL_SITE_TYPES.has(site.site_type);
+  return STAFF_SCHEDULE_SITE_TYPES.has(site.site_type);
 }
 
 function toIsoDate(date: Date) {
@@ -178,7 +183,10 @@ export default async function ScheduleMetricsPage({
   const to = parseDateParam(sp.to, today);
 
   const [{ data: sitesData }, { data: employeesData }] = await Promise.all([
-    supabase.from("sites").select("id,name,code,site_type,type,operational_visibility").order("name", { ascending: true }),
+    supabase
+      .from("sites")
+      .select("id,name,code,site_type,type,operational_visibility,site_operational_capabilities(can_schedule_staff)")
+      .order("name", { ascending: true }),
     supabase.from("employees").select("id,full_name,alias,role,is_active").eq("is_active", true).order("full_name", { ascending: true }),
   ]);
 

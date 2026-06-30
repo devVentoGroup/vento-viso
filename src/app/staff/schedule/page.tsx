@@ -24,6 +24,7 @@ type SiteRow = {
   site_type?: string | null;
   type?: string | null;
   operational_visibility?: string | null;
+  site_operational_capabilities?: { can_schedule_staff: boolean | null } | { can_schedule_staff: boolean | null }[] | null;
 };
 
 type EmployeeRow = {
@@ -168,7 +169,7 @@ type ShiftOperationalContext = {
   checkoutSiteId: string | null;
 };
 
-const OPERATIONAL_SITE_TYPES = new Set(["satellite", "production_center"]);
+const STAFF_SCHEDULE_SITE_TYPES = new Set(["satellite", "production_center", "admin"]);
 
 const FULL_DAY_REST_START_TIME = "00:00";
 const FULL_DAY_REST_END_TIME = "23:59";
@@ -186,8 +187,12 @@ function asNumber(value: FormDataEntryValue | null, fallback = 0) {
 function isOperationalSite(site: SiteRow) {
   if (site.operational_visibility === "hidden") return false;
   if (site.type === "checkin_point") return false;
+  const capability = Array.isArray(site.site_operational_capabilities)
+    ? site.site_operational_capabilities[0]
+    : site.site_operational_capabilities;
+  if (typeof capability?.can_schedule_staff === "boolean") return capability.can_schedule_staff;
   if (!site.site_type) return true;
-  return OPERATIONAL_SITE_TYPES.has(site.site_type);
+  return STAFF_SCHEDULE_SITE_TYPES.has(site.site_type);
 }
 
 function toMonday(date: Date) {
@@ -2657,7 +2662,7 @@ export default async function StaffSchedulePage({
 
   const { data: sitesData } = await supabase
     .from("sites")
-    .select("id,name,code,site_type,type,operational_visibility")
+    .select("id,name,code,site_type,type,operational_visibility,site_operational_capabilities(can_schedule_staff)")
     .order("name", { ascending: true });
 
   const sites = (sitesData ?? []) as SiteRow[];

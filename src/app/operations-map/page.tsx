@@ -24,6 +24,7 @@ type CapabilityRow = {
   can_request_remissions: boolean | null;
   can_fulfill_remissions: boolean | null;
   can_receive_remissions: boolean | null;
+  can_schedule_staff: boolean | null;
   can_sell: boolean | null;
   can_produce: boolean | null;
   can_hold_inventory: boolean | null;
@@ -139,6 +140,8 @@ type LocationUsage = {
   tone?: "success" | "warning";
 };
 
+const STAFF_SCHEDULE_SITE_TYPES = new Set(["satellite", "production_center", "admin"]);
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -245,6 +248,13 @@ function booleanFromForm(value: FormDataEntryValue | null) {
   return value === "on" || value === "true";
 }
 
+function canScheduleStaffDefault(site: SiteRow, capability: CapabilityRow | undefined) {
+  if (typeof capability?.can_schedule_staff === "boolean") return capability.can_schedule_staff;
+  if (site.operational_visibility === "hidden") return false;
+  if (!site.site_type) return true;
+  return STAFF_SCHEDULE_SITE_TYPES.has(site.site_type);
+}
+
 function backToMap(search = "") {
   return `/operations-map${search}`;
 }
@@ -302,6 +312,7 @@ function capabilityLabels(capability: CapabilityRow | undefined) {
     capability.can_receive_remissions ? "Recibe remisiones" : "",
     capability.can_request_remissions ? "Solicita remisiones" : "",
     capability.can_fulfill_remissions ? "Despacha remisiones" : "",
+    capability.can_schedule_staff ? "Agenda personal" : "",
     capability.can_sell ? "Vende" : "",
     capability.can_produce ? "Produce" : "",
     capability.can_hold_inventory ? "Mantiene inventario" : "",
@@ -386,6 +397,7 @@ async function updateSiteOperation(formData: FormData) {
   const operationalVisibility = ["app_review", "test", "hidden"].includes(visibilityRaw)
     ? visibilityRaw
     : "operational";
+  const canScheduleStaff = booleanFromForm(formData.get("can_schedule_staff"));
 
   await requireAppAccess({
     appId: "viso",
@@ -415,6 +427,7 @@ async function updateSiteOperation(formData: FormData) {
   const { error } = await supabase.from("site_operational_capabilities").upsert(
     {
       site_id: siteId,
+      can_schedule_staff: canScheduleStaff,
       operation_model: operationModel,
       primary_operational_location_id: operationModel === "single_loc" ? primaryLocationId : primaryLocationId,
       updated_by: auth.user?.id ?? null,
@@ -754,7 +767,7 @@ export default async function OperationsMapPage({
     supabase
       .from("site_operational_capabilities")
       .select(
-        "site_id,can_request_remissions,can_fulfill_remissions,can_receive_remissions,can_sell,can_produce,can_hold_inventory,is_commercial_business,show_in_product_setup,operation_model,primary_operational_location_id"
+        "site_id,can_request_remissions,can_fulfill_remissions,can_receive_remissions,can_schedule_staff,can_sell,can_produce,can_hold_inventory,is_commercial_business,show_in_product_setup,operation_model,primary_operational_location_id"
       ),
     supabase.from("areas").select("id,site_id,code,name,kind,is_active").order("name", { ascending: true }),
     supabase
@@ -1083,6 +1096,14 @@ export default async function OperationsMapPage({
                               </option>
                             ))}
                         </select>
+                      </label>
+                      <label className="flex items-center gap-2 rounded-lg border border-[var(--ui-border)] bg-white px-3 py-2 text-sm">
+                        <input
+                          type="checkbox"
+                          name="can_schedule_staff"
+                          defaultChecked={canScheduleStaffDefault(site, capability)}
+                        />
+                        <span>Usar en horario semanal de personal</span>
                       </label>
                       <button type="submit" className="ui-btn ui-btn--brand justify-center">
                         Guardar
