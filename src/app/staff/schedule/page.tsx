@@ -24,7 +24,10 @@ type SiteRow = {
   site_type?: string | null;
   type?: string | null;
   operational_visibility?: string | null;
-  site_operational_capabilities?: { can_schedule_staff: boolean | null } | { can_schedule_staff: boolean | null }[] | null;
+  site_operational_capabilities?:
+    | { can_schedule_staff: boolean | null }
+    | { can_schedule_staff: boolean | null }[]
+    | null;
 };
 
 type EmployeeRow = {
@@ -104,9 +107,22 @@ type HistoricalShiftPatternRow = {
   shift_date: string;
   start_time: string;
   end_time: string;
+  employee_id?: string | null;
   operational_role?: string | null;
   employee_role?: string | null;
   count: number;
+};
+
+type EmployeeHistoricalPlanningSignals = {
+  recentMorningShifts: number;
+  recentAfternoonShifts: number;
+  recentEveningShifts: number;
+  lastWeekMorningShifts: number;
+  lastWeekAfternoonShifts: number;
+  lastWeekEveningShifts: number;
+  recentOpeningShifts: number;
+  recentClosingShifts: number;
+  recentWeekendShifts: number;
 };
 
 type AvailabilityRow = {
@@ -169,10 +185,25 @@ type ShiftOperationalContext = {
   checkoutSiteId: string | null;
 };
 
-const STAFF_SCHEDULE_SITE_TYPES = new Set(["satellite", "production_center", "admin"]);
+const STAFF_SCHEDULE_SITE_TYPES = new Set([
+  "satellite",
+  "production_center",
+  "admin",
+]);
+const STAFF_SCHEDULE_PERMISSION = "staff.schedule.view";
 
 const FULL_DAY_REST_START_TIME = "00:00";
 const FULL_DAY_REST_END_TIME = "23:59";
+
+function requireStaffScheduleAccess(returnTo: string, siteId?: string | null) {
+  return requireAppAccess({
+    appId: "viso",
+    returnTo,
+    permissionCode: STAFF_SCHEDULE_PERMISSION,
+    siteId,
+    allowPermissionAccess: true,
+  });
+}
 
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
@@ -190,7 +221,8 @@ function isOperationalSite(site: SiteRow) {
   const capability = Array.isArray(site.site_operational_capabilities)
     ? site.site_operational_capabilities[0]
     : site.site_operational_capabilities;
-  if (typeof capability?.can_schedule_staff === "boolean") return capability.can_schedule_staff;
+  if (typeof capability?.can_schedule_staff === "boolean")
+    return capability.can_schedule_staff;
   if (!site.site_type) return true;
   return STAFF_SCHEDULE_SITE_TYPES.has(site.site_type);
 }
@@ -290,6 +322,77 @@ function buildWeekDays(weekStart: Date) {
 function getDayOfWeek(iso: string) {
   const parsed = new Date(`${iso}T12:00:00`);
   return Number.isNaN(parsed.getTime()) ? -1 : parsed.getDay();
+}
+
+function getScheduleDayPart(startTime: string) {
+  const minutes = parseTimeToMinutes(startTime);
+  if (minutes < 12 * 60) return "morning";
+  if (minutes < 18 * 60) return "afternoon";
+  return "evening";
+}
+
+function createEmptyHistoricalSignals(): EmployeeHistoricalPlanningSignals {
+  return {
+    recentMorningShifts: 0,
+    recentAfternoonShifts: 0,
+    recentEveningShifts: 0,
+    lastWeekMorningShifts: 0,
+    lastWeekAfternoonShifts: 0,
+    lastWeekEveningShifts: 0,
+    recentOpeningShifts: 0,
+    recentClosingShifts: 0,
+    recentWeekendShifts: 0,
+  };
+}
+
+function buildEmployeeHistoricalSignals(
+  rows: Array<{
+    employee_id: string | null;
+    shift_date: string;
+    start_time: string;
+    end_time: string;
+    shift_kind: string | null;
+  }>,
+  weekStart: Date,
+) {
+  const index = new Map<string, EmployeeHistoricalPlanningSignals>();
+  const lastWeekStartIso = isoDate(addDays(weekStart, -7));
+  const lastWeekEndIso = isoDate(addDays(weekStart, -1));
+
+  for (const row of rows) {
+    if (!row.employee_id || row.shift_kind === "descanso") continue;
+    const signals =
+      index.get(row.employee_id) ?? createEmptyHistoricalSignals();
+    const dayPart = getScheduleDayPart(row.start_time);
+    const isLastWeek =
+      row.shift_date >= lastWeekStartIso && row.shift_date <= lastWeekEndIso;
+
+    if (dayPart === "morning") {
+      signals.recentMorningShifts += 1;
+      if (isLastWeek) signals.lastWeekMorningShifts += 1;
+    } else if (dayPart === "afternoon") {
+      signals.recentAfternoonShifts += 1;
+      if (isLastWeek) signals.lastWeekAfternoonShifts += 1;
+    } else {
+      signals.recentEveningShifts += 1;
+      if (isLastWeek) signals.lastWeekEveningShifts += 1;
+    }
+
+    if (parseTimeToMinutes(row.start_time) <= 7 * 60) {
+      signals.recentOpeningShifts += 1;
+    }
+    if (parseTimeToMinutes(row.end_time) >= 21 * 60) {
+      signals.recentClosingShifts += 1;
+    }
+    const dayOfWeek = getDayOfWeek(row.shift_date);
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      signals.recentWeekendShifts += 1;
+    }
+
+    index.set(row.employee_id, signals);
+  }
+
+  return index;
 }
 
 function normalizeRole(value: string | null | undefined) {
@@ -908,10 +1011,7 @@ async function saveShiftAction(formData: FormData) {
   const requestedEmployeeIds =
     employeeIds.length > 0 ? employeeIds : employeeId ? [employeeId] : [];
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo, siteId);
   const supabase = createAdminClient();
 
   if (
@@ -1266,10 +1366,7 @@ async function deleteShiftAction(formData: FormData) {
   const shiftId = asText(formData.get("shift_id"));
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo);
   const supabase = createAdminClient();
 
   if (!shiftId) {
@@ -1297,10 +1394,7 @@ async function deleteManyShiftAction(formData: FormData) {
     .filter(Boolean);
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo);
   const supabase = createAdminClient();
 
   if (shiftIds.length === 0) {
@@ -1328,10 +1422,7 @@ async function deleteDraftWeekAction(formData: FormData) {
   const weekStartIso = asText(formData.get("week_start"));
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo, siteId);
   const supabase = createAdminClient();
 
   if (!siteId || !weekStartIso) {
@@ -1376,10 +1467,7 @@ async function assignManyShiftAction(formData: FormData) {
   ];
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo);
   const supabase = createAdminClient();
 
   if (sourceShiftIds.length === 0 || targetEmployeeIds.length === 0) {
@@ -1551,10 +1639,7 @@ async function copyPreviousWeekAction(formData: FormData) {
   const weekStartIso = asText(formData.get("week_start"));
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo, siteId);
   const supabase = createAdminClient();
 
   if (!siteId || !weekStartIso) {
@@ -1666,10 +1751,7 @@ async function copyDayToOtherDaysAction(formData: FormData) {
     )
     .filter((iso) => iso !== sourceDayIso);
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo, siteId);
   const supabase = createAdminClient();
 
   if (!siteId || !sourceDayIso || !employeeId || targetDays.length === 0) {
@@ -1808,10 +1890,7 @@ async function publishWeekAction(formData: FormData) {
   const weekStartIso = asText(formData.get("week_start"));
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
 
-  const { user } = await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  const { user } = await requireStaffScheduleAccess(returnTo, siteId);
   const supabase = createAdminClient();
 
   if (!siteId || !weekStartIso) {
@@ -1894,10 +1973,7 @@ async function suggestDraftWeekAction(formData: FormData) {
   const weekStartIso = asText(formData.get("week_start"));
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo, siteId);
   const supabase = createAdminClient();
 
   if (!siteId || !weekStartIso) {
@@ -1953,7 +2029,7 @@ async function suggestDraftWeekAction(formData: FormData) {
     supabase
       .from("employee_shifts")
       .select(
-        "shift_date,start_time,end_time,operational_role,status,shift_kind,employees!employee_shifts_employee_id_fkey(role)",
+        "employee_id,shift_date,start_time,end_time,operational_role,status,shift_kind,employees!employee_shifts_employee_id_fkey(role)",
       )
       .eq("site_id", siteId)
       .gte("shift_date", isoDate(addDays(weekStart, -180)))
@@ -1990,6 +2066,7 @@ async function suggestDraftWeekAction(formData: FormData) {
   const staffingRequirements = (staffingRequirementsRes.data ??
     []) as StaffingRequirementRow[];
   const historicalShiftRows = (historicalShiftsRes.data ?? []) as Array<{
+    employee_id: string | null;
     shift_date: string;
     start_time: string;
     end_time: string;
@@ -2126,6 +2203,10 @@ async function suggestDraftWeekAction(formData: FormData) {
   const shiftPreferencesByEmployee = new Map(
     shiftPreferenceRows.map((row) => [row.employee_id, row] as const),
   );
+  const historicalSignalsByEmployee = buildEmployeeHistoricalSignals(
+    historicalShiftRows,
+    weekStart,
+  );
   const availability: PlanningAvailability[] = availabilityRows.flatMap((row) =>
     weekDays
       .filter((day) => row.day_of_week === getDayOfWeek(day.iso))
@@ -2146,6 +2227,9 @@ async function suggestDraftWeekAction(formData: FormData) {
     employees: employees.map((employee) => {
       const limits = planningLimitsByEmployee.get(employee.id);
       const preferences = shiftPreferencesByEmployee.get(employee.id);
+      const historicalSignals =
+        historicalSignalsByEmployee.get(employee.id) ??
+        createEmptyHistoricalSignals();
       return {
         id: employee.id,
         fullName: employee.full_name ?? employee.alias ?? null,
@@ -2159,6 +2243,15 @@ async function suggestDraftWeekAction(formData: FormData) {
         prefersEvening: preferences?.prefers_evening ?? false,
         avoidOpening: preferences?.avoid_opening ?? false,
         avoidClosing: preferences?.avoid_closing ?? false,
+        recentMorningShifts: historicalSignals.recentMorningShifts,
+        recentAfternoonShifts: historicalSignals.recentAfternoonShifts,
+        recentEveningShifts: historicalSignals.recentEveningShifts,
+        lastWeekMorningShifts: historicalSignals.lastWeekMorningShifts,
+        lastWeekAfternoonShifts: historicalSignals.lastWeekAfternoonShifts,
+        lastWeekEveningShifts: historicalSignals.lastWeekEveningShifts,
+        recentOpeningShifts: historicalSignals.recentOpeningShifts,
+        recentClosingShifts: historicalSignals.recentClosingShifts,
+        recentWeekendShifts: historicalSignals.recentWeekendShifts,
       };
     }),
     requirements,
@@ -2175,7 +2268,8 @@ async function suggestDraftWeekAction(formData: FormData) {
       site_id: siteId,
       week_start: weekStartIso,
       status: suggestion.shifts.length > 0 ? "completed" : "failed",
-      strategy: staffingRequirements.length > 0 ? "heuristic_v1" : "historical_v1",
+      strategy:
+        staffingRequirements.length > 0 ? "heuristic_v1" : "historical_v1",
       input_snapshot: {
         requirementsCount: requirements.length,
         employeeCount: employees.length,
@@ -2199,6 +2293,12 @@ async function suggestDraftWeekAction(formData: FormData) {
   const explanation = {
     score: suggestion.score,
     breakdown: suggestion.breakdown,
+    historicalRotationWindowDays: 180,
+    historicalSignalsByEmployee: Object.fromEntries(
+      [...historicalSignalsByEmployee.entries()].map(
+        ([employeeId, signals]) => [employeeId, signals],
+      ),
+    ),
   };
 
   const { data: candidateRow, error: candidateError } = await supabase
@@ -2236,6 +2336,7 @@ async function suggestDraftWeekAction(formData: FormData) {
       notes: shift.notes ?? null,
       explanation: {
         requiredRoleCode: shift.requiredRoleCode ?? null,
+        ...(shift.explanation ?? {}),
       },
     }));
 
@@ -2324,10 +2425,7 @@ async function saveCoverageRequirementAction(formData: FormData) {
   );
   const requiredRoleCode = asText(formData.get("required_role_code")) || null;
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo, siteId);
   const supabase = createAdminClient();
 
   if (
@@ -2382,10 +2480,7 @@ async function deleteCoverageRequirementAction(formData: FormData) {
   const id = asText(formData.get("id"));
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo);
   const supabase = createAdminClient();
 
   if (!id) {
@@ -2419,14 +2514,9 @@ async function saveAvailabilityAction(formData: FormData) {
   const availableFrom = asText(formData.get("available_from"));
   const availableTo = asText(formData.get("available_to"));
   const availabilityKind = asText(formData.get("availability_kind")) as
-    | "preferred"
-    | "allowed"
-    | "blocked";
+    "preferred" | "allowed" | "blocked";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo, siteId);
   const supabase = createAdminClient();
 
   if (
@@ -2482,10 +2572,7 @@ async function deleteAvailabilityAction(formData: FormData) {
   const id = asText(formData.get("id"));
   const returnTo = asText(formData.get("return_to")) || "/staff/schedule";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo);
   const supabase = createAdminClient();
 
   if (!id) {
@@ -2525,10 +2612,7 @@ async function saveWorkerRulesAction(formData: FormData) {
   const avoidOpening = asText(formData.get("avoid_opening")) === "1";
   const avoidClosing = asText(formData.get("avoid_closing")) === "1";
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo,
-  });
+  await requireStaffScheduleAccess(returnTo, siteId);
   const supabase = createAdminClient();
 
   if (!siteId || !employeeId) {
@@ -2654,15 +2738,14 @@ export default async function StaffSchedulePage({
   const okMsg = getOkMessage(safeDecode(sp.ok));
   const errorMsg = safeDecode(sp.error);
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo: "/staff/schedule",
-  });
+  await requireStaffScheduleAccess("/staff/schedule", sp.site_id ?? null);
   const supabase = createAdminClient();
 
   const { data: sitesData } = await supabase
     .from("sites")
-    .select("id,name,code,site_type,type,operational_visibility,site_operational_capabilities(can_schedule_staff)")
+    .select(
+      "id,name,code,site_type,type,operational_visibility,site_operational_capabilities(can_schedule_staff)",
+    )
     .order("name", { ascending: true });
 
   const sites = (sitesData ?? []) as SiteRow[];
@@ -3205,7 +3288,8 @@ export default async function StaffSchedulePage({
     .filter((shift) => shift.shift_kind !== "descanso")
     .flatMap((shift) => {
       const employee = employeeMap.get(shift.employee_id);
-      const employeeLabel = employee?.full_name ?? employee?.alias ?? "Trabajador";
+      const employeeLabel =
+        employee?.full_name ?? employee?.alias ?? "Trabajador";
       const shiftLabel = `${employeeLabel} · ${shift.shift_date} · ${formatShiftRange(
         shift.start_time,
         shift.end_time,
@@ -3224,9 +3308,7 @@ export default async function StaffSchedulePage({
         ).find((row) => row.role_code === shift.operational_role) ?? null;
 
       if (!matrixRow) {
-        return [
-          `${shiftLabel}: rol fuera de la matriz activa para su área.`,
-        ];
+        return [`${shiftLabel}: rol fuera de la matriz activa para su área.`];
       }
 
       const missingPoints = [
@@ -3295,7 +3377,10 @@ export default async function StaffSchedulePage({
             <Link href="/staff" className="ui-btn ui-btn--ghost">
               Ver trabajadores
             </Link>
-            <Link href="/staff/schedule/metrics" className="ui-btn ui-btn--ghost">
+            <Link
+              href="/staff/schedule/metrics"
+              className="ui-btn ui-btn--ghost"
+            >
               Métricas
             </Link>
             <Link
@@ -3334,8 +3419,8 @@ export default async function StaffSchedulePage({
           </ul>
           {scheduleOperationalAlerts.length > 6 ? (
             <p className="mt-2 text-xs font-medium">
-              Hay {scheduleOperationalAlerts.length - 6} alertas adicionales
-              en esta semana.
+              Hay {scheduleOperationalAlerts.length - 6} alertas adicionales en
+              esta semana.
             </p>
           ) : null}
         </div>
@@ -3430,7 +3515,10 @@ export default async function StaffSchedulePage({
                 <input type="hidden" name="site_id" value={selectedSiteId} />
                 <input type="hidden" name="week_start" value={weekStartIso} />
                 <input type="hidden" name="return_to" value={returnTo} />
-                <button type="submit" className="ui-btn ui-btn--ghost whitespace-nowrap">
+                <button
+                  type="submit"
+                  className="ui-btn ui-btn--ghost whitespace-nowrap"
+                >
                   Sugerir horarios
                 </button>
               </form>
@@ -3438,7 +3526,10 @@ export default async function StaffSchedulePage({
                 <input type="hidden" name="site_id" value={selectedSiteId} />
                 <input type="hidden" name="week_start" value={weekStartIso} />
                 <input type="hidden" name="return_to" value={returnTo} />
-                <button type="submit" className="ui-btn ui-btn--ghost whitespace-nowrap">
+                <button
+                  type="submit"
+                  className="ui-btn ui-btn--ghost whitespace-nowrap"
+                >
                   Copiar semana anterior
                 </button>
               </form>

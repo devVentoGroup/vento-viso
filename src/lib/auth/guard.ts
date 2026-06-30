@@ -19,6 +19,7 @@ type GuardOptions = {
   permissionCode?: string | string[];
   siteId?: string | null;
   areaId?: string | null;
+  allowPermissionAccess?: boolean;
 };
 
 export async function requireAppAccess({
@@ -28,6 +29,7 @@ export async function requireAppAccess({
   permissionCode,
   siteId,
   areaId,
+  allowPermissionAccess = false,
 }: GuardOptions) {
   const client = supabase ?? (await createClient());
   const context: PermissionContext = {
@@ -44,9 +46,28 @@ export async function requireAppAccess({
     redirect(`/login?${qs.toString()}`);
   }
 
+  const permissionCodes = Array.isArray(permissionCode)
+    ? permissionCode.filter(Boolean)
+    : permissionCode
+      ? [permissionCode]
+      : [];
+  const normalizedCodes = permissionCodes.map((code) =>
+    normalizePermissionCode(appId, code),
+  );
+
   const canAccess = await checkPermission(client, appId, "access", context);
 
-  if (!canAccess) {
+  let canAccessByPermission = false;
+  if (!canAccess && allowPermissionAccess && normalizedCodes.length > 0) {
+    const checks = await Promise.all(
+      normalizedCodes.map((code) =>
+        checkPermission(client, appId, code, context),
+      ),
+    );
+    canAccessByPermission = checks.every(Boolean);
+  }
+
+  if (!canAccess && !canAccessByPermission) {
     const qs = new URLSearchParams();
     qs.set("returnTo", returnTo);
     qs.set("reason", "no_access");
@@ -54,16 +75,7 @@ export async function requireAppAccess({
     redirect(`/no-access?${qs.toString()}`);
   }
 
-  const permissionCodes = Array.isArray(permissionCode)
-    ? permissionCode.filter(Boolean)
-    : permissionCode
-      ? [permissionCode]
-      : [];
-
-  if (permissionCodes.length) {
-    const normalizedCodes = permissionCodes.map((code) =>
-      normalizePermissionCode(appId, code)
-    );
+  if (normalizedCodes.length) {
     const overrideRole = await getRoleOverrideFromCookies();
     let canOverride = false;
     let actualRole = "";
@@ -88,8 +100,14 @@ export async function requireAppAccess({
 
       const checks = await Promise.all(
         normalizedCodes.map((code) =>
-          isPermissionAllowedForRole(client, overrideRole!, appId, code, overrideContext)
-        )
+          isPermissionAllowedForRole(
+            client,
+            overrideRole!,
+            appId,
+            code,
+            overrideContext,
+          ),
+        ),
       );
       const deniedIndex = checks.findIndex((allowed) => !allowed);
       const deniedCode = deniedIndex >= 0 ? normalizedCodes[deniedIndex] : null;
@@ -103,8 +121,8 @@ export async function requireAppAccess({
     } else {
       const checks = await Promise.all(
         normalizedCodes.map((code) =>
-          checkPermission(client, appId, code, context)
-        )
+          checkPermission(client, appId, code, context),
+        ),
       );
 
       const deniedIndex = checks.findIndex((allowed) => !allowed);
