@@ -77,10 +77,16 @@ type ShiftAttendanceInfo = {
   checkOutAt: string | null;
 };
 
+type EmployeePeriodTotals = {
+  publishedMinutes: number;
+  draftMinutes: number;
+  totalMinutes: number;
+};
+
 type EmployeeTotals = {
-  weekMinutes: number;
-  fortnightMinutes: number;
-  monthMinutes: number;
+  week: EmployeePeriodTotals;
+  fortnight: EmployeePeriodTotals;
+  month: EmployeePeriodTotals;
 };
 
 type ScheduleTableColumn = {
@@ -531,6 +537,27 @@ function formatHoursCompact(totalMinutes: number) {
   const hours = safe / 60;
   if (Number.isInteger(hours)) return `${hours}h`;
   return `${hours.toFixed(1).replace(".", ",")}h`;
+}
+
+function createEmptyPeriodTotals(): EmployeePeriodTotals {
+  return {
+    publishedMinutes: 0,
+    draftMinutes: 0,
+    totalMinutes: 0,
+  };
+}
+
+function addMinutesToPeriodTotals(
+  totals: EmployeePeriodTotals,
+  minutes: number,
+  isPublished: boolean,
+) {
+  totals.totalMinutes += minutes;
+  if (isPublished) {
+    totals.publishedMinutes += minutes;
+  } else {
+    totals.draftMinutes += minutes;
+  }
 }
 
 const BOGOTA_TIME_ZONE = "America/Bogota";
@@ -3095,7 +3122,7 @@ export default async function StaffSchedulePage({
     const { data: monthShiftRows } = await supabase
       .from("employee_shifts")
       .select(
-        "id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,area_id,checkin_site_id,checkout_site_id",
+        "id,employee_id,shift_date,start_time,end_time,shift_kind,operational_role,show_end_as_close,break_minutes,status,notes,site_id,area_id,checkin_site_id,checkout_site_id,published_at",
       )
       .in("employee_id", employeeIds)
       .eq("site_id", selectedSiteId)
@@ -3104,25 +3131,31 @@ export default async function StaffSchedulePage({
 
     for (const employeeId of employeeIds) {
       totalsByEmployee[employeeId] = {
-        weekMinutes: 0,
-        fortnightMinutes: 0,
-        monthMinutes: 0,
+        week: createEmptyPeriodTotals(),
+        fortnight: createEmptyPeriodTotals(),
+        month: createEmptyPeriodTotals(),
       };
     }
 
     for (const shift of (monthShiftRows ?? []) as ShiftRow[]) {
+      if (shift.status === "cancelled") continue;
+
       const totals = totalsByEmployee[shift.employee_id];
       if (!totals) continue;
+
       const minutes = getShiftMinutes(shift);
-      totals.monthMinutes += minutes;
+      if (minutes <= 0) continue;
+
+      const isPublished = Boolean(shift.published_at);
+      addMinutesToPeriodTotals(totals.month, minutes, isPublished);
       if (shift.shift_date >= weekStartIso && shift.shift_date <= weekEndIso) {
-        totals.weekMinutes += minutes;
+        addMinutesToPeriodTotals(totals.week, minutes, isPublished);
       }
       if (
         shift.shift_date >= fortnightStartIso &&
         shift.shift_date <= fortnightEndIso
       ) {
-        totals.fortnightMinutes += minutes;
+        addMinutesToPeriodTotals(totals.fortnight, minutes, isPublished);
       }
     }
   }
@@ -3409,7 +3442,7 @@ export default async function StaffSchedulePage({
       width: 158,
       minWidth: 112,
     })),
-    { key: "total", label: "Total semana", width: 128, minWidth: 104 },
+    { key: "total", label: "Horas semana", width: 156, minWidth: 128 },
   ];
   const scheduleTableInitialWidth = scheduleTableColumns.reduce(
     (total, column) => total + column.width,
@@ -4442,6 +4475,24 @@ export default async function StaffSchedulePage({
                       return true;
                     }
 
+                    function selectAreaDefaultRoleOption(roleSelect, activeOptions) {
+                      if (!roleSelect || activeOptions.length === 0) return false;
+
+                      var defaultOptions = activeOptions.filter(function (item) {
+                        return item.getAttribute("data-is-default") === "1";
+                      });
+                      var option = defaultOptions.length === 1
+                        ? defaultOptions[0]
+                        : activeOptions.length === 1
+                          ? activeOptions[0]
+                          : null;
+
+                      if (!option) return false;
+
+                      roleSelect.selectedIndex = Array.from(roleSelect.options).indexOf(option);
+                      return true;
+                    }
+
                     function getSelectedEmployeeOption(form) {
                       var employeeSelect = form.querySelector('select[name="employee_id"]');
                       return employeeSelect && employeeSelect.selectedIndex >= 0
@@ -4452,6 +4503,8 @@ export default async function StaffSchedulePage({
                     function applyEmployeeDefaultArea(form, force) {
                       var areaSelect = form.querySelector("[data-operational-area-select]");
                       if (!areaSelect) return;
+
+                      if (areaSelect.getAttribute("data-user-changed") === "1") return;
 
                       var selectedEmployeeOption = getSelectedEmployeeOption(form);
                       var employeeId = selectedEmployeeOption ? selectedEmployeeOption.value || "" : "";
@@ -4517,7 +4570,7 @@ export default async function StaffSchedulePage({
                       }
 
                       if (!selectRoleOption(operationalRoleSelect, activeOptions, employeeRole)) {
-                        if (!hasActiveSelection) {
+                        if (!hasActiveSelection && !selectAreaDefaultRoleOption(operationalRoleSelect, activeOptions)) {
                           operationalRoleSelect.value = "";
                         }
                       }
@@ -4539,12 +4592,14 @@ export default async function StaffSchedulePage({
 
                       if (areaSelect) {
                         areaSelect.addEventListener("change", function () {
+                          areaSelect.setAttribute("data-user-changed", "1");
                           if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
                           syncDefaultOperationalRole(form, true);
                         });
                       }
                       if (employeeSelect) {
                         employeeSelect.addEventListener("change", function () {
+                          if (areaSelect) areaSelect.removeAttribute("data-user-changed");
                           if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
                           syncDefaultOperationalRole(form, true);
                         });
@@ -4627,7 +4682,13 @@ export default async function StaffSchedulePage({
                         }
 
                         if (target.matches("[data-operational-area-select]") || target.matches('select[name="employee_id"]')) {
+                          var areaSelect = form.querySelector("[data-operational-area-select]");
                           var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
+                          if (target.matches("[data-operational-area-select]")) {
+                            target.setAttribute("data-user-changed", "1");
+                          } else if (areaSelect) {
+                            areaSelect.removeAttribute("data-user-changed");
+                          }
                           if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
                           initOperationalContextForm(form);
                           syncDefaultOperationalRole(form, true);
@@ -4910,8 +4971,13 @@ export default async function StaffSchedulePage({
                         ...group.employees.map((employee) => {
                           const employeeName =
                             employee.full_name ?? employee.alias ?? employee.id;
-                          const weekMinutes =
-                            totalsByEmployee[employee.id]?.weekMinutes ?? 0;
+                          const weekTotals = totalsByEmployee[
+                            employee.id
+                          ]?.week ?? {
+                            publishedMinutes: 0,
+                            draftMinutes: 0,
+                            totalMinutes: 0,
+                          };
                           const areaVisual = getAreaVisualFromRole(
                             employee.role,
                           );
@@ -5085,9 +5151,26 @@ export default async function StaffSchedulePage({
                                 data-schedule-cell
                                 className="border-b border-[var(--ui-border)] px-3"
                               >
-                                <span className="inline-flex max-w-full rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-xs font-semibold text-[var(--ui-text)]">
-                                  {formatHoursCompact(weekMinutes)}
-                                </span>
+                                <div
+                                  className="flex flex-col gap-1 text-[11px] font-semibold leading-tight"
+                                  title={`Publicadas: ${formatHoursCompact(
+                                    weekTotals.publishedMinutes,
+                                  )} · Borrador: ${formatHoursCompact(
+                                    weekTotals.draftMinutes,
+                                  )} · Total: ${formatHoursCompact(
+                                    weekTotals.totalMinutes,
+                                  )}`}
+                                >
+                                  <span className="inline-flex max-w-full rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                                    Pub {formatHoursCompact(weekTotals.publishedMinutes)}
+                                  </span>
+                                  <span className="inline-flex max-w-full rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
+                                    Bor {formatHoursCompact(weekTotals.draftMinutes)}
+                                  </span>
+                                  <span className="inline-flex max-w-full rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 py-0.5 text-[var(--ui-text)]">
+                                    Tot {formatHoursCompact(weekTotals.totalMinutes)}
+                                  </span>
+                                </div>
                               </td>
                             </tr>
                           );
