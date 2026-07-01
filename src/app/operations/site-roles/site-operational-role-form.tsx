@@ -163,6 +163,12 @@ export function SiteOperationalRoleForm({
         </label>
       </div>
 
+      {!compact ? (
+        <p className="text-xs leading-5 text-slate-500">
+          Marca rol por defecto cuando VISO deba proponerlo automáticamente en horarios. Si una sede o área tiene varios roles sin default, el horario pedirá selección manual.
+        </p>
+      ) : null}
+
       <button type="submit" className="ui-btn ui-btn--brand">
         {submitLabel}
       </button>

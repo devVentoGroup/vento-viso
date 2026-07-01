@@ -50,6 +50,8 @@ type SiteRow = {
 type SiteRoleRow = {
   site_id: string | null;
   role_code: string | null;
+  role_label?: string | null;
+  site_name?: string | null;
   is_active: boolean | null;
 };
 
@@ -197,9 +199,9 @@ async function loadData(db: SupabaseLike): Promise<LoadedData> {
     }),
     loadTable<SiteRoleRow>({
       db,
-      table: "site_operational_roles",
-      columns: "site_id,role_code,is_active",
-      orderColumn: "role_code",
+      table: "vento_site_operational_role_matrix_v1",
+      columns: "site_id,site_name,role_code,role_label,is_active",
+      orderColumn: "site_name",
     }),
     loadTable<CheckinPointRow>({
       db,
@@ -304,12 +306,15 @@ export default async function EmployeeProfilesPage({
       const siteId = String(row.site_id ?? "").trim();
       const roleCode = String(row.role_code ?? "").trim();
       if (!siteId || !roleCode) return null;
+      const roleLabel = String(row.role_label ?? roleCode).trim();
+      const rowSiteName = String(row.site_name ?? "").trim();
       return {
         value: siteRoleKey(siteId, roleCode),
-        label: `${siteName(siteMap.get(siteId))} · ${roleCode}`,
+        label: `${rowSiteName || siteName(siteMap.get(siteId))} · ${roleLabel}`,
       };
     })
     .filter((option): option is { value: string; label: string } => Boolean(option));
+  const siteRoleLabelMap = new Map(siteRoleOptions.map((option) => [option.value, option.label]));
 
   return (
     <div className="space-y-6">
@@ -430,12 +435,16 @@ export default async function EmployeeProfilesPage({
                 const checkinSiteId = String(profile.default_checkin_site_id ?? "");
                 const checkoutSiteId = String(profile.default_checkout_site_id ?? "");
                 const isActive = profile.is_active !== false;
+                const roleLabel =
+                  siteRoleLabelMap.get(siteRoleKey(siteId, roleCode)) ||
+                  roleCode ||
+                  "Rol no encontrado";
 
                 return (
                   <TableRow key={profileKey(profile)}>
                     <TableCell>{employeeName(employeeMap.get(employeeId))}</TableCell>
                     <TableCell>{siteName(siteMap.get(siteId))}</TableCell>
-                    <TableCell>{roleCode || "Rol no encontrado"}</TableCell>
+                    <TableCell>{roleLabel}</TableCell>
                     <TableCell>{pointLabel(pointMap.get(checkinSiteId))}</TableCell>
                     <TableCell>{pointLabel(pointMap.get(checkoutSiteId))}</TableCell>
                     <TableCell>

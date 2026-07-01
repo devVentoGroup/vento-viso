@@ -3017,8 +3017,13 @@ export default async function StaffSchedulePage({
   };
 
   const getSiteDefaultOperationalRoleForArea = (
-    _areaId: string | null | undefined,
+    areaId: string | null | undefined,
   ) => {
+    const options = getOperationalRoleOptionsForArea(areaId);
+    const defaultOptions = options.filter((role) => role.isDefault);
+
+    if (defaultOptions.length === 1) return defaultOptions[0]?.code ?? "";
+    if (options.length === 1) return options[0]?.code ?? "";
     return "";
   };
 
@@ -3231,6 +3236,7 @@ export default async function StaffSchedulePage({
     const existingCode = String(existingRole ?? "").trim();
     if (existingCode && operationalRoleCodes.has(existingCode))
       return existingCode;
+    if (targetEmployeeIds.length === 0) return "";
 
     const areaRoleCodes = new Set(
       getOperationalRoleOptionsForArea(areaId).map((role) => role.code),

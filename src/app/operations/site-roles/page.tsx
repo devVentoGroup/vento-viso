@@ -587,9 +587,6 @@ export default async function SiteRolesPage({
                       <div className="font-medium text-slate-950">
                         {roleMatrixLabel(role) || "—"}
                       </div>
-                      <code className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
-                        {codeValue || "—"}
-                      </code>
                     </TableCell>
                     <TableCell>{roleMatrixFamily(role) || "—"}</TableCell>
                     <TableCell>
