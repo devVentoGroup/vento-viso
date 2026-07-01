@@ -3298,13 +3298,7 @@ export default async function StaffSchedulePage({
     isoDate(toMonday(new Date())),
     viewMode,
   );
-  const quickEmployeeId = (() => {
-    const candidate = safeDecode(sp.quick_employee_id);
-    if (!candidate) return "";
-    return employees.some((employee) => employee.id === candidate)
-      ? candidate
-      : "";
-  })();
+  const quickEmployeeId = "";
   const quickShiftDate = (() => {
     const candidate = safeDecode(sp.quick_shift_date);
     if (!candidate) return weekDays[0]?.iso ?? "";
@@ -4008,7 +4002,6 @@ export default async function StaffSchedulePage({
                   />
                   <input type="hidden" name="break_minutes" value="0" />
                   <input type="hidden" name="status" value="scheduled" />
-                  <input type="hidden" name="keep_quick" value="1" />
 
                   <label className="flex flex-col gap-1 md:col-span-4">
                     <span className="ui-label">Trabajador</span>
