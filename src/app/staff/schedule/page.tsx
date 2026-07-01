@@ -1376,7 +1376,8 @@ async function deleteShiftAction(formData: FormData) {
   const { error } = await supabase
     .from("employee_shifts")
     .delete()
-    .eq("id", shiftId);
+    .eq("id", shiftId)
+    .is("published_at", null);
   if (error) {
     redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
   }
@@ -3027,6 +3028,45 @@ export default async function StaffSchedulePage({
     return "";
   };
 
+  const getDefaultAreaIdForOperationalRole = (
+    roleCode: string | null | undefined,
+  ) => {
+    const normalizedRoleCode = cleanOptionalText(roleCode);
+    if (!normalizedRoleCode) return "";
+
+    const matchingOptions = operationalRoleSelectOptions.filter(
+      (role) => role.code === normalizedRoleCode && role.areaId,
+    );
+    const uniqueAreaIds = uniqueTextValues(
+      matchingOptions.map((role) => role.areaId),
+    );
+
+    if (uniqueAreaIds.length === 1) return uniqueAreaIds[0] ?? "";
+
+    const defaultMatchingOptions = matchingOptions.filter(
+      (role) => role.isDefault,
+    );
+    const uniqueDefaultAreaIds = uniqueTextValues(
+      defaultMatchingOptions.map((role) => role.areaId),
+    );
+
+    return uniqueDefaultAreaIds.length === 1 ? (uniqueDefaultAreaIds[0] ?? "") : "";
+  };
+
+  const getEmployeeDefaultOperationalRole = (employee: EmployeeRow) => {
+    const profiles = operationalProfilesByEmployee.get(employee.id) ?? [];
+    const profileRole = cleanOptionalText(
+      profiles.find((profile) =>
+        cleanOptionalText(profile.default_operational_role),
+      )?.default_operational_role,
+    );
+
+    return (
+      profileRole ??
+      getOperationalRoleCandidateFromBaseRole(employee.role)
+    );
+  };
+
   const operationalRoleCodes = new Set(
     operationalRoleOptions.map((role) => role.code),
   );
@@ -3644,8 +3684,11 @@ export default async function StaffSchedulePage({
                           <option
                             key={employee.id}
                             value={employee.id}
-                            data-operational-role={getOperationalRoleCandidateFromBaseRole(
-                              employee.role,
+                            data-operational-role={getEmployeeDefaultOperationalRole(
+                              employee,
+                            )}
+                            data-default-area-id={getDefaultAreaIdForOperationalRole(
+                              getEmployeeDefaultOperationalRole(employee),
                             )}
                           >
                             {employee.full_name ??
@@ -3722,6 +3765,19 @@ export default async function StaffSchedulePage({
                           </option>
                         ))}
                       </select>
+                    </label>
+
+                    <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                      <input
+                        type="checkbox"
+                        className="rounded border-[var(--ui-border)]"
+                        defaultChecked={Boolean(
+                          selectedShift.checkin_site_id ||
+                            selectedShift.checkout_site_id,
+                        )}
+                        data-external-points-toggle
+                      />
+                      Cambiar puntos de entrada y salida
                     </label>
 
                     <label
@@ -3868,6 +3924,26 @@ export default async function StaffSchedulePage({
                       </button>
                     </div>
                   </form>
+                  {!selectedShift.published_at ? (
+                    <form action={deleteShiftAction} className="mt-3">
+                      <input
+                        type="hidden"
+                        name="shift_id"
+                        value={selectedShift.id}
+                      />
+                      <input
+                        type="hidden"
+                        name="return_to"
+                        value={returnToWithoutEdit}
+                      />
+                      <button
+                        type="submit"
+                        className="ui-btn ui-btn--ghost ui-btn--sm text-[var(--ui-danger)]"
+                      >
+                        Eliminar este borrador
+                      </button>
+                    </form>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -3913,8 +3989,11 @@ export default async function StaffSchedulePage({
                         <option
                           key={employee.id}
                           value={employee.id}
-                          data-operational-role={getOperationalRoleCandidateFromBaseRole(
-                            employee.role,
+                          data-operational-role={getEmployeeDefaultOperationalRole(
+                            employee,
+                          )}
+                          data-default-area-id={getDefaultAreaIdForOperationalRole(
+                            getEmployeeDefaultOperationalRole(employee),
                           )}
                         >
                           {employee.full_name ?? employee.alias ?? employee.id}
@@ -3972,6 +4051,15 @@ export default async function StaffSchedulePage({
                         </option>
                       ))}
                     </select>
+                  </label>
+
+                  <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                    <input
+                      type="checkbox"
+                      className="rounded border-[var(--ui-border)]"
+                      data-external-points-toggle
+                    />
+                    Cambiar puntos de entrada y salida
                   </label>
 
                   <label
@@ -4340,11 +4428,35 @@ export default async function StaffSchedulePage({
                       return true;
                     }
 
+                    function getSelectedEmployeeOption(form) {
+                      var employeeSelect = form.querySelector('select[name="employee_id"]');
+                      return employeeSelect && employeeSelect.selectedIndex >= 0
+                        ? employeeSelect.options[employeeSelect.selectedIndex]
+                        : null;
+                    }
+
+                    function applyEmployeeDefaultArea(form, force) {
+                      var areaSelect = form.querySelector("[data-operational-area-select]");
+                      if (!areaSelect) return;
+
+                      var selectedEmployeeOption = getSelectedEmployeeOption(form);
+                      var employeeId = selectedEmployeeOption ? selectedEmployeeOption.value || "" : "";
+                      var defaultAreaId = employeeId && selectedEmployeeOption
+                        ? selectedEmployeeOption.getAttribute("data-default-area-id") || ""
+                        : "";
+
+                      if (defaultAreaId && (force || !areaSelect.value)) {
+                        areaSelect.value = defaultAreaId;
+                      }
+                    }
+
                     function refreshExternalPointControls(form) {
+                      var externalPointsToggle = form.querySelector("[data-external-points-toggle]");
+                      var externalPointsEnabled = Boolean(externalPointsToggle && externalPointsToggle.checked);
                       var roleSelect = form.querySelector("[data-operational-role-select]");
                       var selectedOption = getSelectedRoleOption(roleSelect);
-                      var requiresCheckin = Boolean(selectedOption && selectedOption.getAttribute("data-requires-checkin") === "1");
-                      var requiresCheckout = Boolean(selectedOption && selectedOption.getAttribute("data-requires-checkout") === "1");
+                      var requiresCheckin = externalPointsEnabled;
+                      var requiresCheckout = externalPointsEnabled;
 
                       var checkinRow = form.querySelector("[data-external-checkin-row]");
                       var checkoutRow = form.querySelector("[data-external-checkout-row]");
@@ -4365,9 +4477,10 @@ export default async function StaffSchedulePage({
                     }
 
                     function syncDefaultOperationalRole(form, force) {
-                      var employeeSelect = form.querySelector('select[name="employee_id"]');
                       var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
                       if (!operationalRoleSelect) return;
+
+                      applyEmployeeDefaultArea(form, force);
 
                       var activeOptions = getActiveRoleOptions(form);
                       var selectedOption = getSelectedRoleOption(operationalRoleSelect);
@@ -4378,9 +4491,7 @@ export default async function StaffSchedulePage({
                         return;
                       }
 
-                      var selectedEmployeeOption = employeeSelect && employeeSelect.selectedIndex >= 0
-                        ? employeeSelect.options[employeeSelect.selectedIndex]
-                        : null;
+                      var selectedEmployeeOption = getSelectedEmployeeOption(form);
                       var employeeId = selectedEmployeeOption ? selectedEmployeeOption.value || "" : "";
                       var employeeRole = employeeId && selectedEmployeeOption ? selectedEmployeeOption.getAttribute("data-operational-role") || "" : "";
 
@@ -4427,6 +4538,12 @@ export default async function StaffSchedulePage({
                       if (operationalRoleSelect) {
                         operationalRoleSelect.addEventListener("change", function () {
                           operationalRoleSelect.setAttribute("data-user-changed", "1");
+                          refreshExternalPointControls(form);
+                        });
+                      }
+                      var externalPointsToggle = form.querySelector("[data-external-points-toggle]");
+                      if (externalPointsToggle) {
+                        externalPointsToggle.addEventListener("change", function () {
                           refreshExternalPointControls(form);
                         });
                       }
