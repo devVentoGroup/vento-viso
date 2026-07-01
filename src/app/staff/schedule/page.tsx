@@ -535,8 +535,10 @@ function formatShiftRange(
 function formatHoursCompact(totalMinutes: number) {
   const safe = Math.max(0, Math.round(totalMinutes));
   const hours = safe / 60;
-  if (Number.isInteger(hours)) return `${hours}h`;
-  return `${hours.toFixed(1).replace(".", ",")}h`;
+  if (Number.isInteger(hours)) {
+    return `${hours} ${hours === 1 ? "hora" : "horas"}`;
+  }
+  return `${hours.toFixed(1).replace(".", ",")} horas`;
 }
 
 function createEmptyPeriodTotals(): EmployeePeriodTotals {
@@ -2797,6 +2799,15 @@ export default async function StaffSchedulePage({
   const returnToWithoutEdit = appendReturnParams(returnTo, {
     edit_shift: null,
   });
+  const totalsStartCandidates = [
+    monthStartIso,
+    fortnightStartIso,
+    weekStartIso,
+  ].sort();
+  const totalsEndCandidates = [monthEndIso, fortnightEndIso, weekEndIso].sort();
+  const totalsStartIso = totalsStartCandidates[0] ?? monthStartIso;
+  const totalsEndIso =
+    totalsEndCandidates[totalsEndCandidates.length - 1] ?? monthEndIso;
 
   const [
     directEmployeesRes,
@@ -3126,8 +3137,8 @@ export default async function StaffSchedulePage({
       )
       .in("employee_id", employeeIds)
       .eq("site_id", selectedSiteId)
-      .gte("shift_date", monthStartIso)
-      .lte("shift_date", monthEndIso);
+      .gte("shift_date", totalsStartIso)
+      .lte("shift_date", totalsEndIso);
 
     for (const employeeId of employeeIds) {
       totalsByEmployee[employeeId] = {
@@ -3442,7 +3453,7 @@ export default async function StaffSchedulePage({
       width: 158,
       minWidth: 112,
     })),
-    { key: "total", label: "Horas semana", width: 156, minWidth: 128 },
+    { key: "total", label: "Horas semana", width: 220, minWidth: 190 },
   ];
   const scheduleTableInitialWidth = scheduleTableColumns.reduce(
     (total, column) => total + column.width,
@@ -3689,7 +3700,7 @@ export default async function StaffSchedulePage({
                   </div>
                   <form
                     action={saveShiftAction}
-                    className="grid gap-3 md:grid-cols-8"
+                    className="grid gap-4 xl:grid-cols-12"
                     data-operational-context-form
                   >
                     <input
@@ -3707,8 +3718,18 @@ export default async function StaffSchedulePage({
                       name="return_to"
                       value={returnToWithoutEdit}
                     />
+                    <input
+                      type="hidden"
+                      name="break_minutes"
+                      value={selectedShift.break_minutes ?? 0}
+                    />
+                    <input
+                      type="hidden"
+                      name="status"
+                      value={selectedShift.status || "scheduled"}
+                    />
 
-                    <label className="flex flex-col gap-1 md:col-span-2">
+                    <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Trabajador</span>
                       <select
                         name="employee_id"
@@ -3735,7 +3756,7 @@ export default async function StaffSchedulePage({
                       </select>
                     </label>
 
-                    <label className="flex flex-col gap-1 md:col-span-2">
+                    <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Área del turno</span>
                       <select
                         name="area_id"
@@ -3753,7 +3774,7 @@ export default async function StaffSchedulePage({
                       </select>
                     </label>
 
-                    <label className="flex flex-col gap-1 md:col-span-2">
+                    <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Rol operativo del turno</span>
                       <select
                         name="operational_role"
@@ -3803,7 +3824,7 @@ export default async function StaffSchedulePage({
                       </select>
                     </label>
 
-                    <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                    <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                       <input
                         type="checkbox"
                         className="rounded border-[var(--ui-border)]"
@@ -3814,7 +3835,7 @@ export default async function StaffSchedulePage({
                     </label>
 
                     <label
-                      className={`flex flex-col gap-1 md:col-span-2 ${
+                      className={`flex flex-col gap-1 md:col-span-6 ${
                         selectedShiftHasExternalPoints ? "" : "hidden"
                       }`}
                       hidden={!selectedShiftHasExternalPoints}
@@ -3838,7 +3859,7 @@ export default async function StaffSchedulePage({
                     </label>
 
                     <label
-                      className={`flex flex-col gap-1 md:col-span-2 ${
+                      className={`flex flex-col gap-1 md:col-span-6 ${
                         selectedShiftHasExternalPoints ? "" : "hidden"
                       }`}
                       hidden={!selectedShiftHasExternalPoints}
@@ -3861,7 +3882,7 @@ export default async function StaffSchedulePage({
                       </select>
                     </label>
 
-                    <label className="flex flex-col gap-1">
+                    <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Día</span>
                       <input
                         name="shift_date"
@@ -3874,7 +3895,7 @@ export default async function StaffSchedulePage({
                       />
                     </label>
 
-                    <label className="flex flex-col gap-1">
+                    <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Inicio</span>
                       <input
                         name="start_time"
@@ -3885,7 +3906,7 @@ export default async function StaffSchedulePage({
                       />
                     </label>
 
-                    <label className="flex flex-col gap-1">
+                    <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Fin</span>
                       <input
                         name="end_time"
@@ -3896,33 +3917,8 @@ export default async function StaffSchedulePage({
                       />
                     </label>
 
-                    <label className="flex flex-col gap-1">
-                      <span className="ui-label">Descanso (min)</span>
-                      <input
-                        name="break_minutes"
-                        type="number"
-                        min={0}
-                        className="ui-input"
-                        defaultValue={selectedShift.break_minutes ?? 0}
-                      />
-                    </label>
 
-                    <label className="flex flex-col gap-1">
-                      <span className="ui-label">Estado</span>
-                      <select
-                        name="status"
-                        className="ui-input"
-                        defaultValue={selectedShift.status}
-                      >
-                        <option value="scheduled">Programado</option>
-                        <option value="confirmed">Confirmado</option>
-                        <option value="completed">Completado</option>
-                        <option value="cancelled">Cancelado</option>
-                        <option value="no_show">No asistió</option>
-                      </select>
-                    </label>
-
-                    <label className="flex flex-col gap-1 md:col-span-6">
+                    <label className="flex flex-col gap-1 md:col-span-12">
                       <span className="ui-label">Nota</span>
                       <input
                         name="notes"
@@ -3931,7 +3927,7 @@ export default async function StaffSchedulePage({
                       />
                     </label>
 
-                    <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                    <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                       <input
                         type="checkbox"
                         name="show_end_as_close"
@@ -3945,7 +3941,7 @@ export default async function StaffSchedulePage({
                       al empleado
                     </label>
 
-                    <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                    <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                       <input
                         type="checkbox"
                         name="full_day_rest"
@@ -3956,10 +3952,10 @@ export default async function StaffSchedulePage({
                       Marcar este día como descanso
                     </label>
 
-                    <div className="flex items-end md:col-span-1">
+                    <div className="flex items-end justify-end md:col-span-12">
                       <button
                         type="submit"
-                        className="ui-btn ui-btn--brand w-full"
+                        className="ui-btn ui-btn--brand w-full md:w-auto md:min-w-[220px]"
                       >
                         Guardar cambios
                       </button>
@@ -3986,9 +3982,8 @@ export default async function StaffSchedulePage({
                     </form>
                   ) : null}
                 </div>
-              ) : null}
-
-              <div className="ui-panel">
+              ) : (
+                <div className="ui-panel">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="ui-h3">Agregar turno por horas</div>
@@ -4001,7 +3996,7 @@ export default async function StaffSchedulePage({
                 </div>
                 <form
                   action={saveShiftAction}
-                  className="grid gap-3 md:grid-cols-6"
+                  className="grid gap-4 xl:grid-cols-12"
                   data-quick-shift-form
                   data-operational-context-form
                 >
@@ -4015,7 +4010,7 @@ export default async function StaffSchedulePage({
                   <input type="hidden" name="status" value="scheduled" />
                   <input type="hidden" name="keep_quick" value="1" />
 
-                  <label className="flex flex-col gap-1 md:col-span-2">
+                  <label className="flex flex-col gap-1 md:col-span-4">
                     <span className="ui-label">Trabajador</span>
                     <select
                       name="employee_id"
@@ -4043,7 +4038,7 @@ export default async function StaffSchedulePage({
                     </select>
                   </label>
 
-                  <label className="flex flex-col gap-1 md:col-span-2">
+                  <label className="flex flex-col gap-1 md:col-span-4">
                     <span className="ui-label">Área del turno</span>
                     <select
                       name="area_id"
@@ -4061,7 +4056,7 @@ export default async function StaffSchedulePage({
                     </select>
                   </label>
 
-                  <label className="flex flex-col gap-1 md:col-span-2">
+                  <label className="flex flex-col gap-1 md:col-span-4">
                     <span className="ui-label">Rol operativo</span>
                     <select
                       name="operational_role"
@@ -4094,7 +4089,7 @@ export default async function StaffSchedulePage({
                     </select>
                   </label>
 
-                  <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                  <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                     <input
                       type="checkbox"
                       className="rounded border-[var(--ui-border)]"
@@ -4104,7 +4099,7 @@ export default async function StaffSchedulePage({
                   </label>
 
                   <label
-                    className="hidden flex flex-col gap-1 md:col-span-3"
+                    className="hidden flex flex-col gap-1 md:col-span-6"
                     hidden
                     data-external-checkin-row
                   >
@@ -4126,7 +4121,7 @@ export default async function StaffSchedulePage({
                   </label>
 
                   <label
-                    className="hidden flex flex-col gap-1 md:col-span-3"
+                    className="hidden flex flex-col gap-1 md:col-span-6"
                     hidden
                     data-external-checkout-row
                   >
@@ -4148,7 +4143,7 @@ export default async function StaffSchedulePage({
                   </label>
 
                   <label
-                    className="flex flex-col gap-1"
+                    className="flex flex-col gap-1 md:col-span-4"
                     data-quick-shift-time-control
                   >
                     <span className="ui-label">Día bloque 1</span>
@@ -4164,7 +4159,7 @@ export default async function StaffSchedulePage({
                   </label>
 
                   <label
-                    className="flex flex-col gap-1"
+                    className="flex flex-col gap-1 md:col-span-4"
                     data-quick-shift-time-control
                   >
                     <span className="ui-label">Inicio bloque 1</span>
@@ -4179,7 +4174,7 @@ export default async function StaffSchedulePage({
                   </label>
 
                   <label
-                    className="flex flex-col gap-1"
+                    className="flex flex-col gap-1 md:col-span-4"
                     data-quick-shift-time-control
                   >
                     <span className="ui-label">Fin bloque 1</span>
@@ -4193,7 +4188,7 @@ export default async function StaffSchedulePage({
                     />
                   </label>
 
-                  <label className="flex flex-col gap-1 md:col-span-6">
+                  <label className="flex flex-col gap-1 md:col-span-12">
                     <span className="ui-label">Nota bloque 1</span>
                     <input
                       name="block_notes"
@@ -4203,7 +4198,7 @@ export default async function StaffSchedulePage({
                     />
                   </label>
 
-                  <label className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                  <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                     <input
                       type="checkbox"
                       name="block_rest_day"
@@ -4214,10 +4209,10 @@ export default async function StaffSchedulePage({
                     Marcar este día como descanso completo
                   </label>
 
-                  <div className="contents" data-quick-shift-extra-blocks />
+                  <div className="contents md:col-span-12" data-quick-shift-extra-blocks />
 
                   <div
-                    className="flex flex-wrap items-center gap-2 md:col-span-6"
+                    className="flex flex-wrap items-center gap-2 md:col-span-12"
                     data-quick-shift-add-row
                   >
                     <button
@@ -4234,7 +4229,7 @@ export default async function StaffSchedulePage({
                   </div>
 
                   <label
-                    className="md:col-span-6 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]"
+                    className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]"
                     data-quick-shift-close-row
                   >
                     <input
@@ -4248,19 +4243,21 @@ export default async function StaffSchedulePage({
                     al empleado
                   </label>
 
-                  <div className="flex items-end">
+                  <div className="flex items-end justify-end md:col-span-12">
                     <button
                       type="submit"
-                      className="ui-btn ui-btn--brand w-full"
+                      className="ui-btn ui-btn--brand w-full md:w-auto md:min-w-[220px]"
                     >
                       Guardar turno
                     </button>
                   </div>
                 </form>
-                <Script
-                  id="viso-quick-shift-blocks"
-                  strategy="afterInteractive"
-                >
+              </div>
+              )}
+              <Script
+                id="viso-quick-shift-blocks"
+                strategy="afterInteractive"
+              >
                   {`
                   (function () {
                     var draftKey = "viso:quick-shift-draft:" + window.location.pathname + ":" + (new URLSearchParams(window.location.search).get("site_id") || "site");
@@ -4282,31 +4279,31 @@ export default async function StaffSchedulePage({
                       var maxDate = firstDateInput ? firstDateInput.getAttribute("max") || "" : "";
                       var inheritedDate = firstDateInput ? firstDateInput.value || "" : "";
                       var block = document.createElement("div");
-                      block.className = "rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 md:col-span-6";
+                      block.className = "rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 md:col-span-12";
                       block.setAttribute("data-quick-shift-block", "optional");
                       block.innerHTML =
                         '<div class="mb-2 flex items-center justify-between gap-2">' +
                           '<div class="text-sm font-semibold text-[var(--ui-text)]">Bloque ' + index + '</div>' +
                           '<button type="button" class="text-xs font-semibold text-[var(--ui-danger)]" data-remove-shift-block>Quitar</button>' +
                         '</div>' +
-                        '<div class="grid gap-3 md:grid-cols-3">' +
-                          '<label class="flex flex-col gap-1">' +
+                        '<div class="grid gap-3 md:grid-cols-12">' +
+                          '<label class="flex flex-col gap-1 md:col-span-4">' +
                             '<span class="ui-label">Día bloque ' + index + '</span>' +
                             '<input name="block_shift_date" type="date" class="ui-input" value="' + inheritedDate + '" min="' + minDate + '" max="' + maxDate + '" />' +
                           '</label>' +
-                          '<label class="flex flex-col gap-1">' +
+                          '<label class="flex flex-col gap-1 md:col-span-4">' +
                             '<span class="ui-label">Inicio bloque ' + index + '</span>' +
                             '<input name="block_start_time" type="time" class="ui-input" data-quick-shift-time-input />' +
                           '</label>' +
-                          '<label class="flex flex-col gap-1">' +
+                          '<label class="flex flex-col gap-1 md:col-span-4">' +
                             '<span class="ui-label">Fin bloque ' + index + '</span>' +
                             '<input name="block_end_time" type="time" class="ui-input" data-quick-shift-time-input />' +
                           '</label>' +
-                          '<label class="flex flex-col gap-1 md:col-span-3">' +
+                          '<label class="flex flex-col gap-1 md:col-span-12">' +
                             '<span class="ui-label">Nota bloque ' + index + '</span>' +
                             '<input name="block_notes" class="ui-input" placeholder="Opcional" maxLength="240" />' +
                           '</label>' +
-                          '<label class="inline-flex items-center gap-2 text-sm text-[var(--ui-text)] md:col-span-3">' +
+                          '<label class="inline-flex items-center gap-2 text-sm text-[var(--ui-text)] md:col-span-12">' +
                             '<input type="checkbox" name="block_rest_day" value="' + (index - 1) + '" class="rounded border-[var(--ui-border)]" data-block-rest-day-toggle />' +
                             '<span>Marcar este día como descanso completo</span>' +
                           '</label>' +
@@ -4736,8 +4733,7 @@ export default async function StaffSchedulePage({
                     }
                   })();
                 `}
-                </Script>
-              </div>
+              </Script>
 
               <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5162,13 +5158,13 @@ export default async function StaffSchedulePage({
                                   )}`}
                                 >
                                   <span className="inline-flex max-w-full rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
-                                    Pub {formatHoursCompact(weekTotals.publishedMinutes)}
+                                    Publicadas {formatHoursCompact(weekTotals.publishedMinutes)}
                                   </span>
                                   <span className="inline-flex max-w-full rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
-                                    Bor {formatHoursCompact(weekTotals.draftMinutes)}
+                                    Borrador {formatHoursCompact(weekTotals.draftMinutes)}
                                   </span>
                                   <span className="inline-flex max-w-full rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 py-0.5 text-[var(--ui-text)]">
-                                    Tot {formatHoursCompact(weekTotals.totalMinutes)}
+                                    Total {formatHoursCompact(weekTotals.totalMinutes)}
                                   </span>
                                 </div>
                               </td>
