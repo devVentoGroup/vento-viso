@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import Script from "next/script";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -3330,6 +3330,9 @@ export default async function StaffSchedulePage({
     selectedShift?.operational_role,
     selectedShiftAreaId,
   );
+  const selectedShiftHasExternalPoints = Boolean(
+    selectedShift?.checkin_site_id || selectedShift?.checkout_site_id,
+  );
   const scheduleOperationalAlerts = weekShifts
     .filter((shift) => shift.shift_kind !== "descanso")
     .flatMap((shift) => {
@@ -3771,17 +3774,17 @@ export default async function StaffSchedulePage({
                       <input
                         type="checkbox"
                         className="rounded border-[var(--ui-border)]"
-                        defaultChecked={Boolean(
-                          selectedShift.checkin_site_id ||
-                            selectedShift.checkout_site_id,
-                        )}
+                        defaultChecked={selectedShiftHasExternalPoints}
                         data-external-points-toggle
                       />
                       Cambiar puntos de entrada y salida
                     </label>
 
                     <label
-                      className="flex flex-col gap-1 md:col-span-2"
+                      className={`flex flex-col gap-1 md:col-span-2 ${
+                        selectedShiftHasExternalPoints ? "" : "hidden"
+                      }`}
+                      hidden={!selectedShiftHasExternalPoints}
                       data-external-checkin-row
                     >
                       <span className="ui-label">Punto check-in</span>
@@ -3789,6 +3792,7 @@ export default async function StaffSchedulePage({
                         name="checkin_site_id"
                         className="ui-input"
                         defaultValue={selectedShift.checkin_site_id ?? ""}
+                        disabled={!selectedShiftHasExternalPoints}
                         data-external-checkin-select
                       >
                         <option value="">Usar perfil / sede</option>
@@ -3801,7 +3805,10 @@ export default async function StaffSchedulePage({
                     </label>
 
                     <label
-                      className="flex flex-col gap-1 md:col-span-2"
+                      className={`flex flex-col gap-1 md:col-span-2 ${
+                        selectedShiftHasExternalPoints ? "" : "hidden"
+                      }`}
+                      hidden={!selectedShiftHasExternalPoints}
                       data-external-checkout-row
                     >
                       <span className="ui-label">Punto check-out</span>
@@ -3809,6 +3816,7 @@ export default async function StaffSchedulePage({
                         name="checkout_site_id"
                         className="ui-input"
                         defaultValue={selectedShift.checkout_site_id ?? ""}
+                        disabled={!selectedShiftHasExternalPoints}
                         data-external-checkout-select
                       >
                         <option value="">Usar perfil / sede</option>
@@ -4063,7 +4071,8 @@ export default async function StaffSchedulePage({
                   </label>
 
                   <label
-                    className="flex flex-col gap-1 md:col-span-3"
+                    className="hidden flex flex-col gap-1 md:col-span-3"
+                    hidden
                     data-external-checkin-row
                   >
                     <span className="ui-label">Punto check-in</span>
@@ -4071,6 +4080,7 @@ export default async function StaffSchedulePage({
                       name="checkin_site_id"
                       className="ui-input"
                       defaultValue=""
+                      disabled
                       data-external-checkin-select
                     >
                       <option value="">Usar perfil / sede</option>
@@ -4083,7 +4093,8 @@ export default async function StaffSchedulePage({
                   </label>
 
                   <label
-                    className="flex flex-col gap-1 md:col-span-3"
+                    className="hidden flex flex-col gap-1 md:col-span-3"
+                    hidden
                     data-external-checkout-row
                   >
                     <span className="ui-label">Punto check-out</span>
@@ -4091,6 +4102,7 @@ export default async function StaffSchedulePage({
                       name="checkout_site_id"
                       className="ui-input"
                       defaultValue=""
+                      disabled
                       data-external-checkout-select
                     >
                       <option value="">Usar perfil / sede</option>
@@ -4377,7 +4389,9 @@ export default async function StaffSchedulePage({
 
                     function setElementHidden(element, hidden) {
                       if (!element) return;
+                      element.hidden = hidden;
                       element.classList.toggle("hidden", hidden);
+                      element.setAttribute("aria-hidden", hidden ? "true" : "false");
                       element.style.display = hidden ? "none" : "";
                     }
 
@@ -4593,6 +4607,33 @@ export default async function StaffSchedulePage({
                     if (!window.__visoQuickShiftDelegated) {
                       window.__visoQuickShiftDelegated = true;
 
+                      document.addEventListener("change", function (event) {
+                        var target = event.target;
+                        if (!target || !target.matches || !target.closest) return;
+                        var form = target.closest("[data-operational-context-form]");
+                        if (!form) return;
+
+                        if (target.matches("[data-external-points-toggle]")) {
+                          initOperationalContextForm(form);
+                          refreshExternalPointControls(form);
+                          return;
+                        }
+
+                        if (target.matches("[data-operational-role-select]")) {
+                          target.setAttribute("data-user-changed", "1");
+                          initOperationalContextForm(form);
+                          refreshExternalPointControls(form);
+                          return;
+                        }
+
+                        if (target.matches("[data-operational-area-select]") || target.matches('select[name="employee_id"]')) {
+                          var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
+                          if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
+                          initOperationalContextForm(form);
+                          syncDefaultOperationalRole(form, true);
+                        }
+                      });
+
                       document.addEventListener("click", function (event) {
                         var addButton = event.target && event.target.closest ? event.target.closest("[data-add-shift-block]") : null;
                         if (addButton) {
@@ -4614,6 +4655,16 @@ export default async function StaffSchedulePage({
                         block.remove();
                         syncBlockRestIndexes(quickForm);
                         refreshBlockControls(quickForm);
+                      });
+                    }
+
+                    if (!window.__visoQuickShiftObserver && window.MutationObserver) {
+                      window.__visoQuickShiftObserver = new MutationObserver(function () {
+                        initAllQuickShiftForms();
+                      });
+                      window.__visoQuickShiftObserver.observe(document.body, {
+                        childList: true,
+                        subtree: true,
                       });
                     }
 
