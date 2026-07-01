@@ -3447,7 +3447,7 @@ export default async function StaffSchedulePage({
       width: 158,
       minWidth: 112,
     })),
-    { key: "total", label: "Horas semana", width: 220, minWidth: 190 },
+    { key: "total", label: "Horas semana", width: 190, minWidth: 150 },
   ];
   const scheduleTableInitialWidth = scheduleTableColumns.reduce(
     (total, column) => total + column.width,
@@ -5142,23 +5142,53 @@ export default async function StaffSchedulePage({
                               >
                                 <div
                                   className="flex flex-col gap-1 text-[11px] font-semibold leading-tight"
-                                  title={`Publicadas: ${formatHoursCompact(
-                                    weekTotals.publishedMinutes,
-                                  )} · Borrador: ${formatHoursCompact(
-                                    weekTotals.draftMinutes,
-                                  )} · Total: ${formatHoursCompact(
-                                    weekTotals.totalMinutes,
-                                  )}`}
+                                  title={
+                                    weekTotals.totalMinutes <= 0
+                                      ? "Sin horas planificadas"
+                                      : weekTotals.publishedMinutes > 0 &&
+                                          weekTotals.draftMinutes > 0
+                                        ? `Publicadas: ${formatHoursCompact(
+                                            weekTotals.publishedMinutes,
+                                          )} · Borrador: ${formatHoursCompact(
+                                            weekTotals.draftMinutes,
+                                          )} · Total: ${formatHoursCompact(
+                                            weekTotals.totalMinutes,
+                                          )}`
+                                        : weekTotals.publishedMinutes > 0
+                                          ? `${formatHoursCompact(
+                                              weekTotals.publishedMinutes,
+                                            )} publicadas`
+                                          : `${formatHoursCompact(
+                                              weekTotals.draftMinutes,
+                                            )} en borrador`
+                                  }
                                 >
-                                  <span className="inline-flex max-w-full rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
-                                    Publicadas {formatHoursCompact(weekTotals.publishedMinutes)}
-                                  </span>
-                                  <span className="inline-flex max-w-full rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
-                                    Borrador {formatHoursCompact(weekTotals.draftMinutes)}
-                                  </span>
-                                  <span className="inline-flex max-w-full rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 py-0.5 text-[var(--ui-text)]">
-                                    Total {formatHoursCompact(weekTotals.totalMinutes)}
-                                  </span>
+                                  {weekTotals.totalMinutes <= 0 ? (
+                                    <span className="text-xs text-[var(--ui-muted)]">
+                                      —
+                                    </span>
+                                  ) : weekTotals.publishedMinutes > 0 &&
+                                    weekTotals.draftMinutes > 0 ? (
+                                    <>
+                                      <span className="inline-flex max-w-full rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                                        Publicadas {formatHoursCompact(weekTotals.publishedMinutes)}
+                                      </span>
+                                      <span className="inline-flex max-w-full rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
+                                        Borrador {formatHoursCompact(weekTotals.draftMinutes)}
+                                      </span>
+                                      <span className="inline-flex max-w-full rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 py-0.5 text-[var(--ui-text)]">
+                                        Total {formatHoursCompact(weekTotals.totalMinutes)}
+                                      </span>
+                                    </>
+                                  ) : weekTotals.publishedMinutes > 0 ? (
+                                    <span className="inline-flex max-w-full rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                                      {formatHoursCompact(weekTotals.publishedMinutes)} publicadas
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex max-w-full rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
+                                      {formatHoursCompact(weekTotals.draftMinutes)} en borrador
+                                    </span>
+                                  )}
                                 </div>
                               </td>
                             </tr>
