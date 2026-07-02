@@ -5065,14 +5065,88 @@ export default async function StaffSchedulePage({
                                                   shift.operational_role,
                                                   operationalRoleOptions,
                                                 )
-                                              : formatHoursCompact(
-                                                  getShiftMinutes(shift),
-                                                );
-                                          const cardTitle = [
-                                            shiftAreaLabel,
-                                            roleLabel,
+                                              : null;
+                                          const visibleStatus =
+                                            visibleStatusByShiftId[shift.id] ??
+                                            "Programado";
+                                          const statusLabel =
+                                            visibleStatus === "Borrador" ||
+                                            visibleStatus === "Cancelado" ||
+                                            visibleStatus === "No asistió" ||
+                                            visibleStatus === "Con retraso"
+                                              ? visibleStatus
+                                              : null;
+                                          const employeeDefaultRole =
+                                            getEmployeeDefaultOperationalRole(
+                                              employee,
+                                            );
+                                          const roleMatchesDefault =
+                                            Boolean(
+                                              shift.operational_role &&
+                                                employeeDefaultRole &&
+                                                normalizeRole(
+                                                  shift.operational_role,
+                                                ) ===
+                                                  normalizeRole(
+                                                    employeeDefaultRole,
+                                                  ),
+                                            );
+                                          const roleMatchesBase =
+                                            Boolean(
+                                              employee.role &&
+                                                roleLabel &&
+                                                normalizeRole(
+                                                  roleLabel,
+                                                ).includes(
+                                                  normalizeRole(employee.role),
+                                                ),
+                                            );
+                                          const shouldShowRoleLabel = Boolean(
+                                            roleLabel &&
+                                              !roleMatchesDefault &&
+                                              !roleMatchesBase,
+                                          );
+                                          const normalizedShiftArea =
+                                            normalizeRole(shiftAreaLabel);
+                                          const normalizedRowArea =
+                                            normalizeRole(areaVisual.label);
+                                          const shouldShowAreaLabel = Boolean(
+                                            shift.area_id &&
+                                              shiftAreaLabel !== "General" &&
+                                              normalizedShiftArea &&
+                                              normalizedRowArea &&
+                                              !normalizedShiftArea.includes(
+                                                normalizedRowArea,
+                                              ) &&
+                                              !normalizedRowArea.includes(
+                                                normalizedShiftArea,
+                                              ) &&
+                                              !shouldShowRoleLabel,
+                                          );
+                                          const visibleDetailLabels = [
+                                            statusLabel,
+                                            shouldShowRoleLabel
+                                              ? roleLabel
+                                              : null,
+                                            shouldShowAreaLabel
+                                              ? shiftAreaLabel
+                                              : null,
                                             externalPointLabel,
-                                            shift.notes,
+                                          ].filter(Boolean);
+                                          const cardTitle = [
+                                            formatShiftRange(
+                                              shift.start_time,
+                                              shift.end_time,
+                                              shift.show_end_as_close,
+                                              shift.shift_kind,
+                                            ),
+                                            visibleStatus,
+                                            roleLabel,
+                                            shiftAreaLabel,
+                                            externalPointLabel,
+                                            shift.notes
+                                              ? `Nota: ${shift.notes}`
+                                              : null,
                                           ]
                                             .filter(Boolean)
                                             .join(" · ");
@@ -5087,7 +5161,7 @@ export default async function StaffSchedulePage({
                                                 },
                                               )}
                                               data-schedule-shift-card
-                                              className={`flex min-w-[78px] flex-1 basis-[78px] flex-col rounded-lg border px-2 no-underline ${areaVisual.shiftClass} ${
+                                              className={`flex min-w-[78px] flex-1 basis-[78px] flex-col rounded-lg border px-2 py-1 no-underline ${areaVisual.shiftClass} ${
                                                 shift.published_at
                                                   ? "ring-1 ring-emerald-300/70"
                                                   : "ring-1 ring-amber-300/70"
@@ -5102,30 +5176,24 @@ export default async function StaffSchedulePage({
                                                   shift.shift_kind,
                                                 )}
                                               </div>
-                                              <div className="mt-0.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] leading-tight text-[var(--ui-muted)]">
-                                                {shift.shift_kind ===
-                                                "descanso" ? (
-                                                  <span>Día libre</span>
-                                                ) : (
-                                                  <>
-                                                    <span>
-                                                      {visibleStatusByShiftId[
-                                                        shift.id
-                                                      ] ?? "Programado"}
-                                                    </span>
-                                                    <span>{roleLabel}</span>
-                                                  </>
-                                                )}
-                                              </div>
-                                              {shift.shift_kind !==
+                                              {shift.shift_kind ===
                                               "descanso" ? (
-                                                <div className="mt-0.5 truncate text-[10px] font-medium leading-tight text-[var(--ui-muted)]">
-                                                  {shiftAreaLabel}
+                                                <div className="mt-0.5 text-[11px] leading-tight text-[var(--ui-muted)]">
+                                                  Día libre
                                                 </div>
-                                              ) : null}
-                                              {externalPointLabel ? (
-                                                <div className="mt-0.5 truncate text-[10px] font-semibold leading-tight text-[var(--ui-brand)]">
-                                                  {externalPointLabel}
+                                              ) : visibleDetailLabels.length >
+                                                0 ? (
+                                                <div className="mt-0.5 flex flex-col gap-0.5 text-[11px] leading-tight text-[var(--ui-muted)]">
+                                                  {visibleDetailLabels.map(
+                                                    (label) => (
+                                                      <span
+                                                        key={String(label)}
+                                                        className="truncate"
+                                                      >
+                                                        {label}
+                                                      </span>
+                                                    ),
+                                                  )}
                                                 </div>
                                               ) : null}
                                             </Link>
