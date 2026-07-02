@@ -4,6 +4,9 @@ export type PlanningEmployee = {
   id: string;
   fullName: string | null;
   roleCode: PlanningRoleCode | null;
+  operationalRoleCodes?: PlanningRoleCode[];
+  defaultOperationalRoleCode?: PlanningRoleCode | null;
+  defaultAreaId?: string | null;
   siteIds: string[];
   isActive: boolean;
   targetWeeklyMinutes?: number | null;
@@ -27,6 +30,7 @@ export type PlanningEmployee = {
 export type PlanningShiftDraft = {
   employeeId: string;
   siteId: string;
+  areaId?: string | null;
   shiftDate: string;
   startTime: string;
   endTime: string;
@@ -55,6 +59,17 @@ export type PlanningAvailability = {
   availabilityKind?: "preferred" | "allowed" | "blocked";
 };
 
+export type PlanningRoleConcurrencyLimit = {
+  id?: string;
+  siteId?: string | null;
+  roleCode: PlanningRoleCode;
+  dayOfWeek?: number | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  maxConcurrent: number;
+  appliesAcrossSites: boolean;
+};
+
 export type PlanningRuleViolation = {
   code:
     | "employee_inactive"
@@ -62,7 +77,8 @@ export type PlanningRuleViolation = {
     | "role_mismatch"
     | "outside_availability"
     | "blocked_window"
-    | "shift_overlap";
+    | "shift_overlap"
+    | "role_concurrency_limit";
   message: string;
 };
 
@@ -87,4 +103,5 @@ export type PlanningGenerationInput = {
   requirements: PlanningRequirement[];
   availability: PlanningAvailability[];
   existingShifts: PlanningShiftDraft[];
+  roleConcurrencyLimits?: PlanningRoleConcurrencyLimit[];
 };

@@ -141,6 +141,18 @@ type AvailabilityRow = {
   availability_kind: "preferred" | "allowed" | "blocked";
 };
 
+type RoleConcurrencyLimitRow = {
+  id: string;
+  site_id: string | null;
+  role_code: string;
+  day_of_week: number | null;
+  start_time: string | null;
+  end_time: string | null;
+  max_concurrent: number;
+  applies_across_sites: boolean;
+  is_active: boolean;
+};
+
 type OperationalRoleOption = {
   code: string;
   label: string;
@@ -453,7 +465,11 @@ function buildHistoricalRequirements(
           startTime: pattern.start_time,
           endTime: pattern.end_time,
           requiredHeadcount: 1,
-          roleCode: pattern.operational_role ?? pattern.employee_role ?? null,
+          roleCode:
+            pattern.operational_role ??
+            getOperationalRoleCandidateFromBaseRole(pattern.employee_role) ??
+            pattern.employee_role ??
+            null,
         });
       }
     }
@@ -2039,6 +2055,9 @@ async function suggestDraftWeekAction(formData: FormData) {
     availabilityRes,
     planningLimitsRes,
     shiftPreferencesRes,
+    siteOperationalRolesRes,
+    employeeOperationalProfilesRes,
+    roleConcurrencyLimitsRes,
   ] = await Promise.all([
     supabase
       .from("employees")
@@ -2099,11 +2118,48 @@ async function suggestDraftWeekAction(formData: FormData) {
         "employee_id,prefers_morning,prefers_afternoon,prefers_evening,avoid_opening,avoid_closing",
       )
       .or(`site_id.is.null,site_id.eq.${siteId}`),
+    supabase
+      .from("vento_site_operational_role_matrix_v1")
+      .select(
+        "site_id,area_id,area_name,area_kind,role_code,role_label,role_family,is_default,requires_external_checkin,requires_external_checkout,is_active",
+      )
+      .eq("site_id", siteId)
+      .eq("is_active", true),
+    supabase
+      .from("employee_site_operational_profiles")
+      .select(
+        "employee_id,site_id,default_operational_role,default_checkin_site_id,default_checkout_site_id,is_active",
+      )
+      .eq("site_id", siteId)
+      .neq("is_active", false),
+    supabase
+      .schema("viso")
+      .from("role_concurrency_limits")
+      .select(
+        "id,site_id,role_code,day_of_week,start_time,end_time,max_concurrent,applies_across_sites,is_active",
+      )
+      .eq("is_active", true)
+      .or(`site_id.is.null,site_id.eq.${siteId}`),
   ]);
 
   if (staffingRequirementsRes.error) {
     redirect(
       `${returnTo}&error=${encodeURIComponent(staffingRequirementsRes.error.message)}`,
+    );
+  }
+  if (siteOperationalRolesRes.error) {
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(siteOperationalRolesRes.error.message)}`,
+    );
+  }
+  if (employeeOperationalProfilesRes.error) {
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(employeeOperationalProfilesRes.error.message)}`,
+    );
+  }
+  if (roleConcurrencyLimitsRes.error) {
+    redirect(
+      `${returnTo}&error=${encodeURIComponent(roleConcurrencyLimitsRes.error.message)}`,
     );
   }
 
@@ -2142,10 +2198,12 @@ async function suggestDraftWeekAction(formData: FormData) {
     .map<PlanningShiftDraft>((shift) => ({
       employeeId: shift.employee_id,
       siteId: shift.site_id,
+      areaId: shift.area_id ?? null,
       shiftDate: shift.shift_date,
       startTime: shift.start_time,
       endTime: shift.end_time,
       shiftKind: (shift.shift_kind ?? "laboral") as "laboral" | "descanso",
+      requiredRoleCode: shift.operational_role ?? null,
       notes: shift.notes,
     }));
 
@@ -2241,12 +2299,47 @@ async function suggestDraftWeekAction(formData: FormData) {
     avoid_opening: boolean;
     avoid_closing: boolean;
   }>;
+  const roleConcurrencyLimitRows = (roleConcurrencyLimitsRes.data ??
+    []) as RoleConcurrencyLimitRow[];
   const planningLimitsByEmployee = new Map(
     planningLimitsRows.map((row) => [row.employee_id, row] as const),
   );
   const shiftPreferencesByEmployee = new Map(
     shiftPreferenceRows.map((row) => [row.employee_id, row] as const),
   );
+  const activeSiteOperationalRoleRows = (siteOperationalRolesRes.data ??
+    []) as SiteOperationalRoleRow[];
+  const employeeOperationalProfileRows = (employeeOperationalProfilesRes.data ??
+    []) as EmployeeOperationalProfileRow[];
+  const profileByEmployee = new Map(
+    employeeOperationalProfileRows
+      .filter((profile) => profile.site_id === siteId)
+      .map((profile) => [profile.employee_id, profile] as const),
+  );
+  const operationalRoleCodesByEmployee = new Map<string, Set<string>>();
+  const areaIdByOperationalRole = new Map<string, string | null>();
+
+  for (const roleRow of activeSiteOperationalRoleRows) {
+    const roleCode = cleanOptionalText(roleRow.role_code);
+    if (!roleCode) continue;
+    if (!areaIdByOperationalRole.has(roleCode) || roleRow.is_default) {
+      areaIdByOperationalRole.set(roleCode, cleanOptionalText(roleRow.area_id));
+    }
+  }
+
+  for (const employee of employees) {
+    const profile = profileByEmployee.get(employee.id);
+    const roleCodes = new Set<string>();
+    const profileRole = cleanOptionalText(profile?.default_operational_role);
+    const baseCandidateRole = getOperationalRoleCandidateFromBaseRole(
+      employee.role,
+    );
+
+    if (profileRole) roleCodes.add(profileRole);
+    if (baseCandidateRole) roleCodes.add(baseCandidateRole);
+
+    operationalRoleCodesByEmployee.set(employee.id, roleCodes);
+  }
   const historicalSignalsByEmployee = buildEmployeeHistoricalSignals(
     historicalShiftRows,
     weekStart,
@@ -2271,13 +2364,27 @@ async function suggestDraftWeekAction(formData: FormData) {
     employees: employees.map((employee) => {
       const limits = planningLimitsByEmployee.get(employee.id);
       const preferences = shiftPreferencesByEmployee.get(employee.id);
+      const profile = profileByEmployee.get(employee.id);
+      const profileRole = cleanOptionalText(profile?.default_operational_role);
+      const fallbackRole = getOperationalRoleCandidateFromBaseRole(
+        employee.role,
+      );
+      const defaultOperationalRoleCode = profileRole ?? fallbackRole;
+      const operationalRoleCodes = [
+        ...(operationalRoleCodesByEmployee.get(employee.id) ?? new Set()),
+      ];
       const historicalSignals =
         historicalSignalsByEmployee.get(employee.id) ??
         createEmptyHistoricalSignals();
       return {
         id: employee.id,
         fullName: employee.full_name ?? employee.alias ?? null,
-        roleCode: employee.role ?? null,
+        roleCode: defaultOperationalRoleCode ?? employee.role ?? null,
+        operationalRoleCodes,
+        defaultOperationalRoleCode,
+        defaultAreaId: defaultOperationalRoleCode
+          ? (areaIdByOperationalRole.get(defaultOperationalRoleCode) ?? null)
+          : null,
         siteIds: [siteId],
         isActive: Boolean(employee.is_active ?? true),
         targetWeeklyMinutes: limits?.target_weekly_minutes ?? null,
@@ -2301,6 +2408,16 @@ async function suggestDraftWeekAction(formData: FormData) {
     requirements,
     availability,
     existingShifts,
+    roleConcurrencyLimits: roleConcurrencyLimitRows.map((row) => ({
+      id: row.id,
+      siteId: row.site_id,
+      roleCode: row.role_code,
+      dayOfWeek: row.day_of_week,
+      startTime: row.start_time,
+      endTime: row.end_time,
+      maxConcurrent: row.max_concurrent,
+      appliesAcrossSites: row.applies_across_sites,
+    })),
   };
 
   const suggestion = generateWeeklySuggestion(generationInput);
@@ -2410,7 +2527,7 @@ async function suggestDraftWeekAction(formData: FormData) {
         {
           employee_id: shift.employeeId,
           site_id: shift.siteId,
-          area_id: null,
+          area_id: shift.areaId ?? null,
           shift_date: shift.shiftDate,
           start_time: shift.startTime,
           end_time: shift.endTime,
@@ -5146,24 +5263,24 @@ export default async function StaffSchedulePage({
                                             normalizeRole(areaVisual.label);
                                           const roleAlreadyNamesArea = Boolean(
                                             roleLabel &&
-                                              normalizeRole(roleLabel).includes(
-                                                normalizedShiftAreaLabel,
-                                              ),
+                                            normalizeRole(roleLabel).includes(
+                                              normalizedShiftAreaLabel,
+                                            ),
                                           );
                                           const shouldShowRoleLabel = Boolean(
                                             shift.shift_kind !== "descanso" &&
-                                              roleLabel &&
-                                              shiftOperationalRole &&
-                                              shiftOperationalRole !==
-                                                employeeDefaultOperationalRole,
+                                            roleLabel &&
+                                            shiftOperationalRole &&
+                                            shiftOperationalRole !==
+                                              employeeDefaultOperationalRole,
                                           );
                                           const shouldShowAreaLabel = Boolean(
                                             shift.shift_kind !== "descanso" &&
-                                              shiftAreaLabel !== "General" &&
-                                              !normalizedShiftAreaLabel.includes(
-                                                normalizedGroupAreaLabel,
-                                              ) &&
-                                              !roleAlreadyNamesArea,
+                                            shiftAreaLabel !== "General" &&
+                                            !normalizedShiftAreaLabel.includes(
+                                              normalizedGroupAreaLabel,
+                                            ) &&
+                                            !roleAlreadyNamesArea,
                                           );
                                           const shiftTemporalClass =
                                             visibleStatus === "Borrador"

@@ -91,28 +91,67 @@ function getPreferenceScore(
   return score;
 }
 
+function normalizeRole(value: string | null | undefined) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function roleMatches(
+  role: string | null | undefined,
+  requiredRole: string | null | undefined,
+) {
+  const normalizedRole = normalizeRole(role);
+  const normalizedRequired = normalizeRole(requiredRole);
+  if (!normalizedRequired) return true;
+  if (!normalizedRole) return false;
+  return (
+    normalizedRole === normalizedRequired ||
+    normalizedRole.includes(normalizedRequired) ||
+    normalizedRequired.includes(normalizedRole)
+  );
+}
+
+function employeeRoleScore(
+  employee: PlanningEmployee,
+  requiredRole: string | null | undefined,
+) {
+  if (!requiredRole) return employee.defaultOperationalRoleCode ? 1 : 0;
+
+  const operationalRoles = employee.operationalRoleCodes ?? [];
+  if (
+    employee.defaultOperationalRoleCode &&
+    normalizeRole(employee.defaultOperationalRoleCode) ===
+      normalizeRole(requiredRole)
+  ) {
+    return 5;
+  }
+  if (
+    operationalRoles.some(
+      (roleCode) => normalizeRole(roleCode) === normalizeRole(requiredRole),
+    )
+  ) {
+    return 4;
+  }
+  if (
+    operationalRoles.some((roleCode) => roleMatches(roleCode, requiredRole))
+  ) {
+    return 3;
+  }
+  if (roleMatches(employee.roleCode, requiredRole)) return 2;
+  return 0;
+}
+
 function sortCandidates(
   employees: PlanningEmployee[],
   requirement: PlanningGenerationInput["requirements"][number],
   allShifts: PlanningShiftDraft[],
 ) {
   return [...employees].sort((left, right) => {
-    const leftRoleScore =
-      requirement.roleCode && left.roleCode
-        ? Number(
-            left.roleCode
-              .toLowerCase()
-              .includes(requirement.roleCode.toLowerCase()),
-          )
-        : Number(!requirement.roleCode);
-    const rightRoleScore =
-      requirement.roleCode && right.roleCode
-        ? Number(
-            right.roleCode
-              .toLowerCase()
-              .includes(requirement.roleCode.toLowerCase()),
-          )
-        : Number(!requirement.roleCode);
+    const leftRoleScore = employeeRoleScore(left, requirement.roleCode);
+    const rightRoleScore = employeeRoleScore(right, requirement.roleCode);
 
     if (leftRoleScore !== rightRoleScore) return rightRoleScore - leftRoleScore;
 
@@ -181,16 +220,24 @@ export function generateWeeklySuggestion(
     let assigned = false;
 
     for (const candidate of sortedCandidates) {
+      const operationalRole =
+        requirement.roleCode ??
+        candidate.defaultOperationalRoleCode ??
+        candidate.roleCode ??
+        null;
       const draft: PlanningShiftDraft = {
         employeeId: candidate.id,
         siteId: requirement.siteId,
+        areaId: candidate.defaultAreaId ?? null,
         shiftDate: requirement.shiftDate,
         startTime: requirement.startTime,
         endTime: requirement.endTime,
         shiftKind: "laboral",
-        requiredRoleCode: requirement.roleCode,
+        requiredRoleCode: operationalRole,
         notes: "Sugerencia inicial del motor de planificación",
         explanation: {
+          operationalRole,
+          defaultAreaId: candidate.defaultAreaId ?? null,
           rotation: {
             dayPart: getShiftDayPart(requirement.startTime),
             recentMorningShifts: candidate.recentMorningShifts ?? 0,
@@ -210,6 +257,7 @@ export function generateWeeklySuggestion(
         employee: candidate,
         availability: input.availability,
         existingShifts: [...input.existingShifts, ...proposedShifts],
+        roleConcurrencyLimits: input.roleConcurrencyLimits,
       });
 
       if (violations.length > 0) {
