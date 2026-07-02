@@ -644,6 +644,20 @@ function getVisibleShiftStatus(
   return "Programado";
 }
 
+function isShiftInProgress(
+  shift: ShiftRow,
+  nowDateIso: string,
+  nowMinutes: number,
+) {
+  if (shift.shift_kind === "descanso") return false;
+  if (shift.status === "cancelled") return false;
+  if (nowDateIso !== shift.shift_date) return false;
+  return (
+    nowMinutes >= parseTimeToMinutes(shift.start_time) &&
+    nowMinutes <= parseTimeToMinutes(shift.end_time)
+  );
+}
+
 type AreaVisual = {
   label: string;
   chipClass: string;
@@ -3088,7 +3102,9 @@ export default async function StaffSchedulePage({
       defaultMatchingOptions.map((role) => role.areaId),
     );
 
-    return uniqueDefaultAreaIds.length === 1 ? (uniqueDefaultAreaIds[0] ?? "") : "";
+    return uniqueDefaultAreaIds.length === 1
+      ? (uniqueDefaultAreaIds[0] ?? "")
+      : "";
   };
 
   const getEmployeeDefaultOperationalRole = (employee: EmployeeRow) => {
@@ -3100,8 +3116,7 @@ export default async function StaffSchedulePage({
     );
 
     return (
-      profileRole ??
-      getOperationalRoleCandidateFromBaseRole(employee.role)
+      profileRole ?? getOperationalRoleCandidateFromBaseRole(employee.role)
     );
   };
 
@@ -3668,7 +3683,10 @@ export default async function StaffSchedulePage({
           {viewMode === "table" ? (
             <div className="space-y-3" data-schedule-table-shell>
               {selectedShift ? (
-                <div key={`edit-shift-panel-${selectedShift.id}`} className="ui-panel">
+                <div
+                  key={`edit-shift-panel-${selectedShift.id}`}
+                  className="ui-panel"
+                >
                   <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <div className="ui-h3">Editar turno seleccionado</div>
@@ -3912,7 +3930,6 @@ export default async function StaffSchedulePage({
                       />
                     </label>
 
-
                     <label className="flex flex-col gap-1 md:col-span-12">
                       <span className="ui-label">Nota</span>
                       <input
@@ -3979,280 +3996,286 @@ export default async function StaffSchedulePage({
                 </div>
               ) : (
                 <div className="ui-panel">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="ui-h3">Agregar turno por horas</div>
-                    <p className="text-xs text-[var(--ui-muted)]">
-                      Flujo rápido: eliges persona, día y uno o varios bloques
-                      horarios. Cada bloque se guarda como una fila
-                      independiente.
-                    </p>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="ui-h3">Agregar turno por horas</div>
+                      <p className="text-xs text-[var(--ui-muted)]">
+                        Flujo rápido: eliges persona, día y uno o varios bloques
+                        horarios. Cada bloque se guarda como una fila
+                        independiente.
+                      </p>
+                    </div>
                   </div>
+                  <form
+                    action={saveShiftAction}
+                    className="grid gap-4 xl:grid-cols-12"
+                    data-quick-shift-form
+                    data-operational-context-form
+                  >
+                    <input
+                      type="hidden"
+                      name="site_id"
+                      value={selectedSiteId}
+                    />
+                    <input
+                      type="hidden"
+                      name="return_to"
+                      value={returnToWithoutEdit}
+                    />
+                    <input type="hidden" name="break_minutes" value="0" />
+                    <input type="hidden" name="status" value="scheduled" />
+
+                    <label className="flex flex-col gap-1 md:col-span-4">
+                      <span className="ui-label">Trabajador</span>
+                      <select
+                        name="employee_id"
+                        className="ui-input"
+                        required
+                        defaultValue={quickEmployeeId}
+                      >
+                        <option value="" disabled>
+                          Seleccionar
+                        </option>
+                        {employees.map((employee) => (
+                          <option
+                            key={employee.id}
+                            value={employee.id}
+                            data-operational-role={getEmployeeDefaultOperationalRole(
+                              employee,
+                            )}
+                            data-default-area-id={getDefaultAreaIdForOperationalRole(
+                              getEmployeeDefaultOperationalRole(employee),
+                            )}
+                          >
+                            {employee.full_name ??
+                              employee.alias ??
+                              employee.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 md:col-span-4">
+                      <span className="ui-label">Área del turno</span>
+                      <select
+                        name="area_id"
+                        className="ui-input"
+                        defaultValue={quickShiftAreaId}
+                        data-operational-area-select
+                      >
+                        <option value="">General / sin área</option>
+                        {operationalAreaOptions.map((area) => (
+                          <option key={area.id} value={area.id}>
+                            {area.label}
+                            {area.kind ? ` · ${area.kind}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 md:col-span-4">
+                      <span className="ui-label">Rol operativo</span>
+                      <select
+                        name="operational_role"
+                        className="ui-input"
+                        defaultValue={quickShiftOperationalRole}
+                        data-operational-role-select
+                        data-site-default-role={siteDefaultOperationalRole}
+                      >
+                        <option value="">Seleccionar rol operativo</option>
+                        {operationalRoleSelectOptions.map((role) => (
+                          <option
+                            key={`${role.areaId ?? "general"}-${role.code}`}
+                            value={role.code}
+                            data-area-id={role.areaId ?? ""}
+                            data-is-default={role.isDefault ? "1" : "0"}
+                            data-requires-checkin={
+                              role.requiresExternalCheckin ? "1" : "0"
+                            }
+                            data-requires-checkout={
+                              role.requiresExternalCheckout ? "1" : "0"
+                            }
+                          >
+                            {role.label}
+                            {role.requiresExternalCheckin ||
+                            role.requiresExternalCheckout
+                              ? " · punto externo"
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                      <input
+                        type="checkbox"
+                        className="rounded border-[var(--ui-border)]"
+                        data-external-points-toggle
+                      />
+                      Cambiar puntos de entrada y salida
+                    </label>
+
+                    <label
+                      className="hidden flex flex-col gap-1 md:col-span-6"
+                      hidden
+                      data-external-checkin-row
+                    >
+                      <span className="ui-label">Punto check-in</span>
+                      <select
+                        name="checkin_site_id"
+                        className="ui-input"
+                        defaultValue=""
+                        disabled
+                        data-external-checkin-select
+                      >
+                        <option value="">Usar perfil / sede</option>
+                        {sites.map((site) => (
+                          <option key={site.id} value={site.id}>
+                            {site.name ?? site.code ?? site.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label
+                      className="hidden flex flex-col gap-1 md:col-span-6"
+                      hidden
+                      data-external-checkout-row
+                    >
+                      <span className="ui-label">Punto check-out</span>
+                      <select
+                        name="checkout_site_id"
+                        className="ui-input"
+                        defaultValue=""
+                        disabled
+                        data-external-checkout-select
+                      >
+                        <option value="">Usar perfil / sede</option>
+                        {sites.map((site) => (
+                          <option key={site.id} value={site.id}>
+                            {site.name ?? site.code ?? site.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label
+                      className="flex flex-col gap-1 md:col-span-4"
+                      data-quick-shift-time-control
+                    >
+                      <span className="ui-label">Día bloque 1</span>
+                      <input
+                        name="block_shift_date"
+                        type="date"
+                        className="ui-input"
+                        required
+                        defaultValue={quickShiftDate}
+                        min={weekDays[0]?.iso ?? undefined}
+                        max={weekDays[6]?.iso ?? undefined}
+                      />
+                    </label>
+
+                    <label
+                      className="flex flex-col gap-1 md:col-span-4"
+                      data-quick-shift-time-control
+                    >
+                      <span className="ui-label">Inicio bloque 1</span>
+                      <input
+                        name="block_start_time"
+                        type="time"
+                        className="ui-input"
+                        required
+                        defaultValue="06:00"
+                        data-quick-shift-time-input
+                      />
+                    </label>
+
+                    <label
+                      className="flex flex-col gap-1 md:col-span-4"
+                      data-quick-shift-time-control
+                    >
+                      <span className="ui-label">Fin bloque 1</span>
+                      <input
+                        name="block_end_time"
+                        type="time"
+                        className="ui-input"
+                        required
+                        defaultValue="14:00"
+                        data-quick-shift-time-input
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1 md:col-span-12">
+                      <span className="ui-label">Nota bloque 1</span>
+                      <input
+                        name="block_notes"
+                        className="ui-input"
+                        placeholder="Ej. Cajero, apoyo barra, cierre"
+                        maxLength={240}
+                      />
+                    </label>
+
+                    <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                      <input
+                        type="checkbox"
+                        name="block_rest_day"
+                        value="0"
+                        className="rounded border-[var(--ui-border)]"
+                        data-block-rest-day-toggle
+                      />
+                      Marcar este día como descanso completo
+                    </label>
+
+                    <div
+                      className="contents md:col-span-12"
+                      data-quick-shift-extra-blocks
+                    />
+
+                    <div
+                      className="flex flex-wrap items-center gap-2 md:col-span-12"
+                      data-quick-shift-add-row
+                    >
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn--ghost ui-btn--sm"
+                        data-add-shift-block
+                      >
+                        + Agregar otro bloque o día
+                      </button>
+                      <span className="text-xs text-[var(--ui-muted)]">
+                        Úsalo para cargar varios bloques o varios días del mismo
+                        trabajador.
+                      </span>
+                    </div>
+
+                    <label
+                      className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]"
+                      data-quick-shift-close-row
+                    >
+                      <input
+                        type="checkbox"
+                        name="show_end_as_close"
+                        value="1"
+                        className="rounded border-[var(--ui-border)]"
+                        data-quick-shift-close-input
+                      />
+                      Mostrar la salida del último bloque como
+                      &quot;Cierre&quot; al empleado
+                    </label>
+
+                    <div className="flex items-end justify-end md:col-span-12">
+                      <button
+                        type="submit"
+                        className="ui-btn ui-btn--brand w-full md:w-auto md:min-w-[220px]"
+                      >
+                        Guardar turno
+                      </button>
+                    </div>
+                  </form>
                 </div>
-                <form
-                  action={saveShiftAction}
-                  className="grid gap-4 xl:grid-cols-12"
-                  data-quick-shift-form
-                  data-operational-context-form
-                >
-                  <input type="hidden" name="site_id" value={selectedSiteId} />
-                  <input
-                    type="hidden"
-                    name="return_to"
-                    value={returnToWithoutEdit}
-                  />
-                  <input type="hidden" name="break_minutes" value="0" />
-                  <input type="hidden" name="status" value="scheduled" />
-
-                  <label className="flex flex-col gap-1 md:col-span-4">
-                    <span className="ui-label">Trabajador</span>
-                    <select
-                      name="employee_id"
-                      className="ui-input"
-                      required
-                      defaultValue={quickEmployeeId}
-                    >
-                      <option value="" disabled>
-                        Seleccionar
-                      </option>
-                      {employees.map((employee) => (
-                        <option
-                          key={employee.id}
-                          value={employee.id}
-                          data-operational-role={getEmployeeDefaultOperationalRole(
-                            employee,
-                          )}
-                          data-default-area-id={getDefaultAreaIdForOperationalRole(
-                            getEmployeeDefaultOperationalRole(employee),
-                          )}
-                        >
-                          {employee.full_name ?? employee.alias ?? employee.id}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="flex flex-col gap-1 md:col-span-4">
-                    <span className="ui-label">Área del turno</span>
-                    <select
-                      name="area_id"
-                      className="ui-input"
-                      defaultValue={quickShiftAreaId}
-                      data-operational-area-select
-                    >
-                      <option value="">General / sin área</option>
-                      {operationalAreaOptions.map((area) => (
-                        <option key={area.id} value={area.id}>
-                          {area.label}
-                          {area.kind ? ` · ${area.kind}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="flex flex-col gap-1 md:col-span-4">
-                    <span className="ui-label">Rol operativo</span>
-                    <select
-                      name="operational_role"
-                      className="ui-input"
-                      defaultValue={quickShiftOperationalRole}
-                      data-operational-role-select
-                      data-site-default-role={siteDefaultOperationalRole}
-                    >
-                      <option value="">Seleccionar rol operativo</option>
-                      {operationalRoleSelectOptions.map((role) => (
-                        <option
-                          key={`${role.areaId ?? "general"}-${role.code}`}
-                          value={role.code}
-                          data-area-id={role.areaId ?? ""}
-                          data-is-default={role.isDefault ? "1" : "0"}
-                          data-requires-checkin={
-                            role.requiresExternalCheckin ? "1" : "0"
-                          }
-                          data-requires-checkout={
-                            role.requiresExternalCheckout ? "1" : "0"
-                          }
-                        >
-                          {role.label}
-                          {role.requiresExternalCheckin ||
-                          role.requiresExternalCheckout
-                            ? " · punto externo"
-                            : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                    <input
-                      type="checkbox"
-                      className="rounded border-[var(--ui-border)]"
-                      data-external-points-toggle
-                    />
-                    Cambiar puntos de entrada y salida
-                  </label>
-
-                  <label
-                    className="hidden flex flex-col gap-1 md:col-span-6"
-                    hidden
-                    data-external-checkin-row
-                  >
-                    <span className="ui-label">Punto check-in</span>
-                    <select
-                      name="checkin_site_id"
-                      className="ui-input"
-                      defaultValue=""
-                      disabled
-                      data-external-checkin-select
-                    >
-                      <option value="">Usar perfil / sede</option>
-                      {sites.map((site) => (
-                        <option key={site.id} value={site.id}>
-                          {site.name ?? site.code ?? site.id}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label
-                    className="hidden flex flex-col gap-1 md:col-span-6"
-                    hidden
-                    data-external-checkout-row
-                  >
-                    <span className="ui-label">Punto check-out</span>
-                    <select
-                      name="checkout_site_id"
-                      className="ui-input"
-                      defaultValue=""
-                      disabled
-                      data-external-checkout-select
-                    >
-                      <option value="">Usar perfil / sede</option>
-                      {sites.map((site) => (
-                        <option key={site.id} value={site.id}>
-                          {site.name ?? site.code ?? site.id}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label
-                    className="flex flex-col gap-1 md:col-span-4"
-                    data-quick-shift-time-control
-                  >
-                    <span className="ui-label">Día bloque 1</span>
-                    <input
-                      name="block_shift_date"
-                      type="date"
-                      className="ui-input"
-                      required
-                      defaultValue={quickShiftDate}
-                      min={weekDays[0]?.iso ?? undefined}
-                      max={weekDays[6]?.iso ?? undefined}
-                    />
-                  </label>
-
-                  <label
-                    className="flex flex-col gap-1 md:col-span-4"
-                    data-quick-shift-time-control
-                  >
-                    <span className="ui-label">Inicio bloque 1</span>
-                    <input
-                      name="block_start_time"
-                      type="time"
-                      className="ui-input"
-                      required
-                      defaultValue="06:00"
-                      data-quick-shift-time-input
-                    />
-                  </label>
-
-                  <label
-                    className="flex flex-col gap-1 md:col-span-4"
-                    data-quick-shift-time-control
-                  >
-                    <span className="ui-label">Fin bloque 1</span>
-                    <input
-                      name="block_end_time"
-                      type="time"
-                      className="ui-input"
-                      required
-                      defaultValue="14:00"
-                      data-quick-shift-time-input
-                    />
-                  </label>
-
-                  <label className="flex flex-col gap-1 md:col-span-12">
-                    <span className="ui-label">Nota bloque 1</span>
-                    <input
-                      name="block_notes"
-                      className="ui-input"
-                      placeholder="Ej. Cajero, apoyo barra, cierre"
-                      maxLength={240}
-                    />
-                  </label>
-
-                  <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                    <input
-                      type="checkbox"
-                      name="block_rest_day"
-                      value="0"
-                      className="rounded border-[var(--ui-border)]"
-                      data-block-rest-day-toggle
-                    />
-                    Marcar este día como descanso completo
-                  </label>
-
-                  <div className="contents md:col-span-12" data-quick-shift-extra-blocks />
-
-                  <div
-                    className="flex flex-wrap items-center gap-2 md:col-span-12"
-                    data-quick-shift-add-row
-                  >
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn--ghost ui-btn--sm"
-                      data-add-shift-block
-                    >
-                      + Agregar otro bloque o día
-                    </button>
-                    <span className="text-xs text-[var(--ui-muted)]">
-                      Úsalo para cargar varios bloques o varios días del mismo
-                      trabajador.
-                    </span>
-                  </div>
-
-                  <label
-                    className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]"
-                    data-quick-shift-close-row
-                  >
-                    <input
-                      type="checkbox"
-                      name="show_end_as_close"
-                      value="1"
-                      className="rounded border-[var(--ui-border)]"
-                      data-quick-shift-close-input
-                    />
-                    Mostrar la salida del último bloque como &quot;Cierre&quot;
-                    al empleado
-                  </label>
-
-                  <div className="flex items-end justify-end md:col-span-12">
-                    <button
-                      type="submit"
-                      className="ui-btn ui-btn--brand w-full md:w-auto md:min-w-[220px]"
-                    >
-                      Guardar turno
-                    </button>
-                  </div>
-                </form>
-              </div>
               )}
-              <Script
-                id="viso-quick-shift-blocks"
-                strategy="afterInteractive"
-              >
-                  {`
+              <Script id="viso-quick-shift-blocks" strategy="afterInteractive">
+                {`
                   (function () {
                     var draftKey = "viso:quick-shift-draft:" + window.location.pathname + ":" + (new URLSearchParams(window.location.search).get("site_id") || "site");
 
@@ -4961,9 +4984,8 @@ export default async function StaffSchedulePage({
                         ...group.employees.map((employee) => {
                           const employeeName =
                             employee.full_name ?? employee.alias ?? employee.id;
-                          const weekTotals = totalsByEmployee[
-                            employee.id
-                          ]?.week ?? {
+                          const weekTotals = totalsByEmployee[employee.id]
+                            ?.week ?? {
                             publishedMinutes: 0,
                             draftMinutes: 0,
                             totalMinutes: 0,
@@ -5069,6 +5091,38 @@ export default async function StaffSchedulePage({
                                           const visibleStatus =
                                             visibleStatusByShiftId[shift.id] ??
                                             "Programado";
+                                          const shiftInProgress =
+                                            isShiftInProgress(
+                                              shift,
+                                              nowBogota.dateIso,
+                                              nowBogota.minutes,
+                                            );
+                                          const shiftEnded = hasShiftEnded(
+                                            shift,
+                                            nowBogota.dateIso,
+                                            nowBogota.minutes,
+                                          );
+                                          const shiftCompleted = Boolean(
+                                            visibleStatus === "Asistió" &&
+                                            shiftEnded,
+                                          );
+                                          const shiftPending = Boolean(
+                                            visibleStatus === "Programado" &&
+                                            !shiftInProgress &&
+                                            !shiftEnded,
+                                          );
+                                          const temporalLabel = shiftInProgress
+                                            ? "En curso"
+                                            : shiftCompleted
+                                              ? "Completado"
+                                              : shiftPending
+                                                ? "Pendiente"
+                                                : null;
+                                          const temporalMarker = shiftInProgress
+                                            ? "●"
+                                            : shiftCompleted
+                                              ? "✓"
+                                              : null;
                                           const statusLabel =
                                             visibleStatus === "Borrador" ||
                                             visibleStatus === "Cancelado" ||
@@ -5076,53 +5130,61 @@ export default async function StaffSchedulePage({
                                             visibleStatus === "Con retraso"
                                               ? visibleStatus
                                               : null;
-                                          const employeeDefaultRole =
-                                            getEmployeeDefaultOperationalRole(
-                                              employee,
+                                          const employeeDefaultOperationalRole =
+                                            cleanOptionalText(
+                                              getEmployeeDefaultOperationalRole(
+                                                employee,
+                                              ),
                                             );
-                                          const roleMatchesDefault =
-                                            Boolean(
-                                              shift.operational_role &&
-                                                employeeDefaultRole &&
-                                                normalizeRole(
-                                                  shift.operational_role,
-                                                ) ===
-                                                  normalizeRole(
-                                                    employeeDefaultRole,
-                                                  ),
+                                          const shiftOperationalRole =
+                                            cleanOptionalText(
+                                              shift.operational_role,
                                             );
-                                          const roleMatchesBase =
-                                            Boolean(
-                                              employee.role &&
-                                                roleLabel &&
-                                                normalizeRole(
-                                                  roleLabel,
-                                                ).includes(
-                                                  normalizeRole(employee.role),
-                                                ),
-                                            );
-                                          const shouldShowRoleLabel = Boolean(
-                                            roleLabel &&
-                                              !roleMatchesDefault &&
-                                              !roleMatchesBase,
-                                          );
-                                          const normalizedShiftArea =
+                                          const normalizedShiftAreaLabel =
                                             normalizeRole(shiftAreaLabel);
-                                          const normalizedRowArea =
+                                          const normalizedGroupAreaLabel =
                                             normalizeRole(areaVisual.label);
-                                          const shouldShowAreaLabel = Boolean(
-                                            shift.area_id &&
-                                              shiftAreaLabel !== "General" &&
-                                              normalizedShiftArea &&
-                                              normalizedRowArea &&
-                                              !normalizedShiftArea.includes(
-                                                normalizedRowArea,
-                                              ) &&
-                                              !normalizedRowArea.includes(
-                                                normalizedShiftArea,
-                                              ) &&
-                                              !shouldShowRoleLabel,
+                                          const roleAlreadyNamesArea = Boolean(
+                                            roleLabel &&
+                                              normalizeRole(roleLabel).includes(
+                                                normalizedShiftAreaLabel,
+                                              ),
                                           );
+                                          const shouldShowRoleLabel = Boolean(
+                                            shift.shift_kind !== "descanso" &&
+                                              roleLabel &&
+                                              shiftOperationalRole &&
+                                              shiftOperationalRole !==
+                                                employeeDefaultOperationalRole,
+                                          );
+                                          const shouldShowAreaLabel = Boolean(
+                                            shift.shift_kind !== "descanso" &&
+                                              shiftAreaLabel !== "General" &&
+                                              !normalizedShiftAreaLabel.includes(
+                                                normalizedGroupAreaLabel,
+                                              ) &&
+                                              !roleAlreadyNamesArea,
+                                          );
+                                          const shiftTemporalClass =
+                                            visibleStatus === "Borrador"
+                                              ? "ring-1 ring-amber-300/80"
+                                              : visibleStatus === "Cancelado"
+                                                ? "opacity-60 ring-1 ring-red-300/70"
+                                                : visibleStatus === "No asistió"
+                                                  ? "ring-1 ring-red-300/80"
+                                                  : visibleStatus ===
+                                                      "Con retraso"
+                                                    ? "ring-1 ring-orange-300/80"
+                                                    : shiftInProgress
+                                                      ? "ring-2 ring-inset ring-[var(--ui-brand)] shadow-sm"
+                                                      : shiftCompleted
+                                                        ? "opacity-70"
+                                                        : shiftPending
+                                                          ? "ring-1 ring-slate-200/80"
+                                                          : "";
+                                          const markerClass = shiftInProgress
+                                            ? "text-[var(--ui-brand)]"
+                                            : "text-emerald-600";
                                           const visibleDetailLabels = [
                                             statusLabel,
                                             shouldShowRoleLabel
@@ -5140,7 +5202,7 @@ export default async function StaffSchedulePage({
                                               shift.show_end_as_close,
                                               shift.shift_kind,
                                             ),
-                                            visibleStatus,
+                                            temporalLabel ?? visibleStatus,
                                             roleLabel,
                                             shiftAreaLabel,
                                             externalPointLabel,
@@ -5161,20 +5223,26 @@ export default async function StaffSchedulePage({
                                                 },
                                               )}
                                               data-schedule-shift-card
-                                              className={`flex min-w-[78px] flex-1 basis-[78px] flex-col rounded-lg border px-2 py-1 no-underline ${areaVisual.shiftClass} ${
-                                                shift.published_at
-                                                  ? "ring-1 ring-emerald-300/70"
-                                                  : "ring-1 ring-amber-300/70"
-                                              } ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
+                                              className={`flex min-w-[78px] flex-1 basis-[78px] flex-col rounded-lg border px-2 py-1 no-underline transition ${areaVisual.shiftClass} ${shiftTemporalClass} ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
                                               title={cardTitle}
                                             >
-                                              <div className="text-xs font-semibold leading-snug text-[var(--ui-text)]">
-                                                {formatShiftRange(
-                                                  shift.start_time,
-                                                  shift.end_time,
-                                                  shift.show_end_as_close,
-                                                  shift.shift_kind,
-                                                )}
+                                              <div className="flex items-center gap-1 text-xs font-semibold leading-snug text-[var(--ui-text)]">
+                                                {temporalMarker ? (
+                                                  <span
+                                                    className={`text-[10px] leading-none ${markerClass}`}
+                                                    aria-hidden="true"
+                                                  >
+                                                    {temporalMarker}
+                                                  </span>
+                                                ) : null}
+                                                <span>
+                                                  {formatShiftRange(
+                                                    shift.start_time,
+                                                    shift.end_time,
+                                                    shift.show_end_as_close,
+                                                    shift.shift_kind,
+                                                  )}
+                                                </span>
                                               </div>
                                               {shift.shift_kind ===
                                               "descanso" ? (
@@ -5240,22 +5308,37 @@ export default async function StaffSchedulePage({
                                     weekTotals.draftMinutes > 0 ? (
                                     <>
                                       <span className="inline-flex max-w-full rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
-                                        Publicadas {formatHoursCompact(weekTotals.publishedMinutes)}
+                                        Publicadas{" "}
+                                        {formatHoursCompact(
+                                          weekTotals.publishedMinutes,
+                                        )}
                                       </span>
                                       <span className="inline-flex max-w-full rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
-                                        Borrador {formatHoursCompact(weekTotals.draftMinutes)}
+                                        Borrador{" "}
+                                        {formatHoursCompact(
+                                          weekTotals.draftMinutes,
+                                        )}
                                       </span>
                                       <span className="inline-flex max-w-full rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 py-0.5 text-[var(--ui-text)]">
-                                        Total {formatHoursCompact(weekTotals.totalMinutes)}
+                                        Total{" "}
+                                        {formatHoursCompact(
+                                          weekTotals.totalMinutes,
+                                        )}
                                       </span>
                                     </>
                                   ) : weekTotals.publishedMinutes > 0 ? (
                                     <span className="inline-flex max-w-full rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
-                                      {formatHoursCompact(weekTotals.publishedMinutes)} publicadas
+                                      {formatHoursCompact(
+                                        weekTotals.publishedMinutes,
+                                      )}{" "}
+                                      publicadas
                                     </span>
                                   ) : (
                                     <span className="inline-flex max-w-full rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
-                                      {formatHoursCompact(weekTotals.draftMinutes)} en borrador
+                                      {formatHoursCompact(
+                                        weekTotals.draftMinutes,
+                                      )}{" "}
+                                      en borrador
                                     </span>
                                   )}
                                 </div>
