@@ -3668,7 +3668,7 @@ export default async function StaffSchedulePage({
           {viewMode === "table" ? (
             <div className="space-y-3" data-schedule-table-shell>
               {selectedShift ? (
-                <div className="ui-panel">
+                <div key={`edit-shift-panel-${selectedShift.id}`} className="ui-panel">
                   <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <div className="ui-h3">Editar turno seleccionado</div>
@@ -3693,6 +3693,7 @@ export default async function StaffSchedulePage({
                     </Link>
                   </div>
                   <form
+                    key={`edit-shift-form-${selectedShift.id}`}
                     action={saveShiftAction}
                     className="grid gap-4 xl:grid-cols-12"
                     data-operational-context-form
