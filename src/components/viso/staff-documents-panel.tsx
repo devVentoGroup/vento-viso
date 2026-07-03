@@ -75,7 +75,9 @@ function sanitizeDocumentFileName(value: string) {
 
 function getPdfMime(file: File) {
   const mime = file.type.trim().toLowerCase();
+  const fileName = file.name.trim().toLowerCase();
   if (!mime) return "application/pdf";
+  if (mime === "application/octet-stream" && fileName.endsWith(".pdf")) return "application/pdf";
   if (mime === "application/pdf" || mime === "application/x-pdf") return mime;
   return "";
 }
@@ -239,7 +241,7 @@ function UploadDocumentForm({
           disabled={isUploading}
           required
         />
-        <p className="ui-caption mt-1">Máximo 20 MB.</p>
+        <p className="ui-caption mt-1">Máximo 20 MB. Se aceptan PDFs aunque el navegador no reporte el tipo de archivo correctamente.</p>
       </div>
 
       <div className="flex gap-2">
@@ -312,7 +314,7 @@ export function StaffDocumentsPanel({
       <div>
         <h4 className="ui-label mb-2">Documentos del trabajador</h4>
         <div className="mb-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-          <p className="ui-caption mb-3">Sube documentos desde aquí o desde ANIMA. Para contrato laboral elige tipo &quot;Contrato laboral&quot; e indica fechas de vigencia.</p>
+          <p className="ui-caption mb-3">Sube documentos desde aquí o desde ANIMA. Para contrato laboral elige tipo &quot;Contrato laboral&quot; e indica fechas de vigencia; contratos vencidos se pueden cargar como historial, pero no cuentan como contrato vigente.</p>
           {!canUploadDocuments ? (
             <p className="ui-caption">No tienes permiso para subir documentos de trabajadores.</p>
           ) : !showUpload ? (

@@ -213,6 +213,7 @@ function sanitizeStaffDocumentFileName(value: string) {
 
 function normalizePdfMime(value: string) {
   const mime = value.trim().toLowerCase() || "application/pdf";
+  if (mime === "application/octet-stream") return "application/pdf";
   if (mime === "application/pdf" || mime === "application/x-pdf") return mime;
   return "";
 }
