@@ -1090,7 +1090,7 @@ export default async function StaffSchedulePage({
                     <input
                       type="hidden"
                       name="site_id"
-                      value={selectedSiteId}
+                      value={selectedShift.site_id}
                     />
                     <input
                       type="hidden"
@@ -1315,6 +1315,39 @@ export default async function StaffSchedulePage({
                       />
                     </label>
 
+                    <div className="md:col-span-12 space-y-2">
+                      <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                        <input
+                          type="checkbox"
+                          className="rounded border-[var(--ui-border)]"
+                          defaultChecked={selectedShift.site_id !== selectedSiteId}
+                          data-block-site-toggle
+                        />
+                        Este turno es para otra sede
+                      </label>
+                      <label
+                        className={`flex flex-col gap-1 ${
+                          selectedShift.site_id !== selectedSiteId ? "" : "hidden"
+                        }`}
+                        hidden={selectedShift.site_id === selectedSiteId}
+                        data-block-site-row
+                      >
+                        <span className="ui-label">Sede del turno</span>
+                        <select
+                          name="block_site_id"
+                          className="ui-input"
+                          defaultValue={selectedShift.site_id}
+                          data-block-site-select
+                        >
+                          {operationalSites.map((site) => (
+                            <option key={site.id} value={site.id}>
+                              {site.name ?? site.code ?? site.id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
                     <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                       <input
                         type="checkbox"
@@ -1390,27 +1423,29 @@ export default async function StaffSchedulePage({
                   >
                     <input
                       type="hidden"
+                      name="site_id"
+                      value={selectedSiteId}
+                    />
+                    <input
+                      type="hidden"
                       name="return_to"
                       value={returnToWithoutEdit}
                     />
                     <input type="hidden" name="break_minutes" value="0" />
                     <input type="hidden" name="status" value="scheduled" />
 
-                    <label className="flex flex-col gap-1 md:col-span-4">
-                      <span className="ui-label">Sede del turno</span>
-                      <select
-                        name="site_id"
-                        className="ui-input"
-                        defaultValue={selectedSiteId}
-                        data-shift-site-select
-                      >
-                        {operationalSites.map((site) => (
-                          <option key={site.id} value={site.id}>
-                            {site.name ?? site.code ?? site.id}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <select
+                      className="hidden"
+                      disabled
+                      hidden
+                      data-block-site-select-template
+                    >
+                      {operationalSites.map((site) => (
+                        <option key={site.id} value={site.id}>
+                          {site.name ?? site.code ?? site.id}
+                        </option>
+                      ))}
+                    </select>
 
                     <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Trabajador</span>
@@ -1611,6 +1646,36 @@ export default async function StaffSchedulePage({
                       />
                     </label>
 
+                    <div className="md:col-span-12 space-y-2">
+                      <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                        <input
+                          type="checkbox"
+                          className="rounded border-[var(--ui-border)]"
+                          data-block-site-toggle
+                        />
+                        Este bloque es para otra sede
+                      </label>
+                      <label
+                        className="hidden flex flex-col gap-1"
+                        hidden
+                        data-block-site-row
+                      >
+                        <span className="ui-label">Sede de este bloque</span>
+                        <select
+                          name="block_site_id"
+                          className="ui-input"
+                          defaultValue={selectedSiteId}
+                          data-block-site-select
+                        >
+                          {operationalSites.map((site) => (
+                            <option key={site.id} value={site.id}>
+                              {site.name ?? site.code ?? site.id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
                     <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                       <input
                         type="checkbox"
@@ -1716,11 +1781,24 @@ export default async function StaffSchedulePage({
                             '<span class="ui-label">Nota bloque ' + index + '</span>' +
                             '<input name="block_notes" class="ui-input" placeholder="Opcional" maxLength="240" />' +
                           '</label>' +
+                          '<div class="space-y-2 md:col-span-12">' +
+                            '<label class="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">' +
+                              '<input type="checkbox" class="rounded border-[var(--ui-border)]" data-block-site-toggle />' +
+                              '<span>Este bloque es para otra sede</span>' +
+                            '</label>' +
+                            '<label class="hidden flex flex-col gap-1" hidden data-block-site-row>' +
+                              '<span class="ui-label">Sede de este bloque</span>' +
+                              '<select name="block_site_id" class="ui-input" data-block-site-select></select>' +
+                            '</label>' +
+                          '</div>' +
                           '<label class="inline-flex items-center gap-2 text-sm text-[var(--ui-text)] md:col-span-12">' +
                             '<input type="checkbox" name="block_rest_day" value="' + (index - 1) + '" class="rounded border-[var(--ui-border)]" data-block-rest-day-toggle />' +
                             '<span>Marcar este día como descanso completo</span>' +
                           '</label>' +
                         '</div>';
+                      var siteTemplate = form.querySelector("[data-block-site-select-template]");
+                      var siteSelect = block.querySelector("[data-block-site-select]");
+                      if (siteTemplate && siteSelect) siteSelect.innerHTML = siteTemplate.innerHTML;
                       return block;
                     }
 
@@ -1736,6 +1814,8 @@ export default async function StaffSchedulePage({
                       var ends = Array.from(form.querySelectorAll('input[name="block_end_time"]'));
                       var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
                       var restInputs = Array.from(form.querySelectorAll('[data-block-rest-day-toggle]'));
+                      var siteToggles = Array.from(form.querySelectorAll('[data-block-site-toggle]'));
+                      var siteSelects = Array.from(form.querySelectorAll('[data-block-site-select]'));
                       return dates.map(function (dateInput, index) {
                         return {
                           date: dateInput.value || "",
@@ -1743,6 +1823,8 @@ export default async function StaffSchedulePage({
                           end: ends[index] ? ends[index].value || "" : "",
                           note: notes[index] ? notes[index].value || "" : "",
                           restDay: Boolean(restInputs[index] && restInputs[index].checked),
+                          otherSite: Boolean(siteToggles[index] && siteToggles[index].checked),
+                          siteId: siteSelects[index] ? siteSelects[index].value || "" : "",
                         };
                       });
                     }
@@ -1761,14 +1843,19 @@ export default async function StaffSchedulePage({
                       var ends = Array.from(form.querySelectorAll('input[name="block_end_time"]'));
                       var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
                       var restInputs = Array.from(form.querySelectorAll('[data-block-rest-day-toggle]'));
+                      var siteToggles = Array.from(form.querySelectorAll('[data-block-site-toggle]'));
+                      var siteSelects = Array.from(form.querySelectorAll('[data-block-site-select]'));
                       rows.forEach(function (row, index) {
                         if (dates[index]) dates[index].value = row.date || "";
                         if (starts[index]) starts[index].value = row.start || "";
                         if (ends[index]) ends[index].value = row.end || "";
                         if (notes[index]) notes[index].value = row.note || "";
                         if (restInputs[index]) restInputs[index].checked = Boolean(row.restDay);
+                        if (siteToggles[index]) siteToggles[index].checked = Boolean(row.otherSite);
+                        if (siteSelects[index] && typeof row.siteId === "string") siteSelects[index].value = row.siteId;
                       });
                       syncBlockRestIndexes(form);
+                      refreshBlockSiteControls(form);
                     }
 
                     function saveDraft(form) {
@@ -2103,7 +2190,24 @@ export default async function StaffSchedulePage({
                         addButton.setAttribute("aria-disabled", "false");
                       }
 
+                      refreshBlockSiteControls(form);
                       refreshExternalPointControls(form);
+                    }
+
+                    function refreshBlockSiteControls(form) {
+                      Array.from(form.querySelectorAll("[data-block-site-toggle]")).forEach(function (toggle) {
+                        var wrapper = toggle.closest(".space-y-2") || toggle.parentElement;
+                        var row = wrapper ? wrapper.querySelector("[data-block-site-row]") : null;
+                        var select = wrapper ? wrapper.querySelector("[data-block-site-select]") : null;
+                        var enabled = Boolean(toggle.checked);
+                        setElementHidden(row, !enabled);
+                        if (select) {
+                          if (!enabled) {
+                            var defaultSite = form.querySelector('[name="site_id"]');
+                            select.value = defaultSite ? defaultSite.value || "" : "";
+                          }
+                        }
+                      });
                     }
 
                     function initQuickShiftForm(form) {
@@ -2114,6 +2218,9 @@ export default async function StaffSchedulePage({
                         var target = event.target;
                         if (target && target.matches && target.matches("[data-block-rest-day-toggle]")) {
                           refreshBlockControls(form);
+                        }
+                        if (target && target.matches && target.matches("[data-block-site-toggle]")) {
+                          refreshBlockSiteControls(form);
                         }
                       });
 
@@ -2146,6 +2253,11 @@ export default async function StaffSchedulePage({
                         if (target.matches("[data-external-points-toggle]")) {
                           initOperationalContextForm(form);
                           refreshExternalPointControls(form);
+                          return;
+                        }
+
+                        if (target.matches("[data-block-site-toggle]")) {
+                          refreshBlockSiteControls(form);
                           return;
                         }
 

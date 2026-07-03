@@ -96,6 +96,9 @@ export async function saveShiftAction(formData: FormData) {
   const blockNotes = formData
     .getAll("block_notes")
     .map((value) => asText(value));
+  const blockSiteIds = formData
+    .getAll("block_site_id")
+    .map((value) => asText(value));
   const shiftNotes = asText(formData.get("notes"));
   const explicitShiftKind = asText(formData.get("shift_kind"));
   const operationalRole = asText(formData.get("operational_role")) || null;
@@ -122,6 +125,7 @@ export async function saveShiftAction(formData: FormData) {
     startTime: string;
     endTime: string;
     notes: string;
+    siteId: string;
     shiftKind: "laboral" | "descanso";
   }> =
     blockCount > 0
@@ -137,6 +141,7 @@ export async function saveShiftAction(formData: FormData) {
                 ? FULL_DAY_REST_END_TIME
                 : (blockEndTimes[index] ?? ""),
               notes: blockNotes[index] ?? "",
+              siteId: blockSiteIds[index] || siteId,
               shiftKind: isRestBlock
                 ? ("descanso" as const)
                 : ("laboral" as const),
@@ -155,6 +160,7 @@ export async function saveShiftAction(formData: FormData) {
     startTime: string;
     endTime: string;
     notes: string;
+    siteId: string;
     shiftKind: "laboral" | "descanso";
   }> =
     globalShiftKind === "descanso" && rawShiftBlocks.length === 0
@@ -164,6 +170,7 @@ export async function saveShiftAction(formData: FormData) {
             startTime: FULL_DAY_REST_START_TIME,
             endTime: FULL_DAY_REST_END_TIME,
             notes: shiftNotes,
+            siteId: blockSiteIds[0] || siteId,
             shiftKind: "descanso",
           },
         ]
@@ -175,6 +182,7 @@ export async function saveShiftAction(formData: FormData) {
               startTime,
               endTime,
               notes: shiftNotes,
+              siteId: blockSiteIds[0] || siteId,
               shiftKind: "laboral",
             },
           ];
@@ -191,6 +199,7 @@ export async function saveShiftAction(formData: FormData) {
     startTime: "",
     endTime: "",
     notes: "",
+    siteId,
     shiftKind: "laboral" as const,
   };
   const laboralShiftBlocks = orderedShiftBlocks.filter(
@@ -213,6 +222,9 @@ export async function saveShiftAction(formData: FormData) {
   const requestedRestShiftDates = [
     ...new Set(restShiftBlocks.map((block) => block.shiftDate).filter(Boolean)),
   ];
+  const requestedSiteIds = [
+    ...new Set(orderedShiftBlocks.map((block) => block.siteId).filter(Boolean)),
+  ];
   const resolvedStartTime = firstShiftBlock.startTime;
   const resolvedEndTime = firstShiftBlock.endTime;
   const showEndAsClose = asText(formData.get("show_end_as_close")) === "1";
@@ -222,12 +234,17 @@ export async function saveShiftAction(formData: FormData) {
   const requestedEmployeeIds =
     employeeIds.length > 0 ? employeeIds : employeeId ? [employeeId] : [];
 
-  await requireStaffScheduleAccess(returnTo, siteId);
+  await Promise.all(
+    requestedSiteIds.length > 0
+      ? requestedSiteIds.map((id) => requireStaffScheduleAccess(returnTo, id))
+      : [requireStaffScheduleAccess(returnTo, siteId)],
+  );
   const supabase = createAdminClient();
 
   if (
     requestedEmployeeIds.length === 0 ||
     !siteId ||
+    requestedSiteIds.length === 0 ||
     requestedShiftDates.length === 0 ||
     orderedShiftBlocks.length === 0
   ) {
@@ -246,33 +263,36 @@ export async function saveShiftAction(formData: FormData) {
     redirect(`${returnTo}&error=${encodeURIComponent(employeeSiteError.message)}`);
   }
 
-  const employeeIdsByPrimarySite = new Set(
-    (employeeSiteRows ?? [])
-      .filter((row) => row.site_id === siteId)
-      .map((row) => row.id),
+  const primarySiteByEmployeeId = new Map(
+    (employeeSiteRows ?? []).map((row) => [row.id, row.site_id]),
   );
-  const unresolvedEmployeeIds = requestedEmployeeIds.filter(
-    (id) => !employeeIdsByPrimarySite.has(id),
-  );
+  const sitesToValidateByEmployeeId = new Map<string, Set<string>>();
+  for (const employee of requestedEmployeeIds) {
+    const set = new Set(
+      requestedSiteIds.filter((id) => primarySiteByEmployeeId.get(employee) !== id),
+    );
+    if (set.size > 0) sitesToValidateByEmployeeId.set(employee, set);
+  }
 
-  if (unresolvedEmployeeIds.length > 0) {
+  const unresolvedEmployeeIds = [...sitesToValidateByEmployeeId.keys()];
+  if (unresolvedEmployeeIds.length > 0 && requestedSiteIds.length > 0) {
     const { data: linkedSiteRows, error: linkedSiteError } = await supabase
       .from("employee_sites")
-      .select("employee_id")
+      .select("employee_id,site_id")
       .in("employee_id", unresolvedEmployeeIds)
-      .eq("site_id", siteId)
+      .in("site_id", requestedSiteIds)
       .eq("is_active", true);
 
     if (linkedSiteError) {
       redirect(`${returnTo}&error=${encodeURIComponent(linkedSiteError.message)}`);
     }
 
-    const linkedEmployeeIds = new Set(
-      (linkedSiteRows ?? []).map((row) => row.employee_id),
-    );
-    const invalidEmployeeIds = unresolvedEmployeeIds.filter(
-      (id) => !linkedEmployeeIds.has(id),
-    );
+    for (const row of linkedSiteRows ?? []) {
+      sitesToValidateByEmployeeId.get(row.employee_id)?.delete(row.site_id);
+    }
+    const invalidEmployeeIds = [...sitesToValidateByEmployeeId.entries()]
+      .filter(([, sites]) => sites.size > 0)
+      .map(([id]) => id);
 
     if (invalidEmployeeIds.length > 0) {
       redirect(
@@ -303,6 +323,13 @@ export async function saveShiftAction(formData: FormData) {
     SiteOperationalRoleRow,
     "requires_external_checkin" | "requires_external_checkout"
   > | null = null;
+  const selectedRoleRequirementsBySiteId = new Map<
+    string,
+    Pick<
+      SiteOperationalRoleRow,
+      "requires_external_checkin" | "requires_external_checkout"
+    >
+  >();
 
   if (hasLaboralBlocks) {
     if (!operationalRole) {
@@ -316,7 +343,7 @@ export async function saveShiftAction(formData: FormData) {
       .select(
         "site_id,area_id,area_name,area_kind,role_code,role_label,role_family,is_default,requires_external_checkin,requires_external_checkout,is_active",
       )
-      .eq("site_id", siteId)
+      .in("site_id", requestedSiteIds)
       .eq("is_active", true);
 
     if (matrixError) {
@@ -324,33 +351,54 @@ export async function saveShiftAction(formData: FormData) {
     }
 
     const matrixRows = (matrixRowsData ?? []) as SiteOperationalRoleRow[];
-    if (areaId && !matrixRows.some((row) => row.area_id === areaId)) {
+    if (
+      areaId &&
+      laboralShiftBlocks.some(
+        (block) =>
+          !matrixRows.some(
+            (row) => row.site_id === block.siteId && row.area_id === areaId,
+          ),
+      )
+    ) {
       redirect(
         `${returnTo}&error=${encodeURIComponent("El área seleccionada no pertenece a la matriz activa de esta sede.")}`,
       );
     }
 
-    const applicableRows = getApplicableOperationalRoleRows(matrixRows, areaId);
-    let selectedRoleRow =
-      applicableRows.find((row) => row.role_code === operationalRole) ?? null;
-
-    if (!selectedRoleRow && !areaId) {
-      const uniqueRoleAreaRows = matrixRows.filter(
-        (row) => row.role_code === operationalRole,
+    for (const blockSiteId of [
+      ...new Set(laboralShiftBlocks.map((block) => block.siteId)),
+    ]) {
+      const siteMatrixRows = matrixRows.filter((row) => row.site_id === blockSiteId);
+      const applicableRows = getApplicableOperationalRoleRows(
+        siteMatrixRows,
+        areaId,
       );
-      if (uniqueRoleAreaRows.length === 1) {
-        selectedRoleRow = uniqueRoleAreaRows[0] ?? null;
-        resolvedAreaId = selectedRoleRow?.area_id ?? null;
+      let selectedRoleRow =
+        applicableRows.find((row) => row.role_code === operationalRole) ?? null;
+
+      if (!selectedRoleRow && !areaId) {
+        const uniqueRoleAreaRows = siteMatrixRows.filter(
+          (row) => row.role_code === operationalRole,
+        );
+        if (uniqueRoleAreaRows.length === 1) {
+          selectedRoleRow = uniqueRoleAreaRows[0] ?? null;
+          if (requestedSiteIds.length === 1) {
+            resolvedAreaId = selectedRoleRow?.area_id ?? null;
+          }
+        }
       }
+
+      if (!selectedRoleRow) {
+        redirect(
+          `${returnTo}&error=${encodeURIComponent("El rol operativo seleccionado no está permitido para la sede y área del turno.")}`,
+        );
+      }
+
+      selectedRoleRequirementsBySiteId.set(blockSiteId, selectedRoleRow);
     }
 
-    if (!selectedRoleRow) {
-      redirect(
-        `${returnTo}&error=${encodeURIComponent("El rol operativo seleccionado no está permitido para la sede y área del turno.")}`,
-      );
-    }
-
-    selectedRoleRequirements = selectedRoleRow;
+    selectedRoleRequirements =
+      selectedRoleRequirementsBySiteId.values().next().value ?? null;
   }
 
   const incompleteBlocks = orderedShiftBlocks.some(
@@ -495,38 +543,43 @@ export async function saveShiftAction(formData: FormData) {
   const operationalContextIndex = await loadShiftOperationalContextIndex(
     supabase,
     hasLaboralBlocks
-      ? requestedEmployeeIds.map((id) => ({
-          employeeId: id,
-          siteId,
-          operationalRole,
-        }))
+      ? requestedEmployeeIds.flatMap((id) =>
+          requestedSiteIds.map((blockSiteId) => ({
+            employeeId: id,
+            siteId: blockSiteId,
+            operationalRole,
+          })),
+        )
       : [],
   );
 
   if (hasLaboralBlocks && selectedRoleRequirements) {
-    const missingExternalContext = requestedEmployeeIds.filter((id) => {
-      const profileContext = getShiftOperationalContext(
-        operationalContextIndex,
-        id,
-        siteId,
-        operationalRole,
-      );
-      const checkinSiteId = resolveContextSiteId(
-        explicitOperationalContext.checkinSiteId,
-        profileContext?.checkinSiteId,
-      );
-      const checkoutSiteId = resolveContextSiteId(
-        explicitOperationalContext.checkoutSiteId,
-        profileContext?.checkoutSiteId,
-      );
+    const missingExternalContext = requestedEmployeeIds.filter((id) =>
+      laboralShiftBlocks.some((block) => {
+        const requirements = selectedRoleRequirementsBySiteId.get(block.siteId);
+        if (!requirements) return false;
 
-      return (
-        (Boolean(selectedRoleRequirements?.requires_external_checkin) &&
-          !checkinSiteId) ||
-        (Boolean(selectedRoleRequirements?.requires_external_checkout) &&
-          !checkoutSiteId)
-      );
-    });
+        const profileContext = getShiftOperationalContext(
+          operationalContextIndex,
+          id,
+          block.siteId,
+          operationalRole,
+        );
+        const checkinSiteId = resolveContextSiteId(
+          explicitOperationalContext.checkinSiteId,
+          profileContext?.checkinSiteId,
+        );
+        const checkoutSiteId = resolveContextSiteId(
+          explicitOperationalContext.checkoutSiteId,
+          profileContext?.checkoutSiteId,
+        );
+
+        return (
+          (Boolean(requirements.requires_external_checkin) && !checkinSiteId) ||
+          (Boolean(requirements.requires_external_checkout) && !checkoutSiteId)
+        );
+      }),
+    );
 
     if (missingExternalContext.length > 0) {
       redirect(
@@ -544,7 +597,7 @@ export async function saveShiftAction(formData: FormData) {
     const isRestBlock = blockShiftKind === "descanso";
     return withShiftOperationalContext(
       {
-        site_id: siteId,
+        site_id: block.siteId,
         area_id: isRestBlock ? null : resolvedAreaId,
         shift_kind: blockShiftKind,
         operational_role: isRestBlock ? null : operationalRole,
@@ -566,7 +619,7 @@ export async function saveShiftAction(formData: FormData) {
         : getShiftOperationalContext(
             operationalContextIndex,
             id,
-            siteId,
+            block.siteId,
             operationalRole,
           ),
       blockShiftKind,
