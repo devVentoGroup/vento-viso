@@ -100,7 +100,7 @@ export async function saveShiftAction(formData: FormData) {
     .map((value) => asText(value));
   const shiftNotes = asText(formData.get("notes"));
   const explicitShiftKind = asText(formData.get("shift_kind"));
-  const operationalRole = asText(formData.get("operational_role")) || null;
+  let operationalRole = asText(formData.get("operational_role")) || null;
   const isRestShift = asText(formData.get("rest_shift")) === "1";
   const isFullDayRest = asText(formData.get("full_day_rest")) === "1";
   const globalShiftKind =
@@ -332,12 +332,6 @@ export async function saveShiftAction(formData: FormData) {
   const resolvedAreaIdBySiteId = new Map<string, string | null>();
 
   if (hasLaboralBlocks) {
-    if (!operationalRole) {
-      redirect(
-        `${returnTo}&error=${encodeURIComponent("Selecciona un rol operativo de la matriz para este turno.")}`,
-      );
-    }
-
     const { data: matrixRowsData, error: matrixError } = await supabase
       .from("vento_site_operational_role_matrix_v1")
       .select(
@@ -351,6 +345,20 @@ export async function saveShiftAction(formData: FormData) {
     }
 
     const matrixRows = (matrixRowsData ?? []) as SiteOperationalRoleRow[];
+    if (!operationalRole) {
+      const uniqueRoleCodes = uniqueTextValues(
+        matrixRows.map((row) => row.role_code),
+      );
+      if (uniqueRoleCodes.length === 1) {
+        operationalRole = uniqueRoleCodes[0] ?? null;
+      }
+    }
+
+    if (!operationalRole) {
+      redirect(
+        `${returnTo}&error=${encodeURIComponent("Selecciona un rol operativo de la matriz para este turno.")}`,
+      );
+    }
 
     for (const blockSiteId of [
       ...new Set(laboralShiftBlocks.map((block) => block.siteId)),
@@ -364,7 +372,16 @@ export async function saveShiftAction(formData: FormData) {
           ? roleRows.find((row) => row.area_id === areaId)
           : null) ??
         roleRows.find((row) => row.is_default) ??
-        (roleRows.length === 1 ? (roleRows[0] ?? null) : null);
+        (roleRows.length === 1 ? (roleRows[0] ?? null) : null) ??
+        (() => {
+          const uniqueAreaIds = uniqueTextValues(
+            roleRows.map((row) => row.area_id),
+          );
+          if (uniqueAreaIds.length !== 1) return null;
+          return (
+            roleRows.find((row) => row.area_id === uniqueAreaIds[0]) ?? null
+          );
+        })();
 
       if (!selectedRoleRow) {
         redirect(

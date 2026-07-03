@@ -427,7 +427,7 @@ export default async function StaffSchedulePage({
       );
     }
 
-    return scopedOptions;
+    return siteOptions;
   };
 
   const getSiteDefaultOperationalRoleForArea = (
@@ -1955,7 +1955,7 @@ export default async function StaffSchedulePage({
                         ? scopedOptions
                         : areaId
                           ? siteOptions.filter(function (option) { return (option.getAttribute("data-area-id") || "") === ""; })
-                          : scopedOptions;
+                          : siteOptions;
 
                       options.forEach(function (option) {
                         var isActive = activeOptions.indexOf(option) >= 0;
@@ -2066,6 +2066,15 @@ export default async function StaffSchedulePage({
                           return option.value === defaultAreaId && !option.disabled;
                         });
                         if (matchingAreaOption) areaSelect.value = defaultAreaId;
+                      }
+
+                      if (!areaSelect.value) {
+                        var activeAreaOptions = Array.from(areaSelect.options).filter(function (option) {
+                          return Boolean(option.value) && !option.disabled && !option.hidden;
+                        });
+                        if (activeAreaOptions.length === 1) {
+                          areaSelect.value = activeAreaOptions[0].value;
+                        }
                       }
                     }
 
