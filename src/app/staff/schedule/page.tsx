@@ -1,18 +1,7 @@
 import Link from "next/link";
 import Script from "next/script";
-import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
-import { notifyShiftChange } from "@/lib/anima/shift-notify";
-import { requireAppAccess } from "@/lib/auth/guard";
-import { generateWeeklySuggestion } from "@/lib/planning-ai/generate";
-import type {
-  PlanningAvailability,
-  PlanningGenerationInput,
-  PlanningRequirement,
-  PlanningShiftDraft,
-} from "@/lib/planning-ai/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -125,6 +114,7 @@ export default async function StaffSchedulePage({
 
   const sites = (sitesData ?? []) as SiteRow[];
   const operationalSites = sites.filter(isOperationalSite);
+  const operationalSiteIds = operationalSites.map((site) => site.id);
   const selectedSiteId =
     sp.site_id && operationalSites.some((site) => site.id === sp.site_id)
       ? String(sp.site_id)
@@ -238,8 +228,9 @@ export default async function StaffSchedulePage({
           .select(
             "site_id,area_id,area_name,area_kind,role_code,role_label,role_family,is_default,requires_external_checkin,requires_external_checkout,is_active",
           )
-          .eq("site_id", selectedSiteId)
+          .in("site_id", operationalSiteIds)
           .eq("is_active", true)
+          .order("site_id", { ascending: true })
           .order("area_name", { ascending: true })
           .order("role_label", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
@@ -249,7 +240,7 @@ export default async function StaffSchedulePage({
           .select(
             "employee_id,site_id,default_operational_role,default_checkin_site_id,default_checkout_site_id,is_active",
           )
-          .eq("site_id", selectedSiteId)
+          .in("site_id", operationalSiteIds)
           .neq("is_active", false)
       : Promise.resolve({ data: [], error: null }),
   ]);
@@ -271,8 +262,40 @@ export default async function StaffSchedulePage({
       "es",
     ),
   );
+  const employeeAllowedSiteIdsById = new Map<string, Set<string>>();
+  for (const employee of employees) {
+    employeeAllowedSiteIdsById.set(
+      employee.id,
+      new Set(employee.site_id ? [employee.site_id] : []),
+    );
+  }
+  if (employees.length > 0 && operationalSiteIds.length > 0) {
+    const { data: allEmployeeSiteLinks } = await supabase
+      .from("employee_sites")
+      .select("employee_id,site_id,is_active")
+      .in(
+        "employee_id",
+        employees.map((employee) => employee.id),
+      )
+      .in("site_id", operationalSiteIds)
+      .eq("is_active", true);
+
+    for (const link of (allEmployeeSiteLinks ?? []) as Array<{
+      employee_id: string;
+      site_id: string;
+      is_active: boolean | null;
+    }>) {
+      const siteSet =
+        employeeAllowedSiteIdsById.get(link.employee_id) ?? new Set<string>();
+      siteSet.add(link.site_id);
+      employeeAllowedSiteIdsById.set(link.employee_id, siteSet);
+    }
+  }
   const configuredOperationalRoleRows = (siteOperationalRolesRes.data ??
     []) as SiteOperationalRoleRow[];
+  const selectedSiteOperationalRoleRows = configuredOperationalRoleRows.filter(
+    (row) => row.site_id === selectedSiteId,
+  );
   const employeeOperationalProfiles = (employeeOperationalProfilesRes.data ??
     []) as EmployeeOperationalProfileRow[];
   const operationalProfilesByEmployee = new Map<
@@ -281,8 +304,6 @@ export default async function StaffSchedulePage({
   >();
 
   for (const profile of employeeOperationalProfiles) {
-    if (profile.site_id !== selectedSiteId) continue;
-
     const current =
       operationalProfilesByEmployee.get(profile.employee_id) ?? [];
     current.push(profile);
@@ -295,10 +316,11 @@ export default async function StaffSchedulePage({
         const id = cleanOptionalText(row.area_id);
         if (!id) return map;
 
-        map.set(id, {
+        map.set(`${row.site_id}:${id}`, {
           id,
           label: cleanOptionalText(row.area_name) ?? "Área sin nombre",
           kind: cleanOptionalText(row.area_kind),
+          siteId: row.site_id,
         });
 
         return map;
@@ -326,6 +348,7 @@ export default async function StaffSchedulePage({
     options.push({
       code,
       label: `${cleanOptionalText(row.role_label) ?? humanizeRoleCode(row.role_code)} · ${areaLabel}`,
+      siteId: row.site_id,
       areaId: cleanOptionalText(row.area_id),
       areaLabel,
       areaKind: cleanOptionalText(row.area_kind),
@@ -338,7 +361,7 @@ export default async function StaffSchedulePage({
   }, []);
 
   const operationalRoleOptions: OperationalRoleOption[] = Array.from(
-    configuredOperationalRoleRows
+    selectedSiteOperationalRoleRows
       .reduce((map, row) => {
         const code = String(row.role_code ?? "").trim();
         if (!code) return map;
@@ -384,15 +407,22 @@ export default async function StaffSchedulePage({
 
   const getOperationalRoleOptionsForArea = (
     areaId: string | null | undefined,
+    siteId: string | null | undefined = selectedSiteId,
   ) => {
     const normalizedAreaId = cleanOptionalText(areaId);
+    const normalizedSiteId = cleanOptionalText(siteId);
+    const siteOptions = operationalRoleSelectOptions.filter(
+      (role) => cleanOptionalText(role.siteId) === normalizedSiteId,
+    );
     const scopedOptions = operationalRoleSelectOptions.filter(
-      (role) => cleanOptionalText(role.areaId) === normalizedAreaId,
+      (role) =>
+        cleanOptionalText(role.siteId) === normalizedSiteId &&
+        cleanOptionalText(role.areaId) === normalizedAreaId,
     );
 
     if (scopedOptions.length > 0) return scopedOptions;
     if (normalizedAreaId) {
-      return operationalRoleSelectOptions.filter(
+      return siteOptions.filter(
         (role) => cleanOptionalText(role.areaId) === null,
       );
     }
@@ -402,8 +432,9 @@ export default async function StaffSchedulePage({
 
   const getSiteDefaultOperationalRoleForArea = (
     areaId: string | null | undefined,
+    siteId: string | null | undefined = selectedSiteId,
   ) => {
-    const options = getOperationalRoleOptionsForArea(areaId);
+    const options = getOperationalRoleOptionsForArea(areaId, siteId);
     const defaultOptions = options.filter((role) => role.isDefault);
 
     if (defaultOptions.length === 1) return defaultOptions[0]?.code ?? "";
@@ -418,7 +449,10 @@ export default async function StaffSchedulePage({
     if (!normalizedRoleCode) return "";
 
     const matchingOptions = operationalRoleSelectOptions.filter(
-      (role) => role.code === normalizedRoleCode && role.areaId,
+      (role) =>
+        cleanOptionalText(role.siteId) === selectedSiteId &&
+        role.code === normalizedRoleCode &&
+        role.areaId,
     );
     const uniqueAreaIds = uniqueTextValues(
       matchingOptions.map((role) => role.areaId),
@@ -442,6 +476,7 @@ export default async function StaffSchedulePage({
     const profiles = operationalProfilesByEmployee.get(employee.id) ?? [];
     const profileRole = cleanOptionalText(
       profiles.find((profile) =>
+        profile.site_id === selectedSiteId &&
         cleanOptionalText(profile.default_operational_role),
       )?.default_operational_role,
     );
@@ -1085,6 +1120,10 @@ export default async function StaffSchedulePage({
                           <option
                             key={employee.id}
                             value={employee.id}
+                            data-site-ids={Array.from(
+                              employeeAllowedSiteIdsById.get(employee.id) ??
+                                new Set<string>(),
+                            ).join(",")}
                             data-operational-role={getEmployeeDefaultOperationalRole(
                               employee,
                             )}
@@ -1110,7 +1149,11 @@ export default async function StaffSchedulePage({
                       >
                         <option value="">General / sin área</option>
                         {operationalAreaOptions.map((area) => (
-                          <option key={area.id} value={area.id}>
+                          <option
+                            key={`${area.siteId ?? "site"}-${area.id}`}
+                            value={area.id}
+                            data-site-id={area.siteId ?? ""}
+                          >
                             {area.label}
                             {area.kind ? ` · ${area.kind}` : ""}
                           </option>
@@ -1137,6 +1180,7 @@ export default async function StaffSchedulePage({
                         ) ? (
                           <option
                             value={selectedShiftOperationalRole}
+                            data-site-id={selectedShift.site_id}
                             data-area-id={selectedShiftAreaId}
                           >
                             {getOperationalRoleLabel(
@@ -1147,8 +1191,9 @@ export default async function StaffSchedulePage({
                         ) : null}
                         {operationalRoleSelectOptions.map((role) => (
                           <option
-                            key={`${role.areaId ?? "general"}-${role.code}`}
+                            key={`${role.siteId ?? "site"}-${role.areaId ?? "general"}-${role.code}`}
                             value={role.code}
+                            data-site-id={role.siteId ?? ""}
                             data-area-id={role.areaId ?? ""}
                             data-is-default={role.isDefault ? "1" : "0"}
                             data-requires-checkin={
@@ -1345,16 +1390,27 @@ export default async function StaffSchedulePage({
                   >
                     <input
                       type="hidden"
-                      name="site_id"
-                      value={selectedSiteId}
-                    />
-                    <input
-                      type="hidden"
                       name="return_to"
                       value={returnToWithoutEdit}
                     />
                     <input type="hidden" name="break_minutes" value="0" />
                     <input type="hidden" name="status" value="scheduled" />
+
+                    <label className="flex flex-col gap-1 md:col-span-4">
+                      <span className="ui-label">Sede del turno</span>
+                      <select
+                        name="site_id"
+                        className="ui-input"
+                        defaultValue={selectedSiteId}
+                        data-shift-site-select
+                      >
+                        {operationalSites.map((site) => (
+                          <option key={site.id} value={site.id}>
+                            {site.name ?? site.code ?? site.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
                     <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Trabajador</span>
@@ -1371,6 +1427,10 @@ export default async function StaffSchedulePage({
                           <option
                             key={employee.id}
                             value={employee.id}
+                            data-site-ids={Array.from(
+                              employeeAllowedSiteIdsById.get(employee.id) ??
+                                new Set<string>(),
+                            ).join(",")}
                             data-operational-role={getEmployeeDefaultOperationalRole(
                               employee,
                             )}
@@ -1396,7 +1456,11 @@ export default async function StaffSchedulePage({
                       >
                         <option value="">General / sin área</option>
                         {operationalAreaOptions.map((area) => (
-                          <option key={area.id} value={area.id}>
+                          <option
+                            key={`${area.siteId ?? "site"}-${area.id}`}
+                            value={area.id}
+                            data-site-id={area.siteId ?? ""}
+                          >
                             {area.label}
                             {area.kind ? ` · ${area.kind}` : ""}
                           </option>
@@ -1416,8 +1480,9 @@ export default async function StaffSchedulePage({
                         <option value="">Seleccionar rol operativo</option>
                         {operationalRoleSelectOptions.map((role) => (
                           <option
-                            key={`${role.areaId ?? "general"}-${role.code}`}
+                            key={`${role.siteId ?? "site"}-${role.areaId ?? "general"}-${role.code}`}
                             value={role.code}
+                            data-site-id={role.siteId ?? ""}
                             data-area-id={role.areaId ?? ""}
                             data-is-default={role.isDefault ? "1" : "0"}
                             data-requires-checkin={
@@ -1708,6 +1773,7 @@ export default async function StaffSchedulePage({
 
                     function saveDraft(form) {
                       try {
+                        var siteSelect = form.querySelector('[name="site_id"]');
                         var employee = form.querySelector('[name="employee_id"]');
                         var areaSelect = form.querySelector("[data-operational-area-select]");
                         var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
@@ -1715,6 +1781,7 @@ export default async function StaffSchedulePage({
                         var checkoutSelect = form.querySelector("[data-external-checkout-select]");
                         var closeInput = form.querySelector("[data-quick-shift-close-input]");
                         window.sessionStorage.setItem(draftKey, JSON.stringify({
+                          siteId: siteSelect ? siteSelect.value || "" : "",
                           employeeId: employee ? employee.value || "" : "",
                           areaId: areaSelect ? areaSelect.value || "" : "",
                           operationalRole: operationalRoleSelect ? operationalRoleSelect.value || "" : "",
@@ -1740,12 +1807,14 @@ export default async function StaffSchedulePage({
                         if (!raw) return;
                         var draft = JSON.parse(raw);
                         if (!draft || typeof draft !== "object") return;
+                        var siteSelect = form.querySelector('[name="site_id"]');
                         var employee = form.querySelector('[name="employee_id"]');
                         var areaSelect = form.querySelector("[data-operational-area-select]");
                         var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
                         var checkinSelect = form.querySelector("[data-external-checkin-select]");
                         var checkoutSelect = form.querySelector("[data-external-checkout-select]");
                         var closeInput = form.querySelector("[data-quick-shift-close-input]");
+                        if (siteSelect && typeof draft.siteId === "string") siteSelect.value = draft.siteId;
                         if (employee && draft.employeeId) employee.value = draft.employeeId;
                         if (areaSelect && typeof draft.areaId === "string") areaSelect.value = draft.areaId;
                         if (checkinSelect && typeof draft.checkinSiteId === "string") checkinSelect.value = draft.checkinSiteId;
@@ -1779,21 +1848,26 @@ export default async function StaffSchedulePage({
                     }
 
                     function getActiveRoleOptions(form) {
+                      var siteSelect = form.querySelector('[name="site_id"]');
                       var areaSelect = form.querySelector("[data-operational-area-select]");
                       var roleSelect = form.querySelector("[data-operational-role-select]");
                       if (!roleSelect) return [];
 
+                      var siteId = siteSelect ? siteSelect.value || "" : "";
                       var areaId = areaSelect ? areaSelect.value || "" : "";
                       var options = Array.from(roleSelect.options).filter(function (option) {
                         return Boolean(option.value);
                       });
-                      var scopedOptions = options.filter(function (option) {
+                      var siteOptions = options.filter(function (option) {
+                        return !siteId || (option.getAttribute("data-site-id") || "") === siteId;
+                      });
+                      var scopedOptions = siteOptions.filter(function (option) {
                         return (option.getAttribute("data-area-id") || "") === areaId;
                       });
                       var activeOptions = scopedOptions.length > 0
                         ? scopedOptions
                         : areaId
-                          ? options.filter(function (option) { return (option.getAttribute("data-area-id") || "") === ""; })
+                          ? siteOptions.filter(function (option) { return (option.getAttribute("data-area-id") || "") === ""; })
                           : scopedOptions;
 
                       options.forEach(function (option) {
@@ -1808,6 +1882,49 @@ export default async function StaffSchedulePage({
                       }
 
                       return activeOptions;
+                    }
+
+                    function getSelectedSiteId(form) {
+                      var siteSelect = form.querySelector('[name="site_id"]');
+                      return siteSelect ? siteSelect.value || "" : "";
+                    }
+
+                    function refreshEmployeeOptionsForSite(form) {
+                      var siteId = getSelectedSiteId(form);
+                      var employeeSelect = form.querySelector('select[name="employee_id"]');
+                      if (!employeeSelect) return;
+
+                      Array.from(employeeSelect.options).forEach(function (option) {
+                        if (!option.value) return;
+                        var siteIds = (option.getAttribute("data-site-ids") || "").split(",").filter(Boolean);
+                        var isActive = !siteId || siteIds.indexOf(siteId) >= 0;
+                        option.disabled = !isActive;
+                        option.hidden = !isActive;
+                      });
+
+                      var selectedOption = employeeSelect.selectedIndex >= 0 ? employeeSelect.options[employeeSelect.selectedIndex] : null;
+                      if (selectedOption && selectedOption.value && selectedOption.disabled) {
+                        employeeSelect.value = "";
+                      }
+                    }
+
+                    function refreshAreaOptionsForSite(form) {
+                      var siteId = getSelectedSiteId(form);
+                      var areaSelect = form.querySelector("[data-operational-area-select]");
+                      if (!areaSelect) return;
+
+                      Array.from(areaSelect.options).forEach(function (option) {
+                        if (!option.value) return;
+                        var optionSiteId = option.getAttribute("data-site-id") || "";
+                        var isActive = !siteId || optionSiteId === siteId;
+                        option.disabled = !isActive;
+                        option.hidden = !isActive;
+                      });
+
+                      var selectedOption = areaSelect.selectedIndex >= 0 ? areaSelect.options[areaSelect.selectedIndex] : null;
+                      if (selectedOption && selectedOption.value && selectedOption.disabled) {
+                        areaSelect.value = "";
+                      }
                     }
 
                     function selectRoleOption(roleSelect, activeOptions, value) {
@@ -1858,7 +1975,10 @@ export default async function StaffSchedulePage({
                         : "";
 
                       if (defaultAreaId && (force || !areaSelect.value)) {
-                        areaSelect.value = defaultAreaId;
+                        var matchingAreaOption = Array.from(areaSelect.options).find(function (option) {
+                          return option.value === defaultAreaId && !option.disabled;
+                        });
+                        if (matchingAreaOption) areaSelect.value = defaultAreaId;
                       }
                     }
 
@@ -1892,6 +2012,8 @@ export default async function StaffSchedulePage({
                       var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
                       if (!operationalRoleSelect) return;
 
+                      refreshEmployeeOptionsForSite(form);
+                      refreshAreaOptionsForSite(form);
                       applyEmployeeDefaultArea(form, force);
 
                       var activeOptions = getActiveRoleOptions(form);
@@ -1929,6 +2051,7 @@ export default async function StaffSchedulePage({
 
                       var areaSelect = form.querySelector("[data-operational-area-select]");
                       var employeeSelect = form.querySelector('select[name="employee_id"]');
+                      var siteSelect = form.querySelector('[name="site_id"]');
                       var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
 
                       if (operationalRoleSelect && operationalRoleSelect.getAttribute("data-preserve-initial-role") === "1" && operationalRoleSelect.value) {
@@ -1944,6 +2067,13 @@ export default async function StaffSchedulePage({
                       }
                       if (employeeSelect) {
                         employeeSelect.addEventListener("change", function () {
+                          if (areaSelect) areaSelect.removeAttribute("data-user-changed");
+                          if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
+                          syncDefaultOperationalRole(form, true);
+                        });
+                      }
+                      if (siteSelect) {
+                        siteSelect.addEventListener("change", function () {
                           if (areaSelect) areaSelect.removeAttribute("data-user-changed");
                           if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
                           syncDefaultOperationalRole(form, true);
@@ -2026,11 +2156,13 @@ export default async function StaffSchedulePage({
                           return;
                         }
 
-                        if (target.matches("[data-operational-area-select]") || target.matches('select[name="employee_id"]')) {
+                        if (target.matches("[data-operational-area-select]") || target.matches('select[name="employee_id"]') || target.matches('[name="site_id"]')) {
                           var areaSelect = form.querySelector("[data-operational-area-select]");
                           var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
                           if (target.matches("[data-operational-area-select]")) {
                             target.setAttribute("data-user-changed", "1");
+                          } else if (target.matches('[name="site_id"]')) {
+                            if (areaSelect) areaSelect.removeAttribute("data-user-changed");
                           } else if (areaSelect) {
                             areaSelect.removeAttribute("data-user-changed");
                           }

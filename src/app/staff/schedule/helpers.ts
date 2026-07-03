@@ -146,6 +146,7 @@ export type RoleConcurrencyLimitRow = {
 export type OperationalRoleOption = {
   code: string;
   label: string;
+  siteId?: string | null;
   areaId?: string | null;
   areaLabel?: string | null;
   areaKind?: string | null;
@@ -171,6 +172,7 @@ export type OperationalAreaOption = {
   id: string;
   label: string;
   kind: string | null;
+  siteId?: string | null;
 };
 
 export type EmployeeOperationalProfileRow = {

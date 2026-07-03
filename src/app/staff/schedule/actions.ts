@@ -236,6 +236,51 @@ export async function saveShiftAction(formData: FormData) {
     );
   }
 
+  const { data: employeeSiteRows, error: employeeSiteError } = await supabase
+    .from("employees")
+    .select("id,site_id,is_active")
+    .in("id", requestedEmployeeIds)
+    .eq("is_active", true);
+
+  if (employeeSiteError) {
+    redirect(`${returnTo}&error=${encodeURIComponent(employeeSiteError.message)}`);
+  }
+
+  const employeeIdsByPrimarySite = new Set(
+    (employeeSiteRows ?? [])
+      .filter((row) => row.site_id === siteId)
+      .map((row) => row.id),
+  );
+  const unresolvedEmployeeIds = requestedEmployeeIds.filter(
+    (id) => !employeeIdsByPrimarySite.has(id),
+  );
+
+  if (unresolvedEmployeeIds.length > 0) {
+    const { data: linkedSiteRows, error: linkedSiteError } = await supabase
+      .from("employee_sites")
+      .select("employee_id")
+      .in("employee_id", unresolvedEmployeeIds)
+      .eq("site_id", siteId)
+      .eq("is_active", true);
+
+    if (linkedSiteError) {
+      redirect(`${returnTo}&error=${encodeURIComponent(linkedSiteError.message)}`);
+    }
+
+    const linkedEmployeeIds = new Set(
+      (linkedSiteRows ?? []).map((row) => row.employee_id),
+    );
+    const invalidEmployeeIds = unresolvedEmployeeIds.filter(
+      (id) => !linkedEmployeeIds.has(id),
+    );
+
+    if (invalidEmployeeIds.length > 0) {
+      redirect(
+        `${returnTo}&error=${encodeURIComponent("Ese trabajador no está vinculado a la sede elegida para el turno.")}`,
+      );
+    }
+  }
+
   if (shiftId && requestedEmployeeIds.length !== 1) {
     redirect(
       `${returnTo}&error=${encodeURIComponent("La edición solo admite un trabajador por turno.")}`,
