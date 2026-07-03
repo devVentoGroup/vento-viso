@@ -73,7 +73,6 @@ export async function saveShiftAction(formData: FormData) {
   ];
   const siteId = asText(formData.get("site_id"));
   const areaId = asText(formData.get("area_id")) || null;
-  let resolvedAreaId = areaId;
   const explicitCheckinSiteId = asText(formData.get("checkin_site_id")) || null;
   const explicitCheckoutSiteId =
     asText(formData.get("checkout_site_id")) || null;
@@ -330,6 +329,7 @@ export async function saveShiftAction(formData: FormData) {
       "requires_external_checkin" | "requires_external_checkout"
     >
   >();
+  const resolvedAreaIdBySiteId = new Map<string, string | null>();
 
   if (hasLaboralBlocks) {
     if (!operationalRole) {
@@ -351,50 +351,29 @@ export async function saveShiftAction(formData: FormData) {
     }
 
     const matrixRows = (matrixRowsData ?? []) as SiteOperationalRoleRow[];
-    if (
-      areaId &&
-      laboralShiftBlocks.some(
-        (block) =>
-          !matrixRows.some(
-            (row) => row.site_id === block.siteId && row.area_id === areaId,
-          ),
-      )
-    ) {
-      redirect(
-        `${returnTo}&error=${encodeURIComponent("El área seleccionada no pertenece a la matriz activa de esta sede.")}`,
-      );
-    }
 
     for (const blockSiteId of [
       ...new Set(laboralShiftBlocks.map((block) => block.siteId)),
     ]) {
       const siteMatrixRows = matrixRows.filter((row) => row.site_id === blockSiteId);
-      const applicableRows = getApplicableOperationalRoleRows(
-        siteMatrixRows,
-        areaId,
+      const roleRows = siteMatrixRows.filter(
+        (row) => row.role_code === operationalRole,
       );
-      let selectedRoleRow =
-        applicableRows.find((row) => row.role_code === operationalRole) ?? null;
-
-      if (!selectedRoleRow && !areaId) {
-        const uniqueRoleAreaRows = siteMatrixRows.filter(
-          (row) => row.role_code === operationalRole,
-        );
-        if (uniqueRoleAreaRows.length === 1) {
-          selectedRoleRow = uniqueRoleAreaRows[0] ?? null;
-          if (requestedSiteIds.length === 1) {
-            resolvedAreaId = selectedRoleRow?.area_id ?? null;
-          }
-        }
-      }
+      const selectedRoleRow =
+        (areaId
+          ? roleRows.find((row) => row.area_id === areaId)
+          : null) ??
+        roleRows.find((row) => row.is_default) ??
+        (roleRows.length === 1 ? (roleRows[0] ?? null) : null);
 
       if (!selectedRoleRow) {
         redirect(
-          `${returnTo}&error=${encodeURIComponent("El rol operativo seleccionado no está permitido para la sede y área del turno.")}`,
+          `${returnTo}&error=${encodeURIComponent("El rol operativo seleccionado no tiene un área única en la sede del bloque. Configura un rol predeterminado o selecciona un rol más específico.")}`,
         );
       }
 
       selectedRoleRequirementsBySiteId.set(blockSiteId, selectedRoleRow);
+      resolvedAreaIdBySiteId.set(blockSiteId, selectedRoleRow.area_id ?? null);
     }
 
     selectedRoleRequirements =
@@ -598,7 +577,9 @@ export async function saveShiftAction(formData: FormData) {
     return withShiftOperationalContext(
       {
         site_id: block.siteId,
-        area_id: isRestBlock ? null : resolvedAreaId,
+        area_id: isRestBlock
+          ? null
+          : (resolvedAreaIdBySiteId.get(block.siteId) ?? null),
         shift_kind: blockShiftKind,
         operational_role: isRestBlock ? null : operationalRole,
         break_minutes: isRestBlock
