@@ -330,6 +330,7 @@ export async function saveShiftAction(formData: FormData) {
     >
   >();
   const resolvedAreaIdBySiteId = new Map<string, string | null>();
+  const resolvedOperationalRoleBySiteId = new Map<string, string>();
 
   if (hasLaboralBlocks) {
     const { data: matrixRowsData, error: matrixError } = await supabase
@@ -363,9 +364,21 @@ export async function saveShiftAction(formData: FormData) {
     for (const blockSiteId of [
       ...new Set(laboralShiftBlocks.map((block) => block.siteId)),
     ]) {
-      const siteMatrixRows = matrixRows.filter((row) => row.site_id === blockSiteId);
+      const siteMatrixRows = matrixRows.filter(
+        (row) => row.site_id === blockSiteId,
+      );
+      const siteUniqueRoleCodes = uniqueTextValues(
+        siteMatrixRows.map((row) => row.role_code),
+      );
+      const effectiveOperationalRole =
+        operationalRole &&
+        siteMatrixRows.some((row) => row.role_code === operationalRole)
+          ? operationalRole
+          : siteUniqueRoleCodes.length === 1
+            ? (siteUniqueRoleCodes[0] ?? null)
+            : operationalRole;
       const roleRows = siteMatrixRows.filter(
-        (row) => row.role_code === operationalRole,
+        (row) => row.role_code === effectiveOperationalRole,
       );
       const selectedRoleRow =
         (areaId
@@ -391,6 +404,10 @@ export async function saveShiftAction(formData: FormData) {
 
       selectedRoleRequirementsBySiteId.set(blockSiteId, selectedRoleRow);
       resolvedAreaIdBySiteId.set(blockSiteId, selectedRoleRow.area_id ?? null);
+      resolvedOperationalRoleBySiteId.set(
+        blockSiteId,
+        selectedRoleRow.role_code,
+      );
     }
 
     selectedRoleRequirements =
@@ -543,7 +560,9 @@ export async function saveShiftAction(formData: FormData) {
           requestedSiteIds.map((blockSiteId) => ({
             employeeId: id,
             siteId: blockSiteId,
-            operationalRole,
+            operationalRole:
+              resolvedOperationalRoleBySiteId.get(blockSiteId) ??
+              operationalRole,
           })),
         )
       : [],
@@ -559,7 +578,8 @@ export async function saveShiftAction(formData: FormData) {
           operationalContextIndex,
           id,
           block.siteId,
-          operationalRole,
+          resolvedOperationalRoleBySiteId.get(block.siteId) ??
+            operationalRole,
         );
         const checkinSiteId = resolveContextSiteId(
           explicitOperationalContext.checkinSiteId,
@@ -598,7 +618,10 @@ export async function saveShiftAction(formData: FormData) {
           ? null
           : (resolvedAreaIdBySiteId.get(block.siteId) ?? null),
         shift_kind: blockShiftKind,
-        operational_role: isRestBlock ? null : operationalRole,
+        operational_role: isRestBlock
+          ? null
+          : (resolvedOperationalRoleBySiteId.get(block.siteId) ??
+            operationalRole),
         break_minutes: isRestBlock
           ? 0
           : Math.max(0, asNumber(formData.get("break_minutes"), 0)),
@@ -618,7 +641,8 @@ export async function saveShiftAction(formData: FormData) {
             operationalContextIndex,
             id,
             block.siteId,
-            operationalRole,
+            resolvedOperationalRoleBySiteId.get(block.siteId) ??
+              operationalRole,
           ),
       blockShiftKind,
       isRestBlock ? null : explicitOperationalContext,
