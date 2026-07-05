@@ -1839,7 +1839,70 @@ export default async function StaffSchedulePage({
                         endSelect.innerHTML = timeTemplate.innerHTML;
                         if (inheritedEnd) endSelect.value = inheritedEnd;
                       }
+                      refreshTimeRangeControls(form);
                       return block;
+                    }
+
+                    function parseTimeMinutes(value) {
+                      var parts = String(value || "").split(":");
+                      if (parts.length < 2) return null;
+                      var hours = Number(parts[0]);
+                      var minutes = Number(parts[1]);
+                      if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+                      return hours * 60 + minutes;
+                    }
+
+                    function getTimeBlockScope(control) {
+                      if (!control || !control.closest) return null;
+                      return control.closest("[data-primary-shift-block]") || control.closest('[data-quick-shift-block="optional"]');
+                    }
+
+                    function getEndSelectForStart(form, startSelect) {
+                      if (!form || !startSelect) return null;
+
+                      if (startSelect.getAttribute("name") === "start_time") {
+                        return form.querySelector('select[name="end_time"]');
+                      }
+
+                      var scope = getTimeBlockScope(startSelect);
+                      if (scope) return scope.querySelector('select[name="block_end_time"]');
+
+                      var starts = Array.from(form.querySelectorAll('select[name="block_start_time"]')).filter(function (input) { return !isRepeatGeneratedInput(input); });
+                      var ends = Array.from(form.querySelectorAll('select[name="block_end_time"]')).filter(function (input) { return !isRepeatGeneratedInput(input); });
+                      var index = starts.indexOf(startSelect);
+                      return index >= 0 ? ends[index] || null : null;
+                    }
+
+                    function refreshEndOptionsForStart(form, startSelect) {
+                      var endSelect = getEndSelectForStart(form, startSelect);
+                      if (!endSelect) return;
+
+                      var startMinutes = parseTimeMinutes(startSelect.value);
+                      var currentValue = endSelect.value || "";
+                      var firstValidValue = "";
+
+                      Array.from(endSelect.options).forEach(function (option) {
+                        if (!option.value) return;
+                        var optionMinutes = parseTimeMinutes(option.value);
+                        var isValid = startMinutes === null || (optionMinutes !== null && optionMinutes > startMinutes);
+                        option.disabled = !isValid;
+                        option.hidden = !isValid;
+                        if (isValid && !firstValidValue) firstValidValue = option.value || "";
+                      });
+
+                      var currentMinutes = parseTimeMinutes(currentValue);
+                      if (!currentValue || startMinutes === null || currentMinutes === null || currentMinutes <= startMinutes) {
+                        endSelect.value = firstValidValue;
+                      }
+                    }
+
+                    function refreshTimeRangeControls(form) {
+                      if (!form) return;
+                      Array.from(form.querySelectorAll('select[name="start_time"], select[name="block_start_time"]')).filter(function (input) {
+                        return !isRepeatGeneratedInput(input);
+                      }).forEach(function (startSelect) {
+                        refreshEndOptionsForStart(form, startSelect);
+                      });
                     }
 
                     function getInputValue(form, selector) {
@@ -2003,6 +2066,7 @@ export default async function StaffSchedulePage({
                       });
                       syncBlockRestIndexes(form);
                       refreshBlockSiteControls(form);
+                      refreshTimeRangeControls(form);
                       syncRepeatGeneratedBlocks(form);
                     }
 
@@ -2405,6 +2469,7 @@ export default async function StaffSchedulePage({
                       }
 
                       syncDefaultOperationalRole(form, false);
+                      refreshTimeRangeControls(form);
                     }
 
                     function refreshBlockControls(form) {
@@ -2441,6 +2506,9 @@ export default async function StaffSchedulePage({
 
                       form.addEventListener("change", function (event) {
                         var target = event.target;
+                        if (target && target.matches && target.matches('select[name="start_time"], select[name="block_start_time"]')) {
+                          refreshTimeRangeControls(form);
+                        }
                         if (target && target.matches && target.matches("[data-block-rest-day-toggle]")) {
                           refreshBlockControls(form);
                         }
@@ -2470,6 +2538,7 @@ export default async function StaffSchedulePage({
                       restoreDraft(form);
                       syncDefaultOperationalRole(form, false);
                       refreshBlockControls(form);
+                      refreshTimeRangeControls(form);
                       syncRepeatGeneratedBlocks(form);
                     }
 
@@ -2486,6 +2555,10 @@ export default async function StaffSchedulePage({
                         if (!target || !target.matches || !target.closest) return;
                         var form = target.closest("[data-operational-context-form]");
                         if (!form) return;
+
+                        if (target.matches('select[name="start_time"], select[name="block_start_time"]')) {
+                          refreshTimeRangeControls(form);
+                        }
 
                         if (target.matches("[data-repeat-week-preset]") || target.matches("[data-repeat-weekday]") || target.matches('[data-primary-shift-block] input[name="block_shift_date"]') || target.matches('[data-primary-shift-block] [name="block_start_time"]') || target.matches('[data-primary-shift-block] [name="block_end_time"]') || target.matches('[data-primary-shift-block] input[name="block_notes"]')) {
                           syncRepeatGeneratedBlocks(form);
@@ -2546,6 +2619,7 @@ export default async function StaffSchedulePage({
                           container.appendChild(createBlock(form));
                           syncBlockRestIndexes(form);
                           refreshBlockControls(form);
+                          refreshTimeRangeControls(form);
                           syncRepeatGeneratedBlocks(form);
                           return;
                         }
