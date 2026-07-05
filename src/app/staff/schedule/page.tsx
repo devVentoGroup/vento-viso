@@ -444,13 +444,15 @@ export default async function StaffSchedulePage({
 
   const getDefaultAreaIdForOperationalRole = (
     roleCode: string | null | undefined,
+    siteId: string | null | undefined = selectedSiteId,
   ) => {
     const normalizedRoleCode = cleanOptionalText(roleCode);
-    if (!normalizedRoleCode) return "";
+    const normalizedSiteId = cleanOptionalText(siteId);
+    if (!normalizedRoleCode || !normalizedSiteId) return "";
 
     const matchingOptions = operationalRoleSelectOptions.filter(
       (role) =>
-        cleanOptionalText(role.siteId) === selectedSiteId &&
+        cleanOptionalText(role.siteId) === normalizedSiteId &&
         role.code === normalizedRoleCode &&
         role.areaId,
     );
@@ -769,9 +771,12 @@ export default async function StaffSchedulePage({
         return [`${shiftLabel}: falta rol operativo.`];
       }
 
+      const shiftSiteOperationalRoleRows = configuredOperationalRoleRows.filter(
+        (row) => row.site_id === shift.site_id,
+      );
       const matrixRow =
         getApplicableOperationalRoleRows(
-          configuredOperationalRoleRows,
+          shiftSiteOperationalRoleRows,
           shift.area_id,
         ).find((row) => row.role_code === shift.operational_role) ?? null;
 
@@ -1971,9 +1976,34 @@ export default async function StaffSchedulePage({
                       return activeOptions;
                     }
 
-                    function getSelectedSiteId(form) {
+                    function getBaseSiteId(form) {
                       var siteSelect = form.querySelector('[name="site_id"]');
                       return siteSelect ? siteSelect.value || "" : "";
+                    }
+
+                    function getPrimaryBlockSiteScope(form) {
+                      var toggle = form.querySelector("[data-block-site-toggle]");
+                      if (!toggle) return null;
+                      var wrapper = toggle.closest(".space-y-2") || toggle.parentElement;
+                      var select = wrapper ? wrapper.querySelector("[data-block-site-select]") : null;
+                      return {
+                        toggle: toggle,
+                        select: select,
+                      };
+                    }
+
+                    function getSelectedSiteId(form) {
+                      var baseSiteId = getBaseSiteId(form);
+                      var blockSiteScope = getPrimaryBlockSiteScope(form);
+                      if (
+                        blockSiteScope &&
+                        blockSiteScope.toggle.checked &&
+                        blockSiteScope.select &&
+                        blockSiteScope.select.value
+                      ) {
+                        return blockSiteScope.select.value || "";
+                      }
+                      return baseSiteId;
                     }
 
                     function refreshEmployeeOptionsForSite(form) {
@@ -2049,6 +2079,32 @@ export default async function StaffSchedulePage({
                         : null;
                     }
 
+                    function getDefaultAreaIdForRole(form, roleCode, siteId) {
+                      if (!roleCode || !siteId) return "";
+                      var roleSelect = form.querySelector("[data-operational-role-select]");
+                      if (!roleSelect) return "";
+
+                      var matchingOptions = Array.from(roleSelect.options).filter(function (option) {
+                        return Boolean(option.value) &&
+                          option.value === roleCode &&
+                          (option.getAttribute("data-site-id") || "") === siteId &&
+                          Boolean(option.getAttribute("data-area-id") || "");
+                      });
+                      var areaIds = Array.from(new Set(matchingOptions.map(function (option) {
+                        return option.getAttribute("data-area-id") || "";
+                      }).filter(Boolean)));
+
+                      if (areaIds.length === 1) return areaIds[0] || "";
+
+                      var defaultAreaIds = Array.from(new Set(matchingOptions.filter(function (option) {
+                        return option.getAttribute("data-is-default") === "1";
+                      }).map(function (option) {
+                        return option.getAttribute("data-area-id") || "";
+                      }).filter(Boolean)));
+
+                      return defaultAreaIds.length === 1 ? defaultAreaIds[0] || "" : "";
+                    }
+
                     function applyEmployeeDefaultArea(form, force) {
                       var areaSelect = form.querySelector("[data-operational-area-select]");
                       if (!areaSelect) return;
@@ -2057,9 +2113,15 @@ export default async function StaffSchedulePage({
 
                       var selectedEmployeeOption = getSelectedEmployeeOption(form);
                       var employeeId = selectedEmployeeOption ? selectedEmployeeOption.value || "" : "";
-                      var defaultAreaId = employeeId && selectedEmployeeOption
-                        ? selectedEmployeeOption.getAttribute("data-default-area-id") || ""
-                        : "";
+                      var employeeRole = employeeId && selectedEmployeeOption ? selectedEmployeeOption.getAttribute("data-operational-role") || "" : "";
+                      var siteId = getSelectedSiteId(form);
+                      var defaultAreaId = getDefaultAreaIdForRole(form, employeeRole, siteId);
+
+                      if (!defaultAreaId && siteId === getBaseSiteId(form)) {
+                        defaultAreaId = employeeId && selectedEmployeeOption
+                          ? selectedEmployeeOption.getAttribute("data-default-area-id") || ""
+                          : "";
+                      }
 
                       if (defaultAreaId && (force || !areaSelect.value)) {
                         var matchingAreaOption = Array.from(areaSelect.options).find(function (option) {
@@ -2175,6 +2237,14 @@ export default async function StaffSchedulePage({
                           syncDefaultOperationalRole(form, true);
                         });
                       }
+                      form.querySelectorAll("[data-block-site-toggle], [data-block-site-select]").forEach(function (control) {
+                        control.addEventListener("change", function () {
+                          if (areaSelect) areaSelect.removeAttribute("data-user-changed");
+                          if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
+                          refreshBlockSiteControls(form);
+                          syncDefaultOperationalRole(form, true);
+                        });
+                      });
                       if (operationalRoleSelect) {
                         operationalRoleSelect.addEventListener("change", function () {
                           operationalRoleSelect.setAttribute("data-user-changed", "1");
@@ -2228,8 +2298,13 @@ export default async function StaffSchedulePage({
                         if (target && target.matches && target.matches("[data-block-rest-day-toggle]")) {
                           refreshBlockControls(form);
                         }
-                        if (target && target.matches && target.matches("[data-block-site-toggle]")) {
+                        if (target && target.matches && (target.matches("[data-block-site-toggle]") || target.matches("[data-block-site-select]"))) {
+                          var areaSelect = form.querySelector("[data-operational-area-select]");
+                          var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
+                          if (areaSelect) areaSelect.removeAttribute("data-user-changed");
+                          if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
                           refreshBlockSiteControls(form);
+                          syncDefaultOperationalRole(form, true);
                         }
                       });
 
@@ -2265,8 +2340,13 @@ export default async function StaffSchedulePage({
                           return;
                         }
 
-                        if (target.matches("[data-block-site-toggle]")) {
+                        if (target.matches("[data-block-site-toggle]") || target.matches("[data-block-site-select]")) {
+                          var areaSelect = form.querySelector("[data-operational-area-select]");
+                          var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
+                          if (areaSelect) areaSelect.removeAttribute("data-user-changed");
+                          if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
                           refreshBlockSiteControls(form);
+                          syncDefaultOperationalRole(form, true);
                           return;
                         }
 
