@@ -1673,8 +1673,64 @@ export default async function StaffSchedulePage({
                       </summary>
                       <div className="mt-3 grid gap-3 md:grid-cols-12">
                         <div
+                          className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 md:col-span-12"
+                          data-repeat-week-shell
+                        >
+                          <div className="grid gap-3 md:grid-cols-[minmax(220px,320px)_1fr]">
+                            <label className="flex flex-col gap-1">
+                              <span className="ui-label">Repetir bloque 1</span>
+                              <select
+                                className="ui-input"
+                                defaultValue="single"
+                                data-repeat-week-preset
+                              >
+                                <option value="single">No repetir</option>
+                                <option value="weekdays">Lunes a viernes</option>
+                                <option value="week">Toda la semana</option>
+                                <option value="custom">Elegir días</option>
+                              </select>
+                            </label>
+                            <div className="flex flex-col justify-end gap-2">
+                              <div
+                                className="hidden flex flex-wrap gap-2"
+                                hidden
+                                data-repeat-custom-days
+                              >
+                                {weekDays.map((day, index) => (
+                                  <label
+                                    key={`repeat-${day.iso}`}
+                                    className="inline-flex items-center gap-1 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface)] px-2 py-1 text-xs font-semibold text-[var(--ui-text)]"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      className="rounded border-[var(--ui-border)]"
+                                      value={day.iso}
+                                      data-repeat-weekday
+                                      data-repeat-weekday-index={index}
+                                    />
+                                    {day.shortLabel}
+                                  </label>
+                                ))}
+                              </div>
+                              <p
+                                className="text-xs text-[var(--ui-muted)]"
+                                data-repeat-summary
+                              >
+                                Se guardará solo el bloque principal.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
                           className="contents md:col-span-12"
                           data-quick-shift-extra-blocks
+                        />
+
+                        <div
+                          className="hidden"
+                          hidden
+                          data-repeat-generated-blocks
                         />
 
                         <div
@@ -1686,10 +1742,10 @@ export default async function StaffSchedulePage({
                             className="ui-btn ui-btn--ghost ui-btn--sm"
                             data-add-shift-block
                           >
-                            + Agregar otro bloque o día
+                            + Agregar bloque manual
                           </button>
                           <span className="text-xs text-[var(--ui-muted)]">
-                            Úsalo solo para turno partido o para cargar otro día del mismo trabajador.
+                            Úsalo solo para turno partido o casos distintos al patrón repetido.
                           </span>
                         </div>
                       </div>
@@ -1786,6 +1842,93 @@ export default async function StaffSchedulePage({
                       return block;
                     }
 
+                    function getInputValue(form, selector) {
+                      var input = form.querySelector(selector);
+                      return input ? input.value || "" : "";
+                    }
+
+                    function formatShortDate(value) {
+                      if (!value || value.length < 10) return value || "";
+                      return value.slice(8, 10) + "/" + value.slice(5, 7);
+                    }
+
+                    function getRepeatPreset(form) {
+                      var preset = form.querySelector("[data-repeat-week-preset]");
+                      return preset ? preset.value || "single" : "single";
+                    }
+
+                    function getRepeatCustomDates(form) {
+                      return Array.from(form.querySelectorAll("[data-repeat-weekday]:checked")).map(function (input) {
+                        return input.value || "";
+                      }).filter(Boolean);
+                    }
+
+                    function getRepeatPresetDates(form) {
+                      var preset = getRepeatPreset(form);
+                      var weekdayInputs = Array.from(form.querySelectorAll("[data-repeat-weekday]"));
+                      if (preset === "weekdays") {
+                        return weekdayInputs.filter(function (input) {
+                          return Number(input.getAttribute("data-repeat-weekday-index") || "0") < 5;
+                        }).map(function (input) { return input.value || ""; }).filter(Boolean);
+                      }
+                      if (preset === "week") {
+                        return weekdayInputs.map(function (input) { return input.value || ""; }).filter(Boolean);
+                      }
+                      if (preset === "custom") return getRepeatCustomDates(form);
+                      return [];
+                    }
+
+                    function refreshRepeatCustomDays(form) {
+                      var customDays = form.querySelector("[data-repeat-custom-days]");
+                      setElementHidden(customDays, getRepeatPreset(form) !== "custom");
+                    }
+
+                    function createHiddenInput(name, value) {
+                      var input = document.createElement("input");
+                      input.type = "hidden";
+                      input.name = name;
+                      input.value = value || "";
+                      return input;
+                    }
+
+                    function syncRepeatGeneratedBlocks(form) {
+                      var container = form.querySelector("[data-repeat-generated-blocks]");
+                      if (!container) return;
+                      refreshRepeatCustomDays(form);
+                      container.innerHTML = "";
+
+                      var primaryDate = getInputValue(form, '[data-primary-shift-block] input[name="block_shift_date"]');
+                      var start = getInputValue(form, '[data-primary-shift-block] [name="block_start_time"]');
+                      var end = getInputValue(form, '[data-primary-shift-block] [name="block_end_time"]');
+                      var note = getInputValue(form, '[data-primary-shift-block] input[name="block_notes"]');
+                      var siteId = getInputValue(form, '[data-primary-shift-block] [name="block_site_id"]') || getBaseSiteId(form);
+                      var dates = Array.from(new Set(getRepeatPresetDates(form))).filter(function (date) {
+                        return Boolean(date && date !== primaryDate);
+                      }).sort();
+
+                      dates.forEach(function (date) {
+                        container.appendChild(createHiddenInput("block_shift_date", date));
+                        container.appendChild(createHiddenInput("block_start_time", start));
+                        container.appendChild(createHiddenInput("block_end_time", end));
+                        container.appendChild(createHiddenInput("block_notes", note));
+                        container.appendChild(createHiddenInput("block_site_id", siteId));
+                      });
+
+                      var summary = form.querySelector("[data-repeat-summary]");
+                      if (!summary) return;
+                      if (dates.length === 0) {
+                        summary.textContent = "Se guardará solo el bloque principal.";
+                        return;
+                      }
+                      var total = dates.length + 1;
+                      var rangeText = start && end ? " de " + start + " a " + end : "";
+                      summary.textContent = "Se crearán " + total + " turnos" + rangeText + ": " + [primaryDate].concat(dates).filter(Boolean).sort().map(formatShortDate).join(", ") + ".";
+                    }
+
+                    function isRepeatGeneratedInput(input) {
+                      return Boolean(input && input.closest && input.closest("[data-repeat-generated-blocks]"));
+                    }
+
                     function syncBlockRestIndexes(form) {
                       Array.from(form.querySelectorAll('[data-block-rest-day-toggle]')).forEach(function (input, index) {
                         input.value = String(index);
@@ -1809,10 +1952,10 @@ export default async function StaffSchedulePage({
                     }
 
                     function getBlockRows(form) {
-                      var dates = Array.from(form.querySelectorAll('input[name="block_shift_date"]'));
-                      var starts = Array.from(form.querySelectorAll('[name="block_start_time"]'));
-                      var ends = Array.from(form.querySelectorAll('[name="block_end_time"]'));
-                      var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
+                      var dates = Array.from(form.querySelectorAll('input[name="block_shift_date"]')).filter(function (input) { return !isRepeatGeneratedInput(input); });
+                      var starts = Array.from(form.querySelectorAll('[name="block_start_time"]')).filter(function (input) { return !isRepeatGeneratedInput(input); });
+                      var ends = Array.from(form.querySelectorAll('[name="block_end_time"]')).filter(function (input) { return !isRepeatGeneratedInput(input); });
+                      var notes = Array.from(form.querySelectorAll('input[name="block_notes"]')).filter(function (input) { return !isRepeatGeneratedInput(input); });
                       var restInputs = Array.from(form.querySelectorAll('[data-block-rest-day-toggle]'));
                       var scopes = getBlockScopes(form);
                       return dates.map(function (dateInput, index) {
@@ -1838,10 +1981,10 @@ export default async function StaffSchedulePage({
                       rows.slice(1).forEach(function () {
                         if (container) container.appendChild(createBlock(form));
                       });
-                      var dates = Array.from(form.querySelectorAll('input[name="block_shift_date"]'));
-                      var starts = Array.from(form.querySelectorAll('[name="block_start_time"]'));
-                      var ends = Array.from(form.querySelectorAll('[name="block_end_time"]'));
-                      var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
+                      var dates = Array.from(form.querySelectorAll('input[name="block_shift_date"]')).filter(function (input) { return !isRepeatGeneratedInput(input); });
+                      var starts = Array.from(form.querySelectorAll('[name="block_start_time"]')).filter(function (input) { return !isRepeatGeneratedInput(input); });
+                      var ends = Array.from(form.querySelectorAll('[name="block_end_time"]')).filter(function (input) { return !isRepeatGeneratedInput(input); });
+                      var notes = Array.from(form.querySelectorAll('input[name="block_notes"]')).filter(function (input) { return !isRepeatGeneratedInput(input); });
                       var restInputs = Array.from(form.querySelectorAll('[data-block-rest-day-toggle]'));
                       var scopes = getBlockScopes(form);
                       rows.forEach(function (row, index) {
@@ -1860,6 +2003,7 @@ export default async function StaffSchedulePage({
                       });
                       syncBlockRestIndexes(form);
                       refreshBlockSiteControls(form);
+                      syncRepeatGeneratedBlocks(form);
                     }
 
                     function saveDraft(form) {
@@ -1879,6 +2023,8 @@ export default async function StaffSchedulePage({
                           checkinSiteId: checkinSelect ? checkinSelect.value || "" : "",
                           checkoutSiteId: checkoutSelect ? checkoutSelect.value || "" : "",
                           showEndAsClose: Boolean(closeInput && closeInput.checked),
+                          repeatPreset: getRepeatPreset(form),
+                          repeatCustomDates: getRepeatCustomDates(form),
                           rows: getBlockRows(form),
                         }));
                       } catch (error) {
@@ -1914,7 +2060,15 @@ export default async function StaffSchedulePage({
                           operationalRoleSelect.setAttribute("data-user-changed", "1");
                         }
                         if (closeInput) closeInput.checked = Boolean(draft.showEndAsClose);
+                        var repeatPreset = form.querySelector("[data-repeat-week-preset]");
+                        if (repeatPreset && typeof draft.repeatPreset === "string") repeatPreset.value = draft.repeatPreset;
+                        if (Array.isArray(draft.repeatCustomDates)) {
+                          form.querySelectorAll("[data-repeat-weekday]").forEach(function (input) {
+                            input.checked = draft.repeatCustomDates.indexOf(input.value || "") >= 0;
+                          });
+                        }
                         writeRows(form, draft.rows);
+                        syncRepeatGeneratedBlocks(form);
                       } catch (error) {
                         try { window.sessionStorage.removeItem(draftKey); } catch (storageError) {}
                       }
@@ -2290,6 +2444,9 @@ export default async function StaffSchedulePage({
                         if (target && target.matches && target.matches("[data-block-rest-day-toggle]")) {
                           refreshBlockControls(form);
                         }
+                        if (target && target.matches && (target.matches("[data-repeat-week-preset]") || target.matches("[data-repeat-weekday]") || target.matches('[data-primary-shift-block] input[name="block_shift_date"]') || target.matches('[data-primary-shift-block] [name="block_start_time"]') || target.matches('[data-primary-shift-block] [name="block_end_time"]') || target.matches('[data-primary-shift-block] input[name="block_notes"]'))) {
+                          syncRepeatGeneratedBlocks(form);
+                        }
                         if (target && target.matches && (target.matches("[data-primary-block-site-toggle]") || target.matches("[data-primary-block-site-select]"))) {
                           var areaSelect = form.querySelector("[data-operational-area-select]");
                           var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
@@ -2305,6 +2462,7 @@ export default async function StaffSchedulePage({
                       initOperationalContextForm(form);
 
                       form.addEventListener("submit", function () {
+                        syncRepeatGeneratedBlocks(form);
                         syncBlockRestIndexes(form);
                         saveDraft(form);
                       });
@@ -2312,6 +2470,7 @@ export default async function StaffSchedulePage({
                       restoreDraft(form);
                       syncDefaultOperationalRole(form, false);
                       refreshBlockControls(form);
+                      syncRepeatGeneratedBlocks(form);
                     }
 
                     function initAllQuickShiftForms() {
@@ -2327,6 +2486,11 @@ export default async function StaffSchedulePage({
                         if (!target || !target.matches || !target.closest) return;
                         var form = target.closest("[data-operational-context-form]");
                         if (!form) return;
+
+                        if (target.matches("[data-repeat-week-preset]") || target.matches("[data-repeat-weekday]") || target.matches('[data-primary-shift-block] input[name="block_shift_date"]') || target.matches('[data-primary-shift-block] [name="block_start_time"]') || target.matches('[data-primary-shift-block] [name="block_end_time"]') || target.matches('[data-primary-shift-block] input[name="block_notes"]')) {
+                          syncRepeatGeneratedBlocks(form);
+                          return;
+                        }
 
                         if (target.matches("[data-external-points-toggle]")) {
                           initOperationalContextForm(form);
@@ -2382,6 +2546,7 @@ export default async function StaffSchedulePage({
                           container.appendChild(createBlock(form));
                           syncBlockRestIndexes(form);
                           refreshBlockControls(form);
+                          syncRepeatGeneratedBlocks(form);
                           return;
                         }
 
@@ -2393,6 +2558,7 @@ export default async function StaffSchedulePage({
                         block.remove();
                         syncBlockRestIndexes(quickForm);
                         refreshBlockControls(quickForm);
+                        syncRepeatGeneratedBlocks(quickForm);
                       });
                     }
 
