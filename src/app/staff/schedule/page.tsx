@@ -1146,77 +1146,6 @@ export default async function StaffSchedulePage({
                       </select>
                     </label>
 
-                    <details
-                      className="md:col-span-12 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3"
-                      open={
-                        selectedShiftHasExternalPoints ||
-                        selectedShift.site_id !== selectedSiteId ||
-                        Boolean(selectedShift.show_end_as_close) ||
-                        selectedShift.shift_kind === "descanso"
-                      }
-                    >
-                      <summary className="cursor-pointer text-sm font-semibold text-[var(--ui-text)]">
-                        Opciones avanzadas
-                      </summary>
-                      <div className="mt-3 grid gap-3 md:grid-cols-12">
-                    <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                      <input
-                        type="checkbox"
-                        className="rounded border-[var(--ui-border)]"
-                        defaultChecked={selectedShiftHasExternalPoints}
-                        data-external-points-toggle
-                      />
-                      Cambiar puntos de entrada y salida
-                    </label>
-
-                    <label
-                      className={`flex flex-col gap-1 md:col-span-6 ${
-                        selectedShiftHasExternalPoints ? "" : "hidden"
-                      }`}
-                      hidden={!selectedShiftHasExternalPoints}
-                      data-external-checkin-row
-                    >
-                      <span className="ui-label">Punto check-in</span>
-                      <select
-                        name="checkin_site_id"
-                        className="ui-input"
-                        defaultValue={selectedShift.checkin_site_id ?? ""}
-                        disabled={!selectedShiftHasExternalPoints}
-                        data-external-checkin-select
-                      >
-                        <option value="">Usar perfil / sede</option>
-                        {sites.map((site) => (
-                          <option key={site.id} value={site.id}>
-                            {site.name ?? site.code ?? site.id}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label
-                      className={`flex flex-col gap-1 md:col-span-6 ${
-                        selectedShiftHasExternalPoints ? "" : "hidden"
-                      }`}
-                      hidden={!selectedShiftHasExternalPoints}
-                      data-external-checkout-row
-                    >
-                      <span className="ui-label">Punto check-out</span>
-                      <select
-                        name="checkout_site_id"
-                        className="ui-input"
-                        defaultValue={selectedShift.checkout_site_id ?? ""}
-                        disabled={!selectedShiftHasExternalPoints}
-                        data-external-checkout-select
-                      >
-                        <option value="">Usar perfil / sede</option>
-                        {sites.map((site) => (
-                          <option key={site.id} value={site.id}>
-                            {site.name ?? site.code ?? site.id}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
                     <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Día</span>
                       <input
@@ -1271,66 +1200,136 @@ export default async function StaffSchedulePage({
                       />
                     </label>
 
-                    <div className="md:col-span-12 space-y-2">
-                      <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                        <input
-                          type="checkbox"
-                          className="rounded border-[var(--ui-border)]"
-                          defaultChecked={selectedShift.site_id !== selectedSiteId}
-                          data-block-site-toggle
-                        />
-                        Este turno es para otra sede
-                      </label>
-                      <label
-                        className={`flex flex-col gap-1 ${
-                          selectedShift.site_id !== selectedSiteId ? "" : "hidden"
-                        }`}
-                        hidden={selectedShift.site_id === selectedSiteId}
-                        data-block-site-row
-                      >
-                        <span className="ui-label">Sede del turno</span>
-                        <select
-                          name="block_site_id"
-                          className="ui-input"
-                          defaultValue={selectedShift.site_id}
-                          data-block-site-select
-                        >
-                          {operationalSites.map((site) => (
-                            <option key={site.id} value={site.id}>
-                              {site.name ?? site.code ?? site.id}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-
-                    <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                      <input
-                        type="checkbox"
-                        name="show_end_as_close"
-                        value="1"
-                        defaultChecked={Boolean(
-                          selectedShift.show_end_as_close,
-                        )}
-                        className="rounded border-[var(--ui-border)]"
-                      />
-                      Mostrar la salida de este bloque como &quot;Cierre&quot;
-                      al empleado
-                    </label>
-
-                    <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                      <input
-                        type="checkbox"
-                        name="full_day_rest"
-                        value="1"
-                        defaultChecked={selectedShift.shift_kind === "descanso"}
-                        className="rounded border-[var(--ui-border)]"
-                      />
-                      Marcar este día como descanso
-                    </label>
-
+                    <div className="md:col-span-12 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 shadow-sm">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-semibold text-[var(--ui-text)]">
+                            Ajustes especiales del turno
+                          </div>
+                          <div className="text-xs text-[var(--ui-muted)]">
+                            Úsalos solo cuando el turno tenga marcación externa, cierre, descanso o sede diferente.
+                          </div>
+                        </div>
                       </div>
-                    </details>
+                      <div className="grid gap-3 md:grid-cols-12">
+                        <label className="md:col-span-4 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                          <input
+                            type="checkbox"
+                            className="rounded border-[var(--ui-border)]"
+                            defaultChecked={selectedShiftHasExternalPoints}
+                            data-external-points-toggle
+                          />
+                          Cambiar puntos de entrada y salida
+                        </label>
+
+                        <label className="md:col-span-4 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                          <input
+                            type="checkbox"
+                            name="show_end_as_close"
+                            value="1"
+                            defaultChecked={Boolean(
+                              selectedShift.show_end_as_close,
+                            )}
+                            className="rounded border-[var(--ui-border)]"
+                          />
+                          Mostrar salida como &quot;Cierre&quot;
+                        </label>
+
+                        <label className="md:col-span-4 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                          <input
+                            type="checkbox"
+                            name="full_day_rest"
+                            value="1"
+                            defaultChecked={selectedShift.shift_kind === "descanso"}
+                            className="rounded border-[var(--ui-border)]"
+                          />
+                          Marcar este día como descanso
+                        </label>
+
+                        <label
+                          className={`flex flex-col gap-1 md:col-span-6 ${
+                            selectedShiftHasExternalPoints ? "" : "hidden"
+                          }`}
+                          hidden={!selectedShiftHasExternalPoints}
+                          data-external-checkin-row
+                        >
+                          <span className="ui-label">Punto check-in</span>
+                          <select
+                            name="checkin_site_id"
+                            className="ui-input"
+                            defaultValue={selectedShift.checkin_site_id ?? ""}
+                            disabled={!selectedShiftHasExternalPoints}
+                            data-external-checkin-select
+                          >
+                            <option value="">Usar perfil / sede</option>
+                            {sites.map((site) => (
+                              <option key={site.id} value={site.id}>
+                                {site.name ?? site.code ?? site.id}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label
+                          className={`flex flex-col gap-1 md:col-span-6 ${
+                            selectedShiftHasExternalPoints ? "" : "hidden"
+                          }`}
+                          hidden={!selectedShiftHasExternalPoints}
+                          data-external-checkout-row
+                        >
+                          <span className="ui-label">Punto check-out</span>
+                          <select
+                            name="checkout_site_id"
+                            className="ui-input"
+                            defaultValue={selectedShift.checkout_site_id ?? ""}
+                            disabled={!selectedShiftHasExternalPoints}
+                            data-external-checkout-select
+                          >
+                            <option value="">Usar perfil / sede</option>
+                            {sites.map((site) => (
+                              <option key={site.id} value={site.id}>
+                                {site.name ?? site.code ?? site.id}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <div className="md:col-span-12 space-y-2 border-t border-[var(--ui-border)] pt-3">
+                          <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                            <input
+                              type="checkbox"
+                              className="rounded border-[var(--ui-border)]"
+                              defaultChecked={selectedShift.site_id !== selectedSiteId}
+                              data-block-site-toggle
+                              data-primary-block-site-toggle
+                            />
+                            Este turno es para otra sede
+                          </label>
+                          <label
+                            className={`flex flex-col gap-1 ${
+                              selectedShift.site_id !== selectedSiteId ? "" : "hidden"
+                            }`}
+                            hidden={selectedShift.site_id === selectedSiteId}
+                            data-block-site-row
+                          >
+                            <span className="ui-label">Sede del turno</span>
+                            <select
+                              name="block_site_id"
+                              className="ui-input"
+                              defaultValue={selectedShift.site_id}
+                              data-block-site-select
+                              data-primary-block-site-select
+                            >
+                              {operationalSites.map((site) => (
+                                <option key={site.id} value={site.id}>
+                                  {site.name ?? site.code ?? site.id}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
 
                     <div className="flex items-end justify-end md:col-span-12">
                       <button
@@ -1508,208 +1507,191 @@ export default async function StaffSchedulePage({
                       </select>
                     </label>
 
-                    <label
-                      className="flex flex-col gap-1 md:col-span-4"
-                      data-quick-shift-time-control
-                    >
-                      <span className="ui-label">Día bloque 1</span>
+                    <div className="contents md:col-span-12" data-primary-shift-block>
                       <input
-                        name="block_shift_date"
-                        type="date"
-                        className="ui-input"
-                        required
-                        defaultValue={quickShiftDate}
-                        min={weekDays[0]?.iso ?? undefined}
-                        max={weekDays[6]?.iso ?? undefined}
+                        type="hidden"
+                        name="block_site_id"
+                        value={selectedSiteId}
+                        data-block-site-select
                       />
-                    </label>
 
-                    <label
-                      className="flex flex-col gap-1 md:col-span-4"
-                      data-quick-shift-time-control
-                    >
-                      <span className="ui-label">Inicio bloque 1</span>
-                      <select
-                        name="block_start_time"
-                        className="ui-input"
-                        required
-                        defaultValue="06:00"
-                        data-quick-shift-time-input
-                      >
-                        {shiftTimeOptions.map((value) => (
-                          <option key={value} value={value}>
-                            {formatShiftTimeOption(value)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label
-                      className="flex flex-col gap-1 md:col-span-4"
-                      data-quick-shift-time-control
-                    >
-                      <span className="ui-label">Fin bloque 1</span>
-                      <select
-                        name="block_end_time"
-                        className="ui-input"
-                        required
-                        defaultValue="14:00"
-                        data-quick-shift-time-input
-                      >
-                        {shiftTimeOptions.map((value) => (
-                          <option key={value} value={value}>
-                            {formatShiftTimeOption(value)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="flex flex-col gap-1 md:col-span-12">
-                      <span className="ui-label">Nota bloque 1</span>
-                      <input
-                        name="block_notes"
-                        className="ui-input"
-                        placeholder="Ej. Cajero, apoyo barra, cierre"
-                        maxLength={240}
-                      />
-                    </label>
-
-                    <details className="md:col-span-12 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                      <summary className="cursor-pointer text-sm font-semibold text-[var(--ui-text)]">
-                        Opciones avanzadas
-                      </summary>
-                      <div className="mt-3 grid gap-3 md:grid-cols-12">
-                    <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                      <input
-                        type="checkbox"
-                        className="rounded border-[var(--ui-border)]"
-                        data-external-points-toggle
-                      />
-                      Cambiar puntos de entrada y salida
-                    </label>
-
-                    <label
-                      className="hidden flex flex-col gap-1 md:col-span-6"
-                      hidden
-                      data-external-checkin-row
-                    >
-                      <span className="ui-label">Punto check-in</span>
-                      <select
-                        name="checkin_site_id"
-                        className="ui-input"
-                        defaultValue=""
-                        disabled
-                        data-external-checkin-select
-                      >
-                        <option value="">Usar perfil / sede</option>
-                        {sites.map((site) => (
-                          <option key={site.id} value={site.id}>
-                            {site.name ?? site.code ?? site.id}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label
-                      className="hidden flex flex-col gap-1 md:col-span-6"
-                      hidden
-                      data-external-checkout-row
-                    >
-                      <span className="ui-label">Punto check-out</span>
-                      <select
-                        name="checkout_site_id"
-                        className="ui-input"
-                        defaultValue=""
-                        disabled
-                        data-external-checkout-select
-                      >
-                        <option value="">Usar perfil / sede</option>
-                        {sites.map((site) => (
-                          <option key={site.id} value={site.id}>
-                            {site.name ?? site.code ?? site.id}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="md:col-span-12 space-y-2">
-                      <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                        <input
-                          type="checkbox"
-                          className="rounded border-[var(--ui-border)]"
-                          data-block-site-toggle
-                        />
-                        Este bloque es para otra sede
-                      </label>
                       <label
-                        className="hidden flex flex-col gap-1"
-                        hidden
-                        data-block-site-row
+                        className="flex flex-col gap-1 md:col-span-4"
+                        data-quick-shift-time-control
                       >
-                        <span className="ui-label">Sede de este bloque</span>
-                        <select
-                          name="block_site_id"
+                        <span className="ui-label">Día bloque 1</span>
+                        <input
+                          name="block_shift_date"
+                          type="date"
                           className="ui-input"
-                          defaultValue={selectedSiteId}
-                          data-block-site-select
+                          required
+                          defaultValue={quickShiftDate}
+                          min={weekDays[0]?.iso ?? undefined}
+                          max={weekDays[6]?.iso ?? undefined}
+                        />
+                      </label>
+
+                      <label
+                        className="flex flex-col gap-1 md:col-span-4"
+                        data-quick-shift-time-control
+                      >
+                        <span className="ui-label">Inicio bloque 1</span>
+                        <select
+                          name="block_start_time"
+                          className="ui-input"
+                          required
+                          defaultValue="06:00"
+                          data-quick-shift-time-input
                         >
-                          {operationalSites.map((site) => (
-                            <option key={site.id} value={site.id}>
-                              {site.name ?? site.code ?? site.id}
+                          {shiftTimeOptions.map((value) => (
+                            <option key={value} value={value}>
+                              {formatShiftTimeOption(value)}
                             </option>
                           ))}
                         </select>
                       </label>
-                    </div>
 
-                    <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
-                      <input
-                        type="checkbox"
-                        name="block_rest_day"
-                        value="0"
-                        className="rounded border-[var(--ui-border)]"
-                        data-block-rest-day-toggle
-                      />
-                      Marcar este día como descanso completo
-                    </label>
-
-                    <div
-                      className="contents md:col-span-12"
-                      data-quick-shift-extra-blocks
-                    />
-
-                    <div
-                      className="flex flex-wrap items-center gap-2 md:col-span-12"
-                      data-quick-shift-add-row
-                    >
-                      <button
-                        type="button"
-                        className="ui-btn ui-btn--ghost ui-btn--sm"
-                        data-add-shift-block
+                      <label
+                        className="flex flex-col gap-1 md:col-span-4"
+                        data-quick-shift-time-control
                       >
-                        + Agregar otro bloque o día
-                      </button>
-                      <span className="text-xs text-[var(--ui-muted)]">
-                        Úsalo para cargar varios bloques o varios días del mismo
-                        trabajador.
-                      </span>
+                        <span className="ui-label">Fin bloque 1</span>
+                        <select
+                          name="block_end_time"
+                          className="ui-input"
+                          required
+                          defaultValue="14:00"
+                          data-quick-shift-time-input
+                        >
+                          {shiftTimeOptions.map((value) => (
+                            <option key={value} value={value}>
+                              {formatShiftTimeOption(value)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="flex flex-col gap-1 md:col-span-12">
+                        <span className="ui-label">Nota bloque 1</span>
+                        <input
+                          name="block_notes"
+                          className="ui-input"
+                          placeholder="Ej. Cajero, apoyo barra, cierre"
+                          maxLength={240}
+                        />
+                      </label>
                     </div>
 
-                    <label
-                      className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]"
-                      data-quick-shift-close-row
-                    >
-                      <input
-                        type="checkbox"
-                        name="show_end_as_close"
-                        value="1"
-                        className="rounded border-[var(--ui-border)]"
-                        data-quick-shift-close-input
-                      />
-                      Mostrar la salida del último bloque como
-                      &quot;Cierre&quot; al empleado
-                    </label>
+                    <div className="md:col-span-12 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 shadow-sm">
+                      <div className="mb-3 text-sm font-semibold text-[var(--ui-text)]">
+                        Controles del bloque principal
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-12">
+                        <label className="md:col-span-4 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                          <input
+                            type="checkbox"
+                            className="rounded border-[var(--ui-border)]"
+                            data-external-points-toggle
+                          />
+                          Cambiar puntos de entrada y salida
+                        </label>
 
+                        <label className="md:col-span-4 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
+                          <input
+                            type="checkbox"
+                            name="block_rest_day"
+                            value="0"
+                            className="rounded border-[var(--ui-border)]"
+                            data-block-rest-day-toggle
+                          />
+                          Marcar este día como descanso completo
+                        </label>
+
+                        <label
+                          className="md:col-span-4 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]"
+                          data-quick-shift-close-row
+                        >
+                          <input
+                            type="checkbox"
+                            name="show_end_as_close"
+                            value="1"
+                            className="rounded border-[var(--ui-border)]"
+                            data-quick-shift-close-input
+                          />
+                          Mostrar salida como &quot;Cierre&quot;
+                        </label>
+
+                        <label
+                          className="hidden flex flex-col gap-1 md:col-span-6"
+                          hidden
+                          data-external-checkin-row
+                        >
+                          <span className="ui-label">Punto check-in</span>
+                          <select
+                            name="checkin_site_id"
+                            className="ui-input"
+                            defaultValue=""
+                            disabled
+                            data-external-checkin-select
+                          >
+                            <option value="">Usar perfil / sede</option>
+                            {sites.map((site) => (
+                              <option key={site.id} value={site.id}>
+                                {site.name ?? site.code ?? site.id}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label
+                          className="hidden flex flex-col gap-1 md:col-span-6"
+                          hidden
+                          data-external-checkout-row
+                        >
+                          <span className="ui-label">Punto check-out</span>
+                          <select
+                            name="checkout_site_id"
+                            className="ui-input"
+                            defaultValue=""
+                            disabled
+                            data-external-checkout-select
+                          >
+                            <option value="">Usar perfil / sede</option>
+                            {sites.map((site) => (
+                              <option key={site.id} value={site.id}>
+                                {site.name ?? site.code ?? site.id}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+
+                    <details className="md:col-span-12 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 shadow-sm">
+                      <summary className="cursor-pointer text-sm font-semibold text-[var(--ui-text)]">
+                        Bloques adicionales
+                      </summary>
+                      <div className="mt-3 grid gap-3 md:grid-cols-12">
+                        <div
+                          className="contents md:col-span-12"
+                          data-quick-shift-extra-blocks
+                        />
+
+                        <div
+                          className="flex flex-wrap items-center gap-2 md:col-span-12"
+                          data-quick-shift-add-row
+                        >
+                          <button
+                            type="button"
+                            className="ui-btn ui-btn--ghost ui-btn--sm"
+                            data-add-shift-block
+                          >
+                            + Agregar otro bloque o día
+                          </button>
+                          <span className="text-xs text-[var(--ui-muted)]">
+                            Úsalo solo para turno partido o para cargar otro día del mismo trabajador.
+                          </span>
+                        </div>
                       </div>
                     </details>
 
@@ -1744,7 +1726,7 @@ export default async function StaffSchedulePage({
                       var inheritedStart = firstStartInput ? firstStartInput.value || "" : "";
                       var inheritedEnd = firstEndInput ? firstEndInput.value || "" : "";
                       var block = document.createElement("div");
-                      block.className = "rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 md:col-span-12";
+                      block.className = "rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-sm md:col-span-12";
                       block.setAttribute("data-quick-shift-block", "optional");
                       block.innerHTML =
                         '<div class="mb-2 flex items-center justify-between gap-2">' +
@@ -1785,7 +1767,11 @@ export default async function StaffSchedulePage({
                         '</div>';
                       var siteTemplate = form.querySelector("[data-block-site-select-template]");
                       var siteSelect = block.querySelector("[data-block-site-select]");
-                      if (siteTemplate && siteSelect) siteSelect.innerHTML = siteTemplate.innerHTML;
+                      if (siteTemplate && siteSelect) {
+                        siteSelect.innerHTML = siteTemplate.innerHTML;
+                        var baseSite = form.querySelector('[name="site_id"]');
+                        if (baseSite && baseSite.value) siteSelect.value = baseSite.value || "";
+                      }
                       var timeTemplate = form.querySelector("[data-shift-time-select-template]");
                       var startSelect = block.querySelector('[name="block_start_time"]');
                       var endSelect = block.querySelector('[name="block_end_time"]');
@@ -1806,23 +1792,39 @@ export default async function StaffSchedulePage({
                       });
                     }
 
+                    function getBlockScopes(form) {
+                      var primary = form.querySelector("[data-primary-shift-block]");
+                      var scopes = primary ? [primary] : [];
+                      return scopes.concat(Array.from(form.querySelectorAll('[data-quick-shift-block="optional"]')));
+                    }
+
+                    function getBlockSiteState(scope) {
+                      if (!scope) return { otherSite: false, siteId: "" };
+                      var toggle = scope.querySelector("[data-block-site-toggle]");
+                      var select = scope.querySelector("[data-block-site-select]");
+                      return {
+                        otherSite: Boolean(toggle && toggle.checked),
+                        siteId: select ? select.value || "" : "",
+                      };
+                    }
+
                     function getBlockRows(form) {
                       var dates = Array.from(form.querySelectorAll('input[name="block_shift_date"]'));
                       var starts = Array.from(form.querySelectorAll('[name="block_start_time"]'));
                       var ends = Array.from(form.querySelectorAll('[name="block_end_time"]'));
                       var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
                       var restInputs = Array.from(form.querySelectorAll('[data-block-rest-day-toggle]'));
-                      var siteToggles = Array.from(form.querySelectorAll('[data-block-site-toggle]'));
-                      var siteSelects = Array.from(form.querySelectorAll('[data-block-site-select]'));
+                      var scopes = getBlockScopes(form);
                       return dates.map(function (dateInput, index) {
+                        var siteState = getBlockSiteState(scopes[index]);
                         return {
                           date: dateInput.value || "",
                           start: starts[index] ? starts[index].value || "" : "",
                           end: ends[index] ? ends[index].value || "" : "",
                           note: notes[index] ? notes[index].value || "" : "",
                           restDay: Boolean(restInputs[index] && restInputs[index].checked),
-                          otherSite: Boolean(siteToggles[index] && siteToggles[index].checked),
-                          siteId: siteSelects[index] ? siteSelects[index].value || "" : "",
+                          otherSite: siteState.otherSite,
+                          siteId: siteState.siteId,
                         };
                       });
                     }
@@ -1841,16 +1843,20 @@ export default async function StaffSchedulePage({
                       var ends = Array.from(form.querySelectorAll('[name="block_end_time"]'));
                       var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
                       var restInputs = Array.from(form.querySelectorAll('[data-block-rest-day-toggle]'));
-                      var siteToggles = Array.from(form.querySelectorAll('[data-block-site-toggle]'));
-                      var siteSelects = Array.from(form.querySelectorAll('[data-block-site-select]'));
+                      var scopes = getBlockScopes(form);
                       rows.forEach(function (row, index) {
                         if (dates[index]) dates[index].value = row.date || "";
                         if (starts[index]) starts[index].value = row.start || "";
                         if (ends[index]) ends[index].value = row.end || "";
                         if (notes[index]) notes[index].value = row.note || "";
                         if (restInputs[index]) restInputs[index].checked = Boolean(row.restDay);
-                        if (siteToggles[index]) siteToggles[index].checked = Boolean(row.otherSite);
-                        if (siteSelects[index] && typeof row.siteId === "string") siteSelects[index].value = row.siteId;
+                        var scope = scopes[index];
+                        if (scope) {
+                          var siteToggle = scope.querySelector("[data-block-site-toggle]");
+                          var siteSelect = scope.querySelector("[data-block-site-select]");
+                          if (siteToggle) siteToggle.checked = Boolean(row.otherSite);
+                          if (siteSelect && typeof row.siteId === "string") siteSelect.value = row.siteId;
+                        }
                       });
                       syncBlockRestIndexes(form);
                       refreshBlockSiteControls(form);
@@ -1969,10 +1975,10 @@ export default async function StaffSchedulePage({
                     }
 
                     function getPrimaryBlockSiteScope(form) {
-                      var toggle = form.querySelector("[data-block-site-toggle]");
+                      var toggle = form.querySelector("[data-primary-block-site-toggle]");
                       if (!toggle) return null;
                       var wrapper = toggle.closest(".space-y-2") || toggle.parentElement;
-                      var select = wrapper ? wrapper.querySelector("[data-block-site-select]") : null;
+                      var select = wrapper ? wrapper.querySelector("[data-primary-block-site-select]") : null;
                       return {
                         toggle: toggle,
                         select: select,
@@ -2223,7 +2229,7 @@ export default async function StaffSchedulePage({
                           syncDefaultOperationalRole(form, true);
                         });
                       }
-                      form.querySelectorAll("[data-block-site-toggle], [data-block-site-select]").forEach(function (control) {
+                      form.querySelectorAll("[data-primary-block-site-toggle], [data-primary-block-site-select]").forEach(function (control) {
                         control.addEventListener("change", function () {
                           if (areaSelect) areaSelect.removeAttribute("data-user-changed");
                           if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
@@ -2284,13 +2290,15 @@ export default async function StaffSchedulePage({
                         if (target && target.matches && target.matches("[data-block-rest-day-toggle]")) {
                           refreshBlockControls(form);
                         }
-                        if (target && target.matches && (target.matches("[data-block-site-toggle]") || target.matches("[data-block-site-select]"))) {
+                        if (target && target.matches && (target.matches("[data-primary-block-site-toggle]") || target.matches("[data-primary-block-site-select]"))) {
                           var areaSelect = form.querySelector("[data-operational-area-select]");
                           var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
                           if (areaSelect) areaSelect.removeAttribute("data-user-changed");
                           if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
                           refreshBlockSiteControls(form);
                           syncDefaultOperationalRole(form, true);
+                        } else if (target && target.matches && (target.matches("[data-block-site-toggle]") || target.matches("[data-block-site-select]"))) {
+                          refreshBlockSiteControls(form);
                         }
                       });
 
@@ -2326,13 +2334,18 @@ export default async function StaffSchedulePage({
                           return;
                         }
 
-                        if (target.matches("[data-block-site-toggle]") || target.matches("[data-block-site-select]")) {
+                        if (target.matches("[data-primary-block-site-toggle]") || target.matches("[data-primary-block-site-select]")) {
                           var areaSelect = form.querySelector("[data-operational-area-select]");
                           var operationalRoleSelect = form.querySelector("[data-operational-role-select]");
                           if (areaSelect) areaSelect.removeAttribute("data-user-changed");
                           if (operationalRoleSelect) operationalRoleSelect.removeAttribute("data-user-changed");
                           refreshBlockSiteControls(form);
                           syncDefaultOperationalRole(form, true);
+                          return;
+                        }
+
+                        if (target.matches("[data-block-site-toggle]") || target.matches("[data-block-site-select]")) {
+                          refreshBlockSiteControls(form);
                           return;
                         }
 
