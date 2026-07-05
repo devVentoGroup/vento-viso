@@ -758,6 +758,19 @@ export default async function StaffSchedulePage({
     0,
   );
 
+  const shiftTimeOptions = Array.from({ length: 48 }, (_, index) => {
+    const hour = Math.floor(index / 2);
+    const minute = index % 2 === 0 ? "00" : "30";
+    return `${String(hour).padStart(2, "0")}:${minute}`;
+  });
+  const formatShiftTimeOption = (value: string) => {
+    const [hourText, minuteText] = value.split(":");
+    const hour = Number(hourText ?? "0");
+    const suffix = hour < 12 ? "a.m." : "p.m.";
+    const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+    return `${String(displayHour).padStart(2, "0")}:${minuteText ?? "00"} ${suffix}`;
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -1133,6 +1146,19 @@ export default async function StaffSchedulePage({
                       </select>
                     </label>
 
+                    <details
+                      className="md:col-span-12 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3"
+                      open={
+                        selectedShiftHasExternalPoints ||
+                        selectedShift.site_id !== selectedSiteId ||
+                        Boolean(selectedShift.show_end_as_close) ||
+                        selectedShift.shift_kind === "descanso"
+                      }
+                    >
+                      <summary className="cursor-pointer text-sm font-semibold text-[var(--ui-text)]">
+                        Opciones avanzadas
+                      </summary>
+                      <div className="mt-3 grid gap-3 md:grid-cols-12">
                     <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                       <input
                         type="checkbox"
@@ -1206,24 +1232,34 @@ export default async function StaffSchedulePage({
 
                     <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Inicio</span>
-                      <input
+                      <select
                         name="start_time"
-                        type="time"
                         className="ui-input"
                         required
                         defaultValue={selectedShift.start_time.slice(0, 5)}
-                      />
+                      >
+                        {shiftTimeOptions.map((value) => (
+                          <option key={value} value={value}>
+                            {formatShiftTimeOption(value)}
+                          </option>
+                        ))}
+                      </select>
                     </label>
 
                     <label className="flex flex-col gap-1 md:col-span-4">
                       <span className="ui-label">Fin</span>
-                      <input
+                      <select
                         name="end_time"
-                        type="time"
                         className="ui-input"
                         required
                         defaultValue={selectedShift.end_time.slice(0, 5)}
-                      />
+                      >
+                        {shiftTimeOptions.map((value) => (
+                          <option key={value} value={value}>
+                            {formatShiftTimeOption(value)}
+                          </option>
+                        ))}
+                      </select>
                     </label>
 
                     <label className="flex flex-col gap-1 md:col-span-12">
@@ -1292,6 +1328,9 @@ export default async function StaffSchedulePage({
                       />
                       Marcar este día como descanso
                     </label>
+
+                      </div>
+                    </details>
 
                     <div className="flex items-end justify-end md:col-span-12">
                       <button
@@ -1363,6 +1402,19 @@ export default async function StaffSchedulePage({
                       {operationalSites.map((site) => (
                         <option key={site.id} value={site.id}>
                           {site.name ?? site.code ?? site.id}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      className="hidden"
+                      disabled
+                      hidden
+                      data-shift-time-select-template
+                    >
+                      {shiftTimeOptions.map((value) => (
+                        <option key={value} value={value}>
+                          {formatShiftTimeOption(value)}
                         </option>
                       ))}
                     </select>
@@ -1456,6 +1508,77 @@ export default async function StaffSchedulePage({
                       </select>
                     </label>
 
+                    <label
+                      className="flex flex-col gap-1 md:col-span-4"
+                      data-quick-shift-time-control
+                    >
+                      <span className="ui-label">Día bloque 1</span>
+                      <input
+                        name="block_shift_date"
+                        type="date"
+                        className="ui-input"
+                        required
+                        defaultValue={quickShiftDate}
+                        min={weekDays[0]?.iso ?? undefined}
+                        max={weekDays[6]?.iso ?? undefined}
+                      />
+                    </label>
+
+                    <label
+                      className="flex flex-col gap-1 md:col-span-4"
+                      data-quick-shift-time-control
+                    >
+                      <span className="ui-label">Inicio bloque 1</span>
+                      <select
+                        name="block_start_time"
+                        className="ui-input"
+                        required
+                        defaultValue="06:00"
+                        data-quick-shift-time-input
+                      >
+                        {shiftTimeOptions.map((value) => (
+                          <option key={value} value={value}>
+                            {formatShiftTimeOption(value)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label
+                      className="flex flex-col gap-1 md:col-span-4"
+                      data-quick-shift-time-control
+                    >
+                      <span className="ui-label">Fin bloque 1</span>
+                      <select
+                        name="block_end_time"
+                        className="ui-input"
+                        required
+                        defaultValue="14:00"
+                        data-quick-shift-time-input
+                      >
+                        {shiftTimeOptions.map((value) => (
+                          <option key={value} value={value}>
+                            {formatShiftTimeOption(value)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 md:col-span-12">
+                      <span className="ui-label">Nota bloque 1</span>
+                      <input
+                        name="block_notes"
+                        className="ui-input"
+                        placeholder="Ej. Cajero, apoyo barra, cierre"
+                        maxLength={240}
+                      />
+                    </label>
+
+                    <details className="md:col-span-12 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                      <summary className="cursor-pointer text-sm font-semibold text-[var(--ui-text)]">
+                        Opciones avanzadas
+                      </summary>
+                      <div className="mt-3 grid gap-3 md:grid-cols-12">
                     <label className="md:col-span-12 inline-flex items-center gap-2 text-sm text-[var(--ui-text)]">
                       <input
                         type="checkbox"
@@ -1507,62 +1630,6 @@ export default async function StaffSchedulePage({
                           </option>
                         ))}
                       </select>
-                    </label>
-
-                    <label
-                      className="flex flex-col gap-1 md:col-span-4"
-                      data-quick-shift-time-control
-                    >
-                      <span className="ui-label">Día bloque 1</span>
-                      <input
-                        name="block_shift_date"
-                        type="date"
-                        className="ui-input"
-                        required
-                        defaultValue={quickShiftDate}
-                        min={weekDays[0]?.iso ?? undefined}
-                        max={weekDays[6]?.iso ?? undefined}
-                      />
-                    </label>
-
-                    <label
-                      className="flex flex-col gap-1 md:col-span-4"
-                      data-quick-shift-time-control
-                    >
-                      <span className="ui-label">Inicio bloque 1</span>
-                      <input
-                        name="block_start_time"
-                        type="time"
-                        className="ui-input"
-                        required
-                        defaultValue="06:00"
-                        data-quick-shift-time-input
-                      />
-                    </label>
-
-                    <label
-                      className="flex flex-col gap-1 md:col-span-4"
-                      data-quick-shift-time-control
-                    >
-                      <span className="ui-label">Fin bloque 1</span>
-                      <input
-                        name="block_end_time"
-                        type="time"
-                        className="ui-input"
-                        required
-                        defaultValue="14:00"
-                        data-quick-shift-time-input
-                      />
-                    </label>
-
-                    <label className="flex flex-col gap-1 md:col-span-12">
-                      <span className="ui-label">Nota bloque 1</span>
-                      <input
-                        name="block_notes"
-                        className="ui-input"
-                        placeholder="Ej. Cajero, apoyo barra, cierre"
-                        maxLength={240}
-                      />
                     </label>
 
                     <div className="md:col-span-12 space-y-2">
@@ -1643,6 +1710,9 @@ export default async function StaffSchedulePage({
                       &quot;Cierre&quot; al empleado
                     </label>
 
+                      </div>
+                    </details>
+
                     <div className="flex items-end justify-end md:col-span-12">
                       <button
                         type="submit"
@@ -1666,9 +1736,13 @@ export default async function StaffSchedulePage({
                     function createBlock(form) {
                       var index = getBlockCount(form) + 1;
                       var firstDateInput = form.querySelector('input[name="block_shift_date"]');
+                      var firstStartInput = form.querySelector('[name="block_start_time"]');
+                      var firstEndInput = form.querySelector('[name="block_end_time"]');
                       var minDate = firstDateInput ? firstDateInput.getAttribute("min") || "" : "";
                       var maxDate = firstDateInput ? firstDateInput.getAttribute("max") || "" : "";
                       var inheritedDate = firstDateInput ? firstDateInput.value || "" : "";
+                      var inheritedStart = firstStartInput ? firstStartInput.value || "" : "";
+                      var inheritedEnd = firstEndInput ? firstEndInput.value || "" : "";
                       var block = document.createElement("div");
                       block.className = "rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 md:col-span-12";
                       block.setAttribute("data-quick-shift-block", "optional");
@@ -1684,11 +1758,11 @@ export default async function StaffSchedulePage({
                           '</label>' +
                           '<label class="flex flex-col gap-1 md:col-span-4">' +
                             '<span class="ui-label">Inicio bloque ' + index + '</span>' +
-                            '<input name="block_start_time" type="time" class="ui-input" data-quick-shift-time-input />' +
+                            '<select name="block_start_time" class="ui-input" data-quick-shift-time-input></select>' +
                           '</label>' +
                           '<label class="flex flex-col gap-1 md:col-span-4">' +
                             '<span class="ui-label">Fin bloque ' + index + '</span>' +
-                            '<input name="block_end_time" type="time" class="ui-input" data-quick-shift-time-input />' +
+                            '<select name="block_end_time" class="ui-input" data-quick-shift-time-input></select>' +
                           '</label>' +
                           '<label class="flex flex-col gap-1 md:col-span-12">' +
                             '<span class="ui-label">Nota bloque ' + index + '</span>' +
@@ -1712,6 +1786,17 @@ export default async function StaffSchedulePage({
                       var siteTemplate = form.querySelector("[data-block-site-select-template]");
                       var siteSelect = block.querySelector("[data-block-site-select]");
                       if (siteTemplate && siteSelect) siteSelect.innerHTML = siteTemplate.innerHTML;
+                      var timeTemplate = form.querySelector("[data-shift-time-select-template]");
+                      var startSelect = block.querySelector('[name="block_start_time"]');
+                      var endSelect = block.querySelector('[name="block_end_time"]');
+                      if (timeTemplate && startSelect) {
+                        startSelect.innerHTML = timeTemplate.innerHTML;
+                        if (inheritedStart) startSelect.value = inheritedStart;
+                      }
+                      if (timeTemplate && endSelect) {
+                        endSelect.innerHTML = timeTemplate.innerHTML;
+                        if (inheritedEnd) endSelect.value = inheritedEnd;
+                      }
                       return block;
                     }
 
@@ -1723,8 +1808,8 @@ export default async function StaffSchedulePage({
 
                     function getBlockRows(form) {
                       var dates = Array.from(form.querySelectorAll('input[name="block_shift_date"]'));
-                      var starts = Array.from(form.querySelectorAll('input[name="block_start_time"]'));
-                      var ends = Array.from(form.querySelectorAll('input[name="block_end_time"]'));
+                      var starts = Array.from(form.querySelectorAll('[name="block_start_time"]'));
+                      var ends = Array.from(form.querySelectorAll('[name="block_end_time"]'));
                       var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
                       var restInputs = Array.from(form.querySelectorAll('[data-block-rest-day-toggle]'));
                       var siteToggles = Array.from(form.querySelectorAll('[data-block-site-toggle]'));
@@ -1752,8 +1837,8 @@ export default async function StaffSchedulePage({
                         if (container) container.appendChild(createBlock(form));
                       });
                       var dates = Array.from(form.querySelectorAll('input[name="block_shift_date"]'));
-                      var starts = Array.from(form.querySelectorAll('input[name="block_start_time"]'));
-                      var ends = Array.from(form.querySelectorAll('input[name="block_end_time"]'));
+                      var starts = Array.from(form.querySelectorAll('[name="block_start_time"]'));
+                      var ends = Array.from(form.querySelectorAll('[name="block_end_time"]'));
                       var notes = Array.from(form.querySelectorAll('input[name="block_notes"]'));
                       var restInputs = Array.from(form.querySelectorAll('[data-block-rest-day-toggle]'));
                       var siteToggles = Array.from(form.querySelectorAll('[data-block-site-toggle]'));
