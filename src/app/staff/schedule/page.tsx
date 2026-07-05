@@ -7,19 +7,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 
 import {
-  assignManyShiftAction,
-  copyDayToOtherDaysAction,
   copyPreviousWeekAction,
-  deleteAvailabilityAction,
-  deleteCoverageRequirementAction,
   deleteDraftWeekAction,
-  deleteManyShiftAction,
   deleteShiftAction,
   publishWeekAction,
-  saveAvailabilityAction,
-  saveCoverageRequirementAction,
   saveShiftAction,
-  saveWorkerRulesAction,
   suggestDraftWeekAction,
 } from "./actions";
 import {
@@ -27,7 +19,6 @@ import {
   addMinutesToPeriodTotals,
   appendReturnParams,
   AREA_ORDER,
-  BOGOTA_TIME_ZONE,
   buildReturnTo,
   buildWeekDays,
   cleanOptionalText,
@@ -44,44 +35,32 @@ import {
   getOkMessage,
   getOperationalRoleCandidateFromBaseRole,
   getOperationalRoleLabel,
-  getScheduleDayPart,
   getShiftMinutes,
   getVisibleShiftStatus,
   hasShiftEnded,
   humanizeRoleCode,
-  isLateCheckIn,
   isOperationalSite,
   isShiftInProgress,
   isoDate,
-  loadShiftOperationalContextIndex,
   normalizeRole,
-  parseTimeToMinutes,
   parseWeekStart,
   requireStaffScheduleAccess,
-  resolveContextSiteId,
   safeDecode,
-  STAFF_SCHEDULE_PERMISSION,
   startOfMonth,
   toMonday,
   uniqueTextValues,
-  withShiftOperationalContext,
   type AttendanceLogRow,
-  type AvailabilityRow,
-  type EmployeePeriodTotals,
   type EmployeeOperationalProfileRow,
   type EmployeeRow,
   type EmployeeSiteLink,
   type EmployeeTotals,
   type OperationalAreaOption,
   type OperationalRoleOption,
-  type RoleConcurrencyLimitRow,
   type ScheduleTableColumn,
   type ShiftAttendanceInfo,
-  type ShiftOperationalContext,
   type ShiftRow,
   type SiteOperationalRoleRow,
   type SiteRow,
-  type StaffingRequirementRow,
 } from "./helpers";
 export default async function StaffSchedulePage({
   searchParams,
@@ -148,10 +127,6 @@ export default async function StaffSchedulePage({
     directEmployeesRes,
     linkedEmployeesRes,
     shiftsRes,
-    staffingRequirementsRes,
-    availabilityConfigRes,
-    planningLimitsRes,
-    shiftPreferencesRes,
     siteOperationalRolesRes,
     employeeOperationalProfilesRes,
   ] = await Promise.all([
@@ -183,44 +158,6 @@ export default async function StaffSchedulePage({
           .lte("shift_date", weekEndIso)
           .order("shift_date", { ascending: true })
           .order("start_time", { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
-    selectedSiteId
-      ? supabase
-          .schema("viso")
-          .from("site_staffing_requirements")
-          .select(
-            "id,site_id,day_of_week,start_time,end_time,min_headcount,ideal_headcount,max_headcount,required_role_code",
-          )
-          .eq("site_id", selectedSiteId)
-          .order("day_of_week", { ascending: true })
-          .order("start_time", { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
-    selectedSiteId
-      ? supabase
-          .schema("viso")
-          .from("employee_availability")
-          .select(
-            "id,employee_id,site_id,day_of_week,available_from,available_to,is_available,availability_kind",
-          )
-          .eq("site_id", selectedSiteId)
-          .order("day_of_week", { ascending: true })
-          .order("available_from", { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
-    selectedSiteId
-      ? supabase
-          .schema("viso")
-          .from("employee_planning_limits")
-          .select("employee_id,target_weekly_minutes,max_weekly_minutes")
-          .eq("site_id", selectedSiteId)
-      : Promise.resolve({ data: [], error: null }),
-    selectedSiteId
-      ? supabase
-          .schema("viso")
-          .from("employee_shift_preferences")
-          .select(
-            "employee_id,prefers_morning,prefers_afternoon,prefers_evening,avoid_opening,avoid_closing",
-          )
-          .eq("site_id", selectedSiteId)
       : Promise.resolve({ data: [], error: null }),
     selectedSiteId
       ? supabase
@@ -491,26 +428,7 @@ export default async function StaffSchedulePage({
   const operationalRoleCodes = new Set(
     operationalRoleOptions.map((role) => role.code),
   );
-  const siteDefaultOperationalRole = getSiteDefaultOperationalRoleForArea(null);
   const employeeIds = employees.map((employee) => employee.id);
-  const staffingRequirements = (staffingRequirementsRes.data ??
-    []) as StaffingRequirementRow[];
-  const availabilityConfigRows = (availabilityConfigRes.data ??
-    []) as (AvailabilityRow & { id: string })[];
-  const planningLimitsRows = (planningLimitsRes.data ?? []) as Array<{
-    employee_id: string;
-    target_weekly_minutes: number;
-    max_weekly_minutes: number;
-  }>;
-  const shiftPreferenceRows = (shiftPreferencesRes.data ?? []) as Array<{
-    employee_id: string;
-    prefers_morning: boolean;
-    prefers_afternoon: boolean;
-    prefers_evening: boolean;
-    avoid_opening: boolean;
-    avoid_closing: boolean;
-  }>;
-
   const totalsByEmployee: Record<string, EmployeeTotals> = {};
   if (employeeIds.length > 0 && selectedSiteId) {
     const { data: monthShiftRows } = await supabase
@@ -1173,9 +1091,6 @@ export default async function StaffSchedulePage({
                         className="ui-input"
                         defaultValue={selectedShiftOperationalRole}
                         data-operational-role-select
-                        data-site-default-role={getSiteDefaultOperationalRoleForArea(
-                          selectedShiftAreaId,
-                        )}
                         data-preserve-initial-role="1"
                       >
                         <option value="">Seleccionar rol operativo</option>
@@ -1515,7 +1430,6 @@ export default async function StaffSchedulePage({
                         className="ui-input"
                         defaultValue={quickShiftOperationalRole}
                         data-operational-role-select
-                        data-site-default-role={siteDefaultOperationalRole}
                       >
                         <option value="">Seleccionar rol operativo</option>
                         {operationalRoleSelectOptions.map((role) => (
@@ -1745,12 +1659,6 @@ export default async function StaffSchedulePage({
                   (function () {
                     var draftKey = "viso:quick-shift-draft:" + window.location.pathname + ":" + (new URLSearchParams(window.location.search).get("site_id") || "site");
 
-                    function clearBlock(block) {
-                      block.querySelectorAll("input").forEach(function (input) {
-                        input.value = "";
-                      });
-                    }
-
                     function getBlockCount(form) {
                       return 1 + form.querySelectorAll('[data-quick-shift-block="optional"]').length;
                     }
@@ -1883,7 +1791,6 @@ export default async function StaffSchedulePage({
                           rows: getBlockRows(form),
                         }));
                       } catch (error) {
-                        // No bloquear el envío si el navegador no permite sessionStorage.
                       }
                     }
 
@@ -1922,10 +1829,6 @@ export default async function StaffSchedulePage({
                       }
                     }
 
-                    function isRestDay(form) {
-                      return false;
-                    }
-
                     function setElementHidden(element, hidden) {
                       if (!element) return;
                       element.hidden = hidden;
@@ -1940,12 +1843,11 @@ export default async function StaffSchedulePage({
                     }
 
                     function getActiveRoleOptions(form) {
-                      var siteSelect = form.querySelector('[name="site_id"]');
                       var areaSelect = form.querySelector("[data-operational-area-select]");
                       var roleSelect = form.querySelector("[data-operational-role-select]");
                       if (!roleSelect) return [];
 
-                      var siteId = siteSelect ? siteSelect.value || "" : "";
+                      var siteId = getSelectedSiteId(form);
                       var areaId = areaSelect ? areaSelect.value || "" : "";
                       var options = Array.from(roleSelect.options).filter(function (option) {
                         return Boolean(option.value);
@@ -2144,7 +2046,6 @@ export default async function StaffSchedulePage({
                       var externalPointsToggle = form.querySelector("[data-external-points-toggle]");
                       var externalPointsEnabled = Boolean(externalPointsToggle && externalPointsToggle.checked);
                       var roleSelect = form.querySelector("[data-operational-role-select]");
-                      var selectedOption = getSelectedRoleOption(roleSelect);
                       var requiresCheckin = externalPointsEnabled;
                       var requiresCheckout = externalPointsEnabled;
 
@@ -3032,7 +2933,6 @@ export default async function StaffSchedulePage({
                       try {
                         window.localStorage.setItem(storageKey, JSON.stringify(state));
                       } catch (error) {
-                        // Ignore storage errors. The table remains usable in the current session.
                       }
                     }
 
