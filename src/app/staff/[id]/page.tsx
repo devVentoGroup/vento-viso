@@ -33,6 +33,8 @@ type EmployeeRow = {
   id: string;
   full_name: string | null;
   alias: string | null;
+  document_type: string | null;
+  document_number: string | null;
   role: string | null;
   is_active: boolean | null;
   site_id: string | null;
@@ -452,6 +454,8 @@ async function updateEmployee(formData: FormData) {
   const id = asText(formData.get("id"));
   const fullName = asText(formData.get("full_name"));
   const alias = asText(formData.get("alias"));
+  const documentType = asText(formData.get("document_type")) || "CC";
+  const documentNumber = asText(formData.get("document_number"));
   const role = asText(formData.get("role"));
   const siteId = asText(formData.get("site_id"));
   const isActive = asBool(formData.get("is_active"));
@@ -472,6 +476,8 @@ async function updateEmployee(formData: FormData) {
     .update({
       full_name: fullName,
       alias: alias || null,
+      document_type: documentType,
+      document_number: documentNumber || null,
       role,
       site_id: siteId,
       is_active: isActive,
@@ -1298,7 +1304,7 @@ export default async function StaffDetailPage({
   ] = await Promise.all([
     supabase
       .from("employees")
-      .select("id,full_name,alias,role,is_active,site_id,photo_url,pin_code_hash")
+      .select("id,full_name,alias,document_type,document_number,role,is_active,site_id,photo_url,pin_code_hash")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -1690,6 +1696,25 @@ export default async function StaffDetailPage({
           <label className="space-y-2 lg:col-span-3">
             <span className="ui-label">Alias</span>
             <input name="alias" className="ui-input" defaultValue={emp.alias ?? ""} />
+          </label>
+          <label className="space-y-2 lg:col-span-2">
+            <span className="ui-label">Tipo documento</span>
+            <select name="document_type" className="ui-input" defaultValue={emp.document_type ?? "CC"}>
+              <option value="CC">CC</option>
+              <option value="CE">CE</option>
+              <option value="TI">TI</option>
+              <option value="PAS">Pasaporte</option>
+              <option value="OTRO">Otro</option>
+            </select>
+          </label>
+          <label className="space-y-2 lg:col-span-3">
+            <span className="ui-label">Cédula</span>
+            <input
+              name="document_number"
+              className="ui-input"
+              defaultValue={emp.document_number ?? ""}
+              placeholder="Número de identificación"
+            />
           </label>
           <label className="space-y-2 lg:col-span-4">
             <span className="ui-label">Rol</span>

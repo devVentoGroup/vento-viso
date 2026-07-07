@@ -17,6 +17,8 @@ type EmployeeRow = {
   id: string;
   full_name: string | null;
   alias: string | null;
+  document_type: string | null;
+  document_number: string | null;
   role: string | null;
   is_active: boolean | null;
   site_id: string | null;
@@ -77,7 +79,7 @@ export default async function StaffPage({
   const [{ data, error: employeesError }, { data: sitesData }] = await Promise.all([
     supabase
       .from("employees")
-      .select("id,full_name,alias,role,is_active,site_id,site:sites!employees_site_id_fkey(id,name,code)")
+      .select("id,full_name,alias,document_type,document_number,role,is_active,site_id,site:sites!employees_site_id_fkey(id,name,code)")
       .order("full_name", { ascending: true }),
     supabase.from("sites").select("id,name,code").order("name", { ascending: true }),
   ]);
@@ -265,6 +267,7 @@ export default async function StaffPage({
             <TableHead>
               <TableRow>
                 <TableHeaderCell>Nombre</TableHeaderCell>
+                <TableHeaderCell>Documento</TableHeaderCell>
                 <TableHeaderCell>Rol</TableHeaderCell>
                 <TableHeaderCell>Sedes</TableHeaderCell>
                 <TableHeaderCell>Contrato / Carnet</TableHeaderCell>
@@ -299,6 +302,16 @@ export default async function StaffPage({
                     <TableCell>
                       <div className="font-semibold">{employee.full_name ?? "Sin nombre"}</div>
                       <div className="ui-caption">{employee.alias ?? employee.id}</div>
+                    </TableCell>
+                    <TableCell>
+                      {employee.document_number ? (
+                        <div>
+                          <div className="font-medium">{employee.document_number}</div>
+                          <div className="ui-caption">{employee.document_type ?? "CC"}</div>
+                        </div>
+                      ) : (
+                        <span className="ui-caption">Sin cédula</span>
+                      )}
                     </TableCell>
                     <TableCell>{employee.role ?? "-"}</TableCell>
                     <TableCell>
