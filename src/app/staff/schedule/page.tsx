@@ -2848,6 +2848,9 @@ export default async function StaffSchedulePage({
                 [data-schedule-column-menu] > summary::-webkit-details-marker {
                   display: none;
                 }
+                [data-schedule-action-menu] > summary::-webkit-details-marker {
+                  display: none;
+                }
               `}</style>
                 <div className="overflow-auto ui-scrollbar-subtle">
                   <table
@@ -2972,15 +2975,82 @@ export default async function StaffSchedulePage({
                                     className="border-b border-r border-[var(--ui-border)] px-2.5 align-top"
                                   >
                                     {dayRows.length === 0 ? (
-                                      <Link
-                                        href={appendReturnParams(returnTo, {
-                                          quick_employee_id: employee.id,
-                                          quick_shift_date: day.iso,
-                                        })}
-                                        className="block min-h-4 rounded no-underline transition hover:bg-[var(--ui-surface-2)]"
-                                        title={`Agregar turno a ${employeeName} el ${day.label}`}
-                                        aria-label={`Agregar turno a ${employeeName} el ${day.label}`}
-                                      />
+                                      <details className="relative" data-schedule-action-menu>
+                                        <summary
+                                          className="block min-h-4 cursor-pointer list-none rounded transition hover:bg-[var(--ui-surface-2)]"
+                                          title={`Opciones para ${employeeName} el ${day.label}`}
+                                          aria-label={`Opciones para ${employeeName} el ${day.label}`}
+                                        />
+                                        <div className="absolute left-0 top-full z-40 mt-1 min-w-36 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1 text-sm shadow-xl">
+                                          <Link
+                                            href={appendReturnParams(returnTo, {
+                                              quick_employee_id: employee.id,
+                                              quick_shift_date: day.iso,
+                                            })}
+                                            className="block rounded-lg px-3 py-2 font-medium text-[var(--ui-text)] no-underline transition hover:bg-[var(--ui-surface-2)]"
+                                          >
+                                            Nuevo
+                                          </Link>
+                                          <form action={saveShiftAction}>
+                                            <input
+                                              type="hidden"
+                                              name="site_id"
+                                              value={selectedSiteId}
+                                            />
+                                            <input
+                                              type="hidden"
+                                              name="return_to"
+                                              value={returnToWithoutEdit}
+                                            />
+                                            <input
+                                              type="hidden"
+                                              name="employee_id"
+                                              value={employee.id}
+                                            />
+                                            <input
+                                              type="hidden"
+                                              name="block_shift_date"
+                                              value={day.iso}
+                                            />
+                                            <input
+                                              type="hidden"
+                                              name="block_start_time"
+                                              value="00:00"
+                                            />
+                                            <input
+                                              type="hidden"
+                                              name="block_end_time"
+                                              value="23:59"
+                                            />
+                                            <input
+                                              type="hidden"
+                                              name="block_site_id"
+                                              value={selectedSiteId}
+                                            />
+                                            <input
+                                              type="hidden"
+                                              name="block_rest_day"
+                                              value="0"
+                                            />
+                                            <input
+                                              type="hidden"
+                                              name="break_minutes"
+                                              value="0"
+                                            />
+                                            <input
+                                              type="hidden"
+                                              name="status"
+                                              value="scheduled"
+                                            />
+                                            <button
+                                              type="submit"
+                                              className="block w-full rounded-lg px-3 py-2 text-left font-medium text-[var(--ui-text)] transition hover:bg-[var(--ui-surface-2)]"
+                                            >
+                                              Descanso
+                                            </button>
+                                          </form>
+                                        </div>
+                                      </details>
                                     ) : (
                                       <div className="flex flex-wrap items-stretch gap-1.5">
                                         {dayRows.map((shift) => {
@@ -3148,18 +3218,16 @@ export default async function StaffSchedulePage({
                                             .join(" · ");
 
                                           return (
-                                            <Link
+                                            <details
                                               key={shift.id}
-                                              href={appendReturnParams(
-                                                returnTo,
-                                                {
-                                                  edit_shift: shift.id,
-                                                },
-                                              )}
-                                              data-schedule-shift-card
-                                              className={`flex min-w-[78px] flex-1 basis-[78px] flex-col rounded-lg border px-2 py-1 no-underline transition ${areaVisual.shiftClass} ${shiftTemporalClass} ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
-                                              title={cardTitle}
+                                              className="relative flex min-w-[78px] flex-1 basis-[78px]"
+                                              data-schedule-action-menu
                                             >
+                                              <summary
+                                                data-schedule-shift-card
+                                                className={`flex min-w-[78px] flex-1 basis-[78px] cursor-pointer list-none flex-col rounded-lg border px-2 py-1 no-underline transition ${areaVisual.shiftClass} ${shiftTemporalClass} ${selectedShift?.id === shift.id ? "ring-2 ring-inset ring-[var(--ui-brand)]" : ""}`}
+                                                title={cardTitle}
+                                              >
                                               <div className="flex items-center gap-1 text-xs font-semibold leading-snug text-[var(--ui-text)]">
                                                 {temporalMarker ? (
                                                   <span
@@ -3198,18 +3266,52 @@ export default async function StaffSchedulePage({
                                                   )}
                                                 </div>
                                               ) : null}
-                                            </Link>
+                                              </summary>
+                                              <div className="absolute left-0 top-full z-40 mt-1 min-w-40 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1 text-sm shadow-xl">
+                                                <Link
+                                                  href={appendReturnParams(returnTo, {
+                                                    quick_employee_id: employee.id,
+                                                    quick_shift_date: day.iso,
+                                                  })}
+                                                  className="block rounded-lg px-3 py-2 font-medium text-[var(--ui-text)] no-underline transition hover:bg-[var(--ui-surface-2)]"
+                                                >
+                                                  Nuevo bloque
+                                                </Link>
+                                                <Link
+                                                  href={appendReturnParams(
+                                                    returnTo,
+                                                    {
+                                                      edit_shift: shift.id,
+                                                    },
+                                                  )}
+                                                  className="block rounded-lg px-3 py-2 font-medium text-[var(--ui-text)] no-underline transition hover:bg-[var(--ui-surface-2)]"
+                                                >
+                                                  Editar
+                                                </Link>
+                                                {!shift.published_at ? (
+                                                  <form action={deleteShiftAction}>
+                                                    <input
+                                                      type="hidden"
+                                                      name="shift_id"
+                                                      value={shift.id}
+                                                    />
+                                                    <input
+                                                      type="hidden"
+                                                      name="return_to"
+                                                      value={returnToWithoutEdit}
+                                                    />
+                                                    <button
+                                                      type="submit"
+                                                      className="block w-full rounded-lg px-3 py-2 text-left font-medium text-[var(--ui-danger)] transition hover:bg-[var(--ui-surface-2)]"
+                                                    >
+                                                      Eliminar
+                                                    </button>
+                                                  </form>
+                                                ) : null}
+                                              </div>
+                                            </details>
                                           );
                                         })}
-                                        <Link
-                                          href={appendReturnParams(returnTo, {
-                                            quick_employee_id: employee.id,
-                                            quick_shift_date: day.iso,
-                                          })}
-                                          className="block min-h-4 flex-1 basis-4 rounded no-underline transition hover:bg-[var(--ui-surface-2)]"
-                                          title={`Agregar otro turno a ${employeeName} el ${day.label}`}
-                                          aria-label={`Agregar otro turno a ${employeeName} el ${day.label}`}
-                                        />
                                       </div>
                                     )}
                                   </td>
@@ -3457,6 +3559,30 @@ export default async function StaffSchedulePage({
                         if (!key) return;
                         event.preventDefault();
                         setColumnHidden(key, true);
+                      });
+
+                      shell.addEventListener("toggle", function (event) {
+                        var menu = event.target;
+                        if (!menu || !menu.matches || !menu.matches("[data-schedule-action-menu]") || !menu.open) return;
+                        shell.querySelectorAll("[data-schedule-action-menu][open]").forEach(function (current) {
+                          if (current !== menu) current.removeAttribute("open");
+                        });
+                      }, true);
+
+                      document.addEventListener("pointerdown", function (event) {
+                        var target = event.target;
+                        if (!target || typeof target.closest !== "function") return;
+                        if (target.closest("[data-schedule-action-menu]")) return;
+                        shell.querySelectorAll("[data-schedule-action-menu][open]").forEach(function (menu) {
+                          menu.removeAttribute("open");
+                        });
+                      });
+
+                      document.addEventListener("keydown", function (event) {
+                        if (event.key !== "Escape") return;
+                        shell.querySelectorAll("[data-schedule-action-menu][open]").forEach(function (menu) {
+                          menu.removeAttribute("open");
+                        });
                       });
 
                       shell.addEventListener("pointerdown", function (event) {
