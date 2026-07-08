@@ -805,6 +805,12 @@ export default async function StaffSchedulePage({
             >
               Configuración de horarios
             </Link>
+            <Link
+              href={`/staff/schedule/global?week=${encodeURIComponent(weekStartIso)}`}
+              className="ui-btn ui-btn--ghost"
+            >
+              Vista global
+            </Link>
             <Link href="/staff/new" className="ui-btn ui-btn--ghost">
               Invitar trabajador
             </Link>
