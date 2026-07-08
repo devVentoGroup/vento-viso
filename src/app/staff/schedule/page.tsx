@@ -2975,9 +2975,12 @@ export default async function StaffSchedulePage({
                                     className="border-b border-r border-[var(--ui-border)] px-2.5 align-top"
                                   >
                                     {dayRows.length === 0 ? (
-                                      <details className="relative" data-schedule-action-menu>
+                                      <details
+                                        className="relative block h-full min-h-10"
+                                        data-schedule-action-menu
+                                      >
                                         <summary
-                                          className="block min-h-4 cursor-pointer list-none rounded transition hover:bg-[var(--ui-surface-2)]"
+                                          className="block h-full min-h-10 cursor-pointer list-none rounded transition hover:bg-[var(--ui-surface-2)]"
                                           title={`Opciones para ${employeeName} el ${day.label}`}
                                           aria-label={`Opciones para ${employeeName} el ${day.label}`}
                                         />
