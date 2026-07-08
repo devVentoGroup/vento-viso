@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Script from "next/script";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -30,12 +31,12 @@ type SiteEmployeeLinkRow = {
 
 const ZOOM_OPTIONS = [65, 75, 85, 100] as const;
 const AREA_PALETTE = [
-  "bg-slate-100",
-  "bg-blue-50",
-  "bg-emerald-50",
-  "bg-amber-50",
   "bg-violet-50",
-  "bg-stone-100",
+  "bg-purple-50",
+  "bg-fuchsia-50",
+  "bg-indigo-50",
+  "bg-slate-50",
+  "bg-zinc-50",
 ] as const;
 
 function getEmployeeRef(row: SiteEmployeeLinkRow["employee"]) {
@@ -51,10 +52,15 @@ function buildPlannerHref(siteId: string, weekStartIso: string) {
   return `/staff/schedule?${query.toString()}`;
 }
 
-function buildGlobalHref(weekStartIso: string, zoom: number) {
+function buildGlobalHref(
+  weekStartIso: string,
+  zoom: number,
+  showManagement = false,
+) {
   const query = new URLSearchParams();
   query.set("week", weekStartIso);
   query.set("zoom", String(zoom));
+  if (showManagement) query.set("show_management", "1");
   return `/staff/schedule/global?${query.toString()}`;
 }
 
@@ -64,7 +70,11 @@ function minutesFromTime(value: string) {
 }
 
 function sortEmployees(first: EmployeeRow, second: EmployeeRow) {
-  const areaCompare = areaLabel(first).localeCompare(areaLabel(second), "es");
+  const firstArea = areaLabel(first);
+  const secondArea = areaLabel(second);
+  if (firstArea === "GENERAL" && secondArea !== "GENERAL") return 1;
+  if (secondArea === "GENERAL" && firstArea !== "GENERAL") return -1;
+  const areaCompare = firstArea.localeCompare(secondArea, "es");
   if (areaCompare !== 0) return areaCompare;
   return employeeLabel(first).localeCompare(employeeLabel(second), "es");
 }
@@ -91,6 +101,27 @@ function areaLabel(employee: EmployeeRow) {
   return role.toUpperCase();
 }
 
+function normalizeText(value: string | null | undefined) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function isManagementRole(employee: EmployeeRow) {
+  const role = normalizeText(employee.role);
+  return (
+    role.includes("propiet") ||
+    role.includes("duen") ||
+    role.includes("owner") ||
+    role.includes("gerente general") ||
+    role.includes("gerencia general") ||
+    role === "gerente" ||
+    role === "gerencia"
+  );
+}
+
 function compactTime(value: string) {
   const [hourText, minuteText] = value.slice(0, 5).split(":");
   const hour = Number(hourText ?? "0");
@@ -112,12 +143,14 @@ export default async function StaffScheduleGlobalPage({
   searchParams?: Promise<{
     week?: string;
     zoom?: string;
+    show_management?: string;
     error?: string;
   }>;
 }) {
   const sp = (await searchParams) ?? {};
   const errorMsg = safeDecode(sp.error);
   const zoom = normalizeZoom(sp.zoom);
+  const showManagement = sp.show_management === "1";
 
   await requireStaffScheduleAccess("/staff/schedule/global", null);
 
@@ -258,6 +291,7 @@ export default async function StaffScheduleGlobalPage({
             site_id: site.id,
           },
       )
+      .filter((employee) => showManagement || !isManagementRole(employee))
       .sort(sortEmployees);
     return { site, employees };
   });
@@ -279,10 +313,24 @@ export default async function StaffScheduleGlobalPage({
           subtitle="Hoja compacta de todas las sedes para revisar el panorama completo."
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              <Link href={buildGlobalHref(isoDate(addDays(weekStart, -7)), zoom)} className="ui-btn ui-btn--ghost">
+              <Link
+                href={buildGlobalHref(
+                  isoDate(addDays(weekStart, -7)),
+                  zoom,
+                  showManagement,
+                )}
+                className="ui-btn ui-btn--ghost"
+              >
                 Semana anterior
               </Link>
-              <Link href={buildGlobalHref(isoDate(addDays(weekStart, 7)), zoom)} className="ui-btn ui-btn--ghost">
+              <Link
+                href={buildGlobalHref(
+                  isoDate(addDays(weekStart, 7)),
+                  zoom,
+                  showManagement,
+                )}
+                className="ui-btn ui-btn--ghost"
+              >
                 Semana siguiente
               </Link>
               <Link
@@ -306,12 +354,29 @@ export default async function StaffScheduleGlobalPage({
             {formatWeekLabel(weekStart)} · {operationalSites.length} sedes ·{" "}
             {shifts.length} turnos · {conflictKeys.size} conflictos
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
+            <Link
+              href={buildGlobalHref(weekStartIso, zoom, !showManagement)}
+              className={`border px-2 py-1 no-underline ${
+                showManagement
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-300 bg-white text-slate-700"
+              }`}
+            >
+              {showManagement ? "Ocultar gerencia" : "Mostrar gerencia"}
+            </Link>
+            <button
+              type="button"
+              className="border border-slate-300 bg-white px-2 py-1 text-slate-700"
+              data-reset-hidden-employees
+            >
+              Mostrar ocultos
+            </button>
             <span className="mr-1 text-slate-500">Zoom</span>
             {ZOOM_OPTIONS.map((option) => (
               <Link
                 key={option}
-                href={buildGlobalHref(weekStartIso, option)}
+                href={buildGlobalHref(weekStartIso, option, showManagement)}
                 className={`border px-2 py-1 no-underline ${
                   option === zoom
                     ? "border-slate-900 bg-slate-900 text-white"
@@ -339,7 +404,7 @@ export default async function StaffScheduleGlobalPage({
                     <tr key={`${site.id}-header`}>
                       <th
                         colSpan={10}
-                        className="border border-slate-900 bg-cyan-200 px-1 py-1 text-center text-[11px] font-black uppercase"
+                        className="border border-slate-900 bg-violet-100 px-1 py-1 text-center text-[11px] font-black uppercase text-violet-950"
                       >
                         {site.name ?? site.code ?? site.id} (
                         {weekDays[0]?.shortLabel.toUpperCase()} AL{" "}
@@ -347,16 +412,16 @@ export default async function StaffScheduleGlobalPage({
                       </th>
                     </tr>
                     <tr key={`${site.id}-columns`}>
-                      <th className="w-[88px] border border-slate-900 bg-cyan-100 px-1 py-1 text-center font-black">
+                      <th className="w-[88px] border border-slate-900 bg-violet-50 px-1 py-1 text-center font-black text-violet-950">
                         AREA
                       </th>
-                      <th className="w-[88px] border border-slate-900 bg-cyan-100 px-1 py-1 text-center font-black">
+                      <th className="w-[88px] border border-slate-900 bg-violet-50 px-1 py-1 text-center font-black text-violet-950">
                         PERSONA
                       </th>
                       {weekDays.map((day) => (
                         <th
                           key={day.iso}
-                          className="w-[104px] border border-slate-900 bg-cyan-100 px-1 py-1 text-center font-black"
+                          className="w-[104px] border border-slate-900 bg-violet-50 px-1 py-1 text-center font-black text-violet-950"
                         >
                           <div>{day.label.toUpperCase()}</div>
                           <div>{day.shortLabel}</div>
@@ -394,7 +459,10 @@ export default async function StaffScheduleGlobalPage({
                           );
                         }, 0);
                         return (
-                          <tr key={`${site.id}-${employee.id}`}>
+                          <tr
+                            key={`${site.id}-${employee.id}`}
+                            data-global-schedule-employee-row={employee.id}
+                          >
                             <td
                               className={`max-w-[88px] truncate border border-slate-900 px-1 py-0.5 text-center text-[10px] font-black ${areaColor}`}
                               title={area}
@@ -405,7 +473,14 @@ export default async function StaffScheduleGlobalPage({
                               className="max-w-[88px] truncate border border-slate-900 px-1 py-0.5 text-center font-black"
                               title={name}
                             >
-                              {name}
+                              <button
+                                type="button"
+                                className="max-w-full truncate font-black"
+                                title={`Ocultar ${name} de la vista global`}
+                                data-hide-global-schedule-employee={employee.id}
+                              >
+                                {name}
+                              </button>
                             </td>
                             {weekDays.map((day) => {
                               const rows =
@@ -469,6 +544,55 @@ export default async function StaffScheduleGlobalPage({
           </div>
         </div>
       </div>
+      <Script id="viso-global-schedule-hidden-workers" strategy="afterInteractive">
+        {`
+          (function () {
+            var key = "viso:global-schedule:hidden-employees";
+
+            function readHidden() {
+              try {
+                var raw = window.localStorage.getItem(key);
+                var parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? new Set(parsed.filter(Boolean)) : new Set();
+              } catch (_) {
+                return new Set();
+              }
+            }
+
+            function writeHidden(hidden) {
+              window.localStorage.setItem(key, JSON.stringify(Array.from(hidden)));
+            }
+
+            function applyHidden() {
+              var hidden = readHidden();
+              document.querySelectorAll("[data-global-schedule-employee-row]").forEach(function (row) {
+                var employeeId = row.getAttribute("data-global-schedule-employee-row");
+                row.hidden = hidden.has(employeeId);
+              });
+            }
+
+            document.addEventListener("click", function (event) {
+              var target = event.target && event.target.closest ? event.target.closest("[data-hide-global-schedule-employee]") : null;
+              if (target) {
+                var employeeId = target.getAttribute("data-hide-global-schedule-employee");
+                if (!employeeId) return;
+                var hidden = readHidden();
+                hidden.add(employeeId);
+                writeHidden(hidden);
+                applyHidden();
+                return;
+              }
+
+              var reset = event.target && event.target.closest ? event.target.closest("[data-reset-hidden-employees]") : null;
+              if (!reset) return;
+              window.localStorage.removeItem(key);
+              applyHidden();
+            });
+
+            applyHidden();
+          })();
+        `}
+      </Script>
     </div>
   );
 }
