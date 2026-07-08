@@ -105,6 +105,7 @@ function normalizeText(value: string | null | undefined) {
   return String(value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_-]+/g, " ")
     .trim()
     .toLowerCase();
 }
@@ -170,6 +171,12 @@ export default async function StaffScheduleGlobalPage({
   const sites = (sitesData ?? []) as SiteRow[];
   const operationalSites = sites.filter(isOperationalSite);
   const operationalSiteIds = operationalSites.map((site) => site.id);
+  const siteLabelById = new Map(
+    operationalSites.map((site) => [
+      site.id,
+      String(site.code || site.name || "Otra sede").toUpperCase(),
+    ]),
+  );
 
   const [directEmployeesRes, linkedEmployeesRes, shiftsRes] =
     operationalSiteIds.length > 0
@@ -359,18 +366,20 @@ export default async function StaffScheduleGlobalPage({
               href={buildGlobalHref(weekStartIso, zoom, !showManagement)}
               className={`border px-2 py-1 no-underline ${
                 showManagement
-                  ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-slate-300 bg-white text-slate-700"
+                  ? "border-violet-700 bg-violet-100 text-violet-950"
+                  : "border-violet-200 bg-white text-violet-800"
               }`}
             >
-              {showManagement ? "Ocultar gerencia" : "Mostrar gerencia"}
+              {showManagement
+                ? "Ocultar propietarios y gerencia"
+                : "Ver propietarios y gerencia"}
             </Link>
             <button
               type="button"
-              className="border border-slate-300 bg-white px-2 py-1 text-slate-700"
+              className="border border-violet-200 bg-white px-2 py-1 text-violet-800"
               data-reset-hidden-employees
             >
-              Mostrar ocultos
+              Restaurar personas
             </button>
             <span className="mr-1 text-slate-500">Zoom</span>
             {ZOOM_OPTIONS.map((option) => (
@@ -379,8 +388,8 @@ export default async function StaffScheduleGlobalPage({
                 href={buildGlobalHref(weekStartIso, option, showManagement)}
                 className={`border px-2 py-1 no-underline ${
                   option === zoom
-                    ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-slate-300 bg-white text-slate-700"
+                    ? "border-violet-700 bg-violet-700 text-white"
+                    : "border-violet-200 bg-white text-violet-800"
                 }`}
               >
                 {option}%
@@ -475,7 +484,7 @@ export default async function StaffScheduleGlobalPage({
                             >
                               <button
                                 type="button"
-                                className="max-w-full truncate font-black"
+                                className="max-w-full cursor-pointer truncate font-black hover:text-violet-700 hover:underline"
                                 title={`Ocultar ${name} de la vista global`}
                                 data-hide-global-schedule-employee={employee.id}
                               >
@@ -487,13 +496,32 @@ export default async function StaffScheduleGlobalPage({
                                 shiftsBySiteEmployeeDay.get(
                                   `${site.id}__${employee.id}__${day.iso}`,
                                 ) ?? [];
+                              const otherDraftRows = (
+                                shiftsByEmployeeDay.get(
+                                  `${employee.id}__${day.iso}`,
+                                ) ?? []
+                              ).filter(
+                                (shift) =>
+                                  shift.site_id !== site.id &&
+                                  !shift.published_at &&
+                                  shift.shift_kind !== "descanso",
+                              );
+                              const ownText = rows
+                                .map((shift) => compactShiftLabel(shift))
+                                .join(" / ");
+                              const otherDraftText = otherDraftRows
+                                .map(
+                                  (shift) =>
+                                    `${siteLabelById.get(shift.site_id) ?? "OTRA"}: ${compactShiftLabel(shift)}`,
+                                )
+                                .join(" / ");
                               const hasConflict = conflictKeys.has(
                                 `${employee.id}__${day.iso}`,
                               );
                               return (
                                 <td
                                   key={day.iso}
-                                  className={`h-[20px] max-w-[104px] truncate border border-slate-900 px-1 py-0.5 text-center font-bold ${
+                                  className={`h-[20px] max-w-[104px] border border-slate-900 px-1 py-0.5 text-center font-bold ${
                                     hasConflict ? "bg-red-200" : areaColor
                                   }`}
                                   title={rows
@@ -508,11 +536,14 @@ export default async function StaffScheduleGlobalPage({
                                     )
                                     .join(" / ")}
                                 >
-                                  {rows.length === 0
-                                    ? ""
-                                    : rows
-                                        .map((shift) => compactShiftLabel(shift))
-                                        .join(" / ")}
+                                  {ownText ? (
+                                    <div className="truncate">{ownText}</div>
+                                  ) : null}
+                                  {otherDraftText ? (
+                                    <div className="truncate text-[9px] font-black leading-none text-violet-700">
+                                      {otherDraftText}
+                                    </div>
+                                  ) : null}
                                 </td>
                               );
                             })}
@@ -571,8 +602,13 @@ export default async function StaffScheduleGlobalPage({
               });
             }
 
+            function closestAction(target, selector) {
+              var element = target && target.nodeType === 1 ? target : target && target.parentElement;
+              return element && element.closest ? element.closest(selector) : null;
+            }
+
             document.addEventListener("click", function (event) {
-              var target = event.target && event.target.closest ? event.target.closest("[data-hide-global-schedule-employee]") : null;
+              var target = closestAction(event.target, "[data-hide-global-schedule-employee]");
               if (target) {
                 var employeeId = target.getAttribute("data-hide-global-schedule-employee");
                 if (!employeeId) return;
@@ -583,7 +619,7 @@ export default async function StaffScheduleGlobalPage({
                 return;
               }
 
-              var reset = event.target && event.target.closest ? event.target.closest("[data-reset-hidden-employees]") : null;
+              var reset = closestAction(event.target, "[data-reset-hidden-employees]");
               if (!reset) return;
               window.localStorage.removeItem(key);
               applyHidden();
