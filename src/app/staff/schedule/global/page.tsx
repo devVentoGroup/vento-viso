@@ -157,7 +157,10 @@ function compactTime(value: string) {
   const hour = Number(hourText ?? "0");
   const minute = Number(minuteText ?? "0");
   const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-  return minute === 0 ? String(displayHour) : `${displayHour}:${minuteText}`;
+  const suffix = hour >= 12 ? "pm" : "am";
+  return minute === 0
+    ? `${displayHour}${suffix}`
+    : `${displayHour}:${minuteText}${suffix}`;
 }
 
 function compactShiftLabel(shift: ShiftRow) {
