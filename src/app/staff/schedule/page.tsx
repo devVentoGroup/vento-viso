@@ -112,6 +112,8 @@ export default async function StaffSchedulePage({
   const returnTo = buildReturnTo(selectedSiteId, weekStartIso, viewMode);
   const returnToWithoutEdit = appendReturnParams(returnTo, {
     edit_shift: null,
+    quick_employee_id: null,
+    quick_shift_date: null,
   });
   const totalsStartCandidates = [
     monthStartIso,
@@ -599,7 +601,13 @@ export default async function StaffSchedulePage({
     isoDate(toMonday(new Date())),
     viewMode,
   );
-  const quickEmployeeId = "";
+  const quickEmployeeId = (() => {
+    const candidate = safeDecode(sp.quick_employee_id);
+    if (!candidate) return "";
+    return employees.some((employee) => employee.id === candidate)
+      ? candidate
+      : "";
+  })();
   const quickShiftDate = (() => {
     const candidate = safeDecode(sp.quick_shift_date);
     if (!candidate) return weekDays[0]?.iso ?? "";
@@ -672,6 +680,7 @@ export default async function StaffSchedulePage({
   const selectedShiftHasExternalPoints = Boolean(
     selectedShift?.checkin_site_id || selectedShift?.checkout_site_id,
   );
+  const isCreatingQuickShift = Boolean(!selectedShift && quickEmployeeId);
   const scheduleOperationalAlerts = weekShifts
     .filter((shift) => shift.shift_kind !== "descanso")
     .flatMap((shift) => {
@@ -987,8 +996,11 @@ export default async function StaffSchedulePage({
               {selectedShift ? (
                 <div
                   key={`edit-shift-panel-${selectedShift.id}`}
-                  className="ui-panel"
+                  className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-3 py-6 backdrop-blur-[1px] sm:px-6"
+                  role="dialog"
+                  aria-modal="true"
                 >
+                  <div className="w-full max-w-5xl rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-2xl sm:p-5">
                   <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <div className="ui-h3">Editar turno seleccionado</div>
@@ -1360,9 +1372,15 @@ export default async function StaffSchedulePage({
                       </button>
                     </form>
                   ) : null}
+                  </div>
                 </div>
-              ) : (
-                <div className="ui-panel">
+              ) : isCreatingQuickShift ? (
+                <div
+                  className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-3 py-6 backdrop-blur-[1px] sm:px-6"
+                  role="dialog"
+                  aria-modal="true"
+                >
+                  <div className="w-full max-w-5xl rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-2xl sm:p-5">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="ui-h3">Agregar turno por horas</div>
@@ -1372,6 +1390,12 @@ export default async function StaffSchedulePage({
                         independiente.
                       </p>
                     </div>
+                    <Link
+                      href={returnToWithoutEdit}
+                      className="ui-btn ui-btn--ghost ui-btn--sm"
+                    >
+                      Cerrar
+                    </Link>
                   </div>
                   <form
                     action={saveShiftAction}
@@ -1760,8 +1784,9 @@ export default async function StaffSchedulePage({
                       </button>
                     </div>
                   </form>
+                  </div>
                 </div>
-              )}
+              ) : null}
               <Script id="viso-quick-shift-blocks" strategy="afterInteractive">
                 {`
                   (function () {
@@ -2947,9 +2972,16 @@ export default async function StaffSchedulePage({
                                     className="border-b border-r border-[var(--ui-border)] px-2.5 align-top"
                                   >
                                     {dayRows.length === 0 ? (
-                                      <span className="text-xs text-[var(--ui-muted)]">
-                                        —
-                                      </span>
+                                      <Link
+                                        href={appendReturnParams(returnTo, {
+                                          quick_employee_id: employee.id,
+                                          quick_shift_date: day.iso,
+                                        })}
+                                        className="flex min-h-14 items-center justify-center rounded-lg border border-dashed border-[var(--ui-border)] text-xs font-semibold text-[var(--ui-muted)] no-underline transition hover:border-[var(--ui-brand)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"
+                                        title={`Agregar turno a ${employeeName} el ${day.label}`}
+                                      >
+                                        Agregar
+                                      </Link>
                                     ) : (
                                       <div className="flex flex-wrap items-stretch gap-1.5">
                                         {dayRows.map((shift) => {
@@ -3170,6 +3202,16 @@ export default async function StaffSchedulePage({
                                             </Link>
                                           );
                                         })}
+                                        <Link
+                                          href={appendReturnParams(returnTo, {
+                                            quick_employee_id: employee.id,
+                                            quick_shift_date: day.iso,
+                                          })}
+                                          className="flex min-w-[72px] flex-1 basis-[72px] items-center justify-center rounded-lg border border-dashed border-[var(--ui-border)] px-2 py-1 text-xs font-semibold text-[var(--ui-muted)] no-underline transition hover:border-[var(--ui-brand)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"
+                                          title={`Agregar otro turno a ${employeeName} el ${day.label}`}
+                                        >
+                                          Agregar
+                                        </Link>
                                       </div>
                                     )}
                                   </td>
