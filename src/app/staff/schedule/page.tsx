@@ -2977,11 +2977,10 @@ export default async function StaffSchedulePage({
                                           quick_employee_id: employee.id,
                                           quick_shift_date: day.iso,
                                         })}
-                                        className="flex min-h-14 items-center justify-center rounded-lg border border-dashed border-[var(--ui-border)] text-xs font-semibold text-[var(--ui-muted)] no-underline transition hover:border-[var(--ui-brand)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"
+                                        className="block min-h-4 rounded no-underline transition hover:bg-[var(--ui-surface-2)]"
                                         title={`Agregar turno a ${employeeName} el ${day.label}`}
-                                      >
-                                        Agregar
-                                      </Link>
+                                        aria-label={`Agregar turno a ${employeeName} el ${day.label}`}
+                                      />
                                     ) : (
                                       <div className="flex flex-wrap items-stretch gap-1.5">
                                         {dayRows.map((shift) => {
@@ -3207,11 +3206,10 @@ export default async function StaffSchedulePage({
                                             quick_employee_id: employee.id,
                                             quick_shift_date: day.iso,
                                           })}
-                                          className="flex min-w-[72px] flex-1 basis-[72px] items-center justify-center rounded-lg border border-dashed border-[var(--ui-border)] px-2 py-1 text-xs font-semibold text-[var(--ui-muted)] no-underline transition hover:border-[var(--ui-brand)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"
+                                          className="block min-h-4 flex-1 basis-4 rounded no-underline transition hover:bg-[var(--ui-surface-2)]"
                                           title={`Agregar otro turno a ${employeeName} el ${day.label}`}
-                                        >
-                                          Agregar
-                                        </Link>
+                                          aria-label={`Agregar otro turno a ${employeeName} el ${day.label}`}
+                                        />
                                       </div>
                                     )}
                                   </td>
