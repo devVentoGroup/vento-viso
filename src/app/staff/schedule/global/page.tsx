@@ -30,12 +30,12 @@ type SiteEmployeeLinkRow = {
 
 const ZOOM_OPTIONS = [65, 75, 85, 100] as const;
 const AREA_PALETTE = [
-  "bg-cyan-100",
-  "bg-fuchsia-100",
-  "bg-yellow-100",
-  "bg-orange-100",
-  "bg-sky-100",
-  "bg-emerald-100",
+  "bg-slate-100",
+  "bg-blue-50",
+  "bg-emerald-50",
+  "bg-amber-50",
+  "bg-violet-50",
+  "bg-stone-100",
 ] as const;
 
 function getEmployeeRef(row: SiteEmployeeLinkRow["employee"]) {
@@ -64,10 +64,9 @@ function minutesFromTime(value: string) {
 }
 
 function sortEmployees(first: EmployeeRow, second: EmployeeRow) {
-  return (first.full_name ?? first.alias ?? first.id).localeCompare(
-    second.full_name ?? second.alias ?? second.id,
-    "es",
-  );
+  const areaCompare = areaLabel(first).localeCompare(areaLabel(second), "es");
+  if (areaCompare !== 0) return areaCompare;
+  return employeeLabel(first).localeCompare(employeeLabel(second), "es");
 }
 
 function normalizeZoom(value: string | undefined) {
