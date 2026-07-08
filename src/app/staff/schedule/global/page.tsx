@@ -4,6 +4,7 @@ import Script from "next/script";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+import { deleteShiftAction, saveShiftAction } from "../actions";
 import {
   addDays,
   buildWeekDays,
@@ -49,6 +50,34 @@ function buildPlannerHref(siteId: string, weekStartIso: string) {
   query.set("site_id", siteId);
   query.set("week", weekStartIso);
   query.set("view", "table");
+  return `/staff/schedule?${query.toString()}`;
+}
+
+function buildPlannerQuickHref(
+  siteId: string,
+  weekStartIso: string,
+  employeeId: string,
+  shiftDate: string,
+) {
+  const query = new URLSearchParams();
+  query.set("site_id", siteId);
+  query.set("week", weekStartIso);
+  query.set("view", "table");
+  query.set("quick_employee_id", employeeId);
+  query.set("quick_shift_date", shiftDate);
+  return `/staff/schedule?${query.toString()}`;
+}
+
+function buildPlannerEditHref(
+  siteId: string,
+  weekStartIso: string,
+  shiftId: string,
+) {
+  const query = new URLSearchParams();
+  query.set("site_id", siteId);
+  query.set("week", weekStartIso);
+  query.set("view", "table");
+  query.set("edit_shift", shiftId);
   return `/staff/schedule?${query.toString()}`;
 }
 
@@ -515,6 +544,16 @@ export default async function StaffScheduleGlobalPage({
                                     `${siteLabelById.get(shift.site_id) ?? "OTRA"}: ${compactShiftLabel(shift)}`,
                                 )
                                 .join(" / ");
+                              const employeeDayRows =
+                                shiftsByEmployeeDay.get(
+                                  `${employee.id}__${day.iso}`,
+                                ) ?? [];
+                              const hasLaboralShiftThatDay =
+                                employeeDayRows.some(
+                                  (shift) =>
+                                    shift.shift_kind !== "descanso" &&
+                                    shift.status !== "cancelled",
+                                );
                               const hasConflict = conflictKeys.has(
                                 `${employee.id}__${day.iso}`,
                               );
@@ -536,14 +575,151 @@ export default async function StaffScheduleGlobalPage({
                                     )
                                     .join(" / ")}
                                 >
-                                  {ownText ? (
-                                    <div className="truncate">{ownText}</div>
-                                  ) : null}
-                                  {otherDraftText ? (
-                                    <div className="truncate text-[9px] font-black leading-none text-violet-700">
-                                      {otherDraftText}
+                                  <details
+                                    className="relative block min-h-[18px]"
+                                    data-global-schedule-action-menu
+                                  >
+                                    <summary
+                                      className="block min-h-[18px] cursor-pointer list-none"
+                                      title={`Opciones para ${name} el ${day.label} en ${siteLabelById.get(site.id) ?? "esta sede"}`}
+                                    >
+                                      {ownText ? (
+                                        <div className="truncate">
+                                          {ownText}
+                                        </div>
+                                      ) : null}
+                                      {otherDraftText ? (
+                                        <div className="truncate text-[9px] font-black leading-none text-violet-700">
+                                          {otherDraftText}
+                                        </div>
+                                      ) : null}
+                                    </summary>
+                                    <div className="absolute left-0 top-full z-50 mt-1 min-w-32 rounded-lg border border-violet-200 bg-white p-1 text-left text-[11px] font-semibold shadow-xl">
+                                      <Link
+                                        href={buildPlannerQuickHref(
+                                          site.id,
+                                          weekStartIso,
+                                          employee.id,
+                                          day.iso,
+                                        )}
+                                        className="block rounded px-2 py-1 text-violet-950 no-underline hover:bg-violet-50"
+                                      >
+                                        {rows.length > 0
+                                          ? "Nuevo bloque"
+                                          : "Nuevo"}
+                                      </Link>
+                                      {rows.length > 0
+                                        ? rows.map((shift) => (
+                                            <Link
+                                              key={shift.id}
+                                              href={buildPlannerEditHref(
+                                                site.id,
+                                                weekStartIso,
+                                                shift.id,
+                                              )}
+                                              className="block rounded px-2 py-1 text-violet-950 no-underline hover:bg-violet-50"
+                                            >
+                                              Editar {compactShiftLabel(shift)}
+                                            </Link>
+                                          ))
+                                        : null}
+                                      {rows.length === 0 &&
+                                      !hasLaboralShiftThatDay ? (
+                                        <form action={saveShiftAction}>
+                                          <input
+                                            type="hidden"
+                                            name="site_id"
+                                            value={site.id}
+                                          />
+                                          <input
+                                            type="hidden"
+                                            name="return_to"
+                                            value={buildGlobalHref(
+                                              weekStartIso,
+                                              zoom,
+                                              showManagement,
+                                            )}
+                                          />
+                                          <input
+                                            type="hidden"
+                                            name="employee_id"
+                                            value={employee.id}
+                                          />
+                                          <input
+                                            type="hidden"
+                                            name="block_shift_date"
+                                            value={day.iso}
+                                          />
+                                          <input
+                                            type="hidden"
+                                            name="block_start_time"
+                                            value="00:00"
+                                          />
+                                          <input
+                                            type="hidden"
+                                            name="block_end_time"
+                                            value="23:59"
+                                          />
+                                          <input
+                                            type="hidden"
+                                            name="block_site_id"
+                                            value={site.id}
+                                          />
+                                          <input
+                                            type="hidden"
+                                            name="block_rest_day"
+                                            value="0"
+                                          />
+                                          <input
+                                            type="hidden"
+                                            name="break_minutes"
+                                            value="0"
+                                          />
+                                          <input
+                                            type="hidden"
+                                            name="status"
+                                            value="scheduled"
+                                          />
+                                          <button
+                                            type="submit"
+                                            className="block w-full rounded px-2 py-1 text-left text-violet-950 hover:bg-violet-50"
+                                          >
+                                            Descanso
+                                          </button>
+                                        </form>
+                                      ) : null}
+                                      {rows.map((shift) =>
+                                        !shift.published_at ? (
+                                          <form
+                                            key={`${shift.id}-delete`}
+                                            action={deleteShiftAction}
+                                          >
+                                            <input
+                                              type="hidden"
+                                              name="shift_id"
+                                              value={shift.id}
+                                            />
+                                            <input
+                                              type="hidden"
+                                              name="return_to"
+                                              value={buildGlobalHref(
+                                                weekStartIso,
+                                                zoom,
+                                                showManagement,
+                                              )}
+                                            />
+                                            <button
+                                              type="submit"
+                                              className="block w-full rounded px-2 py-1 text-left text-[var(--ui-danger)] hover:bg-violet-50"
+                                            >
+                                              Eliminar{" "}
+                                              {compactShiftLabel(shift)}
+                                            </button>
+                                          </form>
+                                        ) : null,
+                                      )}
                                     </div>
-                                  ) : null}
+                                  </details>
                                 </td>
                               );
                             })}
@@ -623,6 +799,28 @@ export default async function StaffScheduleGlobalPage({
               if (!reset) return;
               window.localStorage.removeItem(key);
               applyHidden();
+            });
+
+            document.addEventListener("toggle", function (event) {
+              var menu = event.target;
+              if (!menu || !menu.matches || !menu.matches("[data-global-schedule-action-menu]") || !menu.open) return;
+              document.querySelectorAll("[data-global-schedule-action-menu][open]").forEach(function (current) {
+                if (current !== menu) current.removeAttribute("open");
+              });
+            }, true);
+
+            document.addEventListener("pointerdown", function (event) {
+              if (closestAction(event.target, "[data-global-schedule-action-menu]")) return;
+              document.querySelectorAll("[data-global-schedule-action-menu][open]").forEach(function (menu) {
+                menu.removeAttribute("open");
+              });
+            });
+
+            document.addEventListener("keydown", function (event) {
+              if (event.key !== "Escape") return;
+              document.querySelectorAll("[data-global-schedule-action-menu][open]").forEach(function (menu) {
+                menu.removeAttribute("open");
+              });
             });
 
             applyHidden();
