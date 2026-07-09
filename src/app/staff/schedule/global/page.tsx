@@ -1,5 +1,7 @@
 import Link from "next/link";
 import Script from "next/script";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -30,6 +32,11 @@ type SiteEmployeeLinkRow = {
   employee?: EmployeeRow | EmployeeRow[] | null;
 };
 
+type HiddenScheduleEmployeeRow = {
+  employee_id: string;
+  employee?: EmployeeRow | EmployeeRow[] | null;
+};
+
 const ZOOM_OPTIONS = [65, 75, 85, 100] as const;
 const AREA_PALETTE = [
   "bg-violet-50",
@@ -39,6 +46,11 @@ const AREA_PALETTE = [
   "bg-slate-50",
   "bg-zinc-50",
 ] as const;
+const BASE_GLOBAL_COLUMNS = [
+  { key: "area", width: 88, minWidth: 42 },
+  { key: "person", width: 88, minWidth: 46 },
+] as const;
+const GLOBAL_HOURS_COLUMN = { key: "hours", width: 42, minWidth: 32 } as const;
 
 function getEmployeeRef(row: SiteEmployeeLinkRow["employee"]) {
   if (!row) return null;
@@ -170,6 +182,64 @@ function compactShiftLabel(shift: ShiftRow) {
   return `${start} a ${end}`;
 }
 
+export async function hideEmployeeFromGlobalScheduleAction(formData: FormData) {
+  "use server";
+
+  const employeeId = String(formData.get("employee_id") ?? "").trim();
+  const returnTo =
+    String(formData.get("return_to") ?? "").trim() || "/staff/schedule/global";
+
+  await requireStaffScheduleAccess(returnTo, null);
+
+  if (!employeeId) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Trabajador inválido.")}`);
+  }
+
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from("staff_schedule_hidden_employees")
+    .upsert({
+      employee_id: employeeId,
+      hidden_by: null,
+      updated_by: null,
+      updated_at: new Date().toISOString(),
+    });
+
+  if (error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/staff/schedule/global");
+  redirect(returnTo);
+}
+
+export async function restoreEmployeeToGlobalScheduleAction(formData: FormData) {
+  "use server";
+
+  const employeeId = String(formData.get("employee_id") ?? "").trim();
+  const returnTo =
+    String(formData.get("return_to") ?? "").trim() || "/staff/schedule/global";
+
+  await requireStaffScheduleAccess(returnTo, null);
+
+  if (!employeeId) {
+    redirect(`${returnTo}&error=${encodeURIComponent("Trabajador inválido.")}`);
+  }
+
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from("staff_schedule_hidden_employees")
+    .delete()
+    .eq("employee_id", employeeId);
+
+  if (error) {
+    redirect(`${returnTo}&error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/staff/schedule/global");
+  redirect(returnTo);
+}
+
 export default async function StaffScheduleGlobalPage({
   searchParams,
 }: {
@@ -189,8 +259,19 @@ export default async function StaffScheduleGlobalPage({
 
   const weekStart = parseWeekStart(sp.week);
   const weekStartIso = isoDate(weekStart);
+  const globalReturnTo = buildGlobalHref(weekStartIso, zoom, showManagement);
   const weekEndIso = isoDate(addDays(weekStart, 6));
   const weekDays = buildWeekDays(weekStart);
+  const globalColumns = [
+    ...BASE_GLOBAL_COLUMNS,
+    ...weekDays.map((day, index) => ({
+      key: `day-${index}`,
+      width: 104,
+      minWidth: 54,
+      day,
+    })),
+    GLOBAL_HOURS_COLUMN,
+  ];
   const supabase = createAdminClient();
 
   const { data: sitesData } = await supabase
@@ -210,7 +291,7 @@ export default async function StaffScheduleGlobalPage({
     ]),
   );
 
-  const [directEmployeesRes, linkedEmployeesRes, shiftsRes] =
+  const [directEmployeesRes, linkedEmployeesRes, shiftsRes, hiddenEmployeesRes] =
     operationalSiteIds.length > 0
       ? await Promise.all([
           supabase
@@ -237,8 +318,15 @@ export default async function StaffScheduleGlobalPage({
             .order("site_id", { ascending: true })
             .order("shift_date", { ascending: true })
             .order("start_time", { ascending: true }),
+          supabase
+            .from("staff_schedule_hidden_employees")
+            .select(
+              "employee_id,employee:employees(id,full_name,alias,role,is_active,site_id)",
+            )
+            .order("hidden_at", { ascending: false }),
         ])
       : [
+          { data: [], error: null },
           { data: [], error: null },
           { data: [], error: null },
           { data: [], error: null },
@@ -267,6 +355,12 @@ export default async function StaffScheduleGlobalPage({
   for (const shift of shifts) {
     employeeIdsBySiteId.get(shift.site_id)?.add(shift.employee_id);
   }
+
+  const hiddenRows =
+    (hiddenEmployeesRes.data ?? []) as HiddenScheduleEmployeeRow[];
+  const hiddenEmployeeIds = new Set(
+    hiddenRows.map((row) => row.employee_id).filter(Boolean),
+  );
 
   const shiftsBySiteEmployeeDay = new Map<string, ShiftRow[]>();
   const shiftsByEmployeeDay = new Map<string, ShiftRow[]>();
@@ -334,6 +428,11 @@ export default async function StaffScheduleGlobalPage({
       .sort(sortEmployees);
     return { site, employees };
   });
+
+  const hiddenEmployees = hiddenRows
+    .map((row) => getEmployeeRef(row.employee))
+    .filter((employee): employee is EmployeeRow => Boolean(employee?.id))
+    .sort(sortEmployees);
 
   const areaColorByLabel = new Map<string, string>();
   const getAreaColor = (label: string) => {
@@ -406,12 +505,57 @@ export default async function StaffScheduleGlobalPage({
                 ? "Ocultar propietarios y gerencia"
                 : "Ver propietarios y gerencia"}
             </Link>
+            <details className="relative" data-global-hidden-people-menu>
+              <summary className="cursor-pointer list-none border border-violet-200 bg-white px-2 py-1 text-violet-800">
+                Ocultos{" "}
+                <span data-global-hidden-count>{hiddenEmployees.length}</span>
+              </summary>
+              <div
+                className="absolute right-0 top-full z-50 mt-1 min-w-56 rounded-lg border border-violet-200 bg-white p-1 text-left text-[11px] shadow-xl"
+                data-global-hidden-list
+              >
+                {hiddenEmployees.length === 0 ? (
+                  <div className="px-2 py-1 text-slate-500">
+                    No hay personas ocultas.
+                  </div>
+                ) : (
+                  hiddenEmployees.map((employee) => {
+                    const hiddenName = employeeLabel(employee);
+                    return (
+                      <form
+                        key={employee.id}
+                        action={restoreEmployeeToGlobalScheduleAction}
+                        data-global-hidden-employee-form="restore"
+                      >
+                        <input
+                          type="hidden"
+                          name="employee_id"
+                          value={employee.id}
+                        />
+                        <input
+                          type="hidden"
+                          name="return_to"
+                          value={globalReturnTo}
+                        />
+                        <button
+                          type="submit"
+                          className="block w-full rounded px-2 py-1 text-left font-semibold text-violet-950 hover:bg-violet-50"
+                          title={`Mostrar ${hiddenName} en la vista global`}
+                        >
+                          {hiddenName}
+                        </button>
+                      </form>
+                    );
+                  })
+                )}
+              </div>
+            </details>
             <button
               type="button"
               className="border border-violet-200 bg-white px-2 py-1 text-violet-800"
-              data-reset-hidden-employees
+              data-reset-global-columns
             >
-              Restaurar personas
+              Restaurar columnas
             </button>
             <span className="mr-1 text-slate-500">Zoom</span>
             {ZOOM_OPTIONS.map((option) => (
@@ -438,7 +582,21 @@ export default async function StaffScheduleGlobalPage({
               width: `${10000 / zoom}%`,
             }}
           >
-            <table className="w-full min-w-[1180px] border-collapse text-[11px] leading-tight">
+            <table
+              className="w-full min-w-[1180px] border-collapse text-[11px] leading-tight"
+              data-global-schedule-table
+              data-storage-key="viso:global-schedule-table:v1"
+            >
+              <colgroup>
+                {globalColumns.map((column) => (
+                  <col
+                    key={column.key}
+                    data-global-schedule-column={column.key}
+                    data-default-width={column.width}
+                    data-min-width={column.minWidth}
+                  />
+                ))}
+              </colgroup>
               <tbody>
                 {sitesWithRows.map(({ site, employees }) => (
                   <>
@@ -453,23 +611,53 @@ export default async function StaffScheduleGlobalPage({
                       </th>
                     </tr>
                     <tr key={`${site.id}-columns`}>
-                      <th className="w-[88px] border border-slate-900 bg-violet-50 px-1 py-1 text-center font-black text-violet-950">
+                      <th
+                        data-global-schedule-cell="area"
+                        className="relative border border-slate-900 bg-violet-50 px-1 py-1 text-center font-black text-violet-950"
+                      >
                         AREA
+                        <span
+                          aria-hidden="true"
+                          className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-violet-300"
+                          data-global-schedule-resize-handle="area"
+                        />
                       </th>
-                      <th className="w-[88px] border border-slate-900 bg-violet-50 px-1 py-1 text-center font-black text-violet-950">
+                      <th
+                        data-global-schedule-cell="person"
+                        className="relative border border-slate-900 bg-violet-50 px-1 py-1 text-center font-black text-violet-950"
+                      >
                         PERSONA
+                        <span
+                          aria-hidden="true"
+                          className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-violet-300"
+                          data-global-schedule-resize-handle="person"
+                        />
                       </th>
-                      {weekDays.map((day) => (
+                      {weekDays.map((day, dayIndex) => (
                         <th
                           key={day.iso}
-                          className="w-[104px] border border-slate-900 bg-violet-50 px-1 py-1 text-center font-black text-violet-950"
+                          data-global-schedule-cell={`day-${dayIndex}`}
+                          className="relative border border-slate-900 bg-violet-50 px-1 py-1 text-center font-black text-violet-950"
                         >
                           <div>{day.label.toUpperCase()}</div>
                           <div>{day.shortLabel}</div>
+                          <span
+                            aria-hidden="true"
+                            className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-violet-300"
+                            data-global-schedule-resize-handle={`day-${dayIndex}`}
+                          />
                         </th>
                       ))}
-                      <th className="w-[42px] border border-slate-900 bg-white px-1 py-1 text-center font-black">
+                      <th
+                        data-global-schedule-cell="hours"
+                        className="relative border border-slate-900 bg-white px-1 py-1 text-center font-black"
+                      >
                         H
+                        <span
+                          aria-hidden="true"
+                          className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-violet-300"
+                          data-global-schedule-resize-handle="hours"
+                        />
                       </th>
                     </tr>
                     {employees.length === 0 ? (
@@ -503,54 +691,68 @@ export default async function StaffScheduleGlobalPage({
                           <tr
                             key={`${site.id}-${employee.id}`}
                             data-global-schedule-employee-row={employee.id}
+                            hidden={hiddenEmployeeIds.has(employee.id)}
                           >
                             <td
-                              className={`max-w-[88px] truncate border border-slate-900 px-1 py-0.5 text-center text-[10px] font-black ${areaColor}`}
+                              data-global-schedule-cell="area"
+                              className={`truncate border border-slate-900 px-1 py-0.5 text-center text-[10px] font-black ${areaColor}`}
                               title={area}
                             >
                               {area}
                             </td>
                             <td
-                              className="max-w-[88px] truncate border border-slate-900 px-1 py-0.5 text-center font-black"
+                              data-global-schedule-cell="person"
+                              className="truncate border border-slate-900 px-1 py-0.5 text-center font-black"
                               title={name}
                             >
-                              <button
-                                type="button"
-                                className="max-w-full cursor-pointer truncate font-black hover:text-violet-700 hover:underline"
-                                title={`Ocultar ${name} de la vista global`}
-                                data-hide-global-schedule-employee={employee.id}
+                              <form
+                                action={hideEmployeeFromGlobalScheduleAction}
+                                data-global-hidden-employee-form="hide"
                               >
-                                {name}
-                              </button>
+                                <input
+                                  type="hidden"
+                                  name="employee_id"
+                                  value={employee.id}
+                                />
+                                <input
+                                  type="hidden"
+                                  name="return_to"
+                                  value={globalReturnTo}
+                                />
+                                <button
+                                  type="submit"
+                                  className="max-w-full cursor-pointer truncate font-black hover:text-violet-700 hover:underline"
+                                  title={`Ocultar ${name} de la vista global para todos`}
+                                >
+                                  {name}
+                                </button>
+                              </form>
                             </td>
-                            {weekDays.map((day) => {
+                            {weekDays.map((day, dayIndex) => {
                               const rows =
                                 shiftsBySiteEmployeeDay.get(
                                   `${site.id}__${employee.id}__${day.iso}`,
                                 ) ?? [];
-                              const otherDraftRows = (
-                                shiftsByEmployeeDay.get(
-                                  `${employee.id}__${day.iso}`,
-                                ) ?? []
-                              ).filter(
-                                (shift) =>
-                                  shift.site_id !== site.id &&
-                                  !shift.published_at &&
-                                  shift.shift_kind !== "descanso",
-                              );
-                              const ownText = rows
-                                .map((shift) => compactShiftLabel(shift))
-                                .join(" / ");
-                              const otherDraftText = otherDraftRows
-                                .map(
-                                  (shift) =>
-                                    `${siteLabelById.get(shift.site_id) ?? "OTRA"}: ${compactShiftLabel(shift)}`,
-                                )
-                                .join(" / ");
                               const employeeDayRows =
                                 shiftsByEmployeeDay.get(
                                   `${employee.id}__${day.iso}`,
                                 ) ?? [];
+                              const otherSiteRows = employeeDayRows.filter(
+                                (shift) =>
+                                  shift.site_id !== site.id &&
+                                  shift.status !== "cancelled",
+                              );
+                              const ownText = rows
+                                .map((shift) => compactShiftLabel(shift))
+                                .join(" / ");
+                              const otherSiteText = otherSiteRows
+                                .map(
+                                  (shift) =>
+                                    shift.shift_kind === "descanso"
+                                      ? "DESCANSA"
+                                      : `${siteLabelById.get(shift.site_id) ?? "OTRA"}: ${compactShiftLabel(shift)}`,
+                                )
+                                .join(" / ");
                               const hasLaboralShiftThatDay =
                                 employeeDayRows.some(
                                   (shift) =>
@@ -563,7 +765,8 @@ export default async function StaffScheduleGlobalPage({
                               return (
                                 <td
                                   key={day.iso}
-                                  className={`h-[20px] max-w-[104px] border border-slate-900 px-1 py-0.5 text-center font-bold ${
+                                  data-global-schedule-cell={`day-${dayIndex}`}
+                                  className={`h-[20px] border border-slate-900 px-1 py-0.5 text-center font-bold ${
                                     hasConflict ? "bg-red-200" : areaColor
                                   }`}
                                   title={rows
@@ -591,9 +794,9 @@ export default async function StaffScheduleGlobalPage({
                                           {ownText}
                                         </div>
                                       ) : null}
-                                      {otherDraftText ? (
+                                      {otherSiteText ? (
                                         <div className="truncate text-[9px] font-black leading-none text-violet-700">
-                                          {otherDraftText}
+                                          {otherSiteText}
                                         </div>
                                       ) : null}
                                     </summary>
@@ -726,7 +929,10 @@ export default async function StaffScheduleGlobalPage({
                                 </td>
                               );
                             })}
-                            <td className="border border-slate-900 px-1 py-0.5 text-center font-bold">
+                            <td
+                              data-global-schedule-cell="hours"
+                              className="border border-slate-900 px-1 py-0.5 text-center font-bold"
+                            >
                               {weekMinutes > 0
                                 ? Math.round((weekMinutes / 60) * 10) / 10
                                 : ""}
@@ -757,51 +963,207 @@ export default async function StaffScheduleGlobalPage({
       <Script id="viso-global-schedule-hidden-workers" strategy="afterInteractive">
         {`
           (function () {
-            var key = "viso:global-schedule:hidden-employees";
-
-            function readHidden() {
-              try {
-                var raw = window.localStorage.getItem(key);
-                var parsed = raw ? JSON.parse(raw) : [];
-                return Array.isArray(parsed) ? new Set(parsed.filter(Boolean)) : new Set();
-              } catch (_) {
-                return new Set();
-              }
-            }
-
-            function writeHidden(hidden) {
-              window.localStorage.setItem(key, JSON.stringify(Array.from(hidden)));
-            }
-
-            function applyHidden() {
-              var hidden = readHidden();
-              document.querySelectorAll("[data-global-schedule-employee-row]").forEach(function (row) {
-                var employeeId = row.getAttribute("data-global-schedule-employee-row");
-                row.hidden = hidden.has(employeeId);
-              });
-            }
-
             function closestAction(target, selector) {
               var element = target && target.nodeType === 1 ? target : target && target.parentElement;
               return element && element.closest ? element.closest(selector) : null;
             }
 
-            document.addEventListener("click", function (event) {
-              var target = closestAction(event.target, "[data-hide-global-schedule-employee]");
-              if (target) {
-                var employeeId = target.getAttribute("data-hide-global-schedule-employee");
-                if (!employeeId) return;
-                var hidden = readHidden();
-                hidden.add(employeeId);
-                writeHidden(hidden);
-                applyHidden();
-                return;
+            function readColumnState(storageKey) {
+              try {
+                return JSON.parse(window.localStorage.getItem(storageKey) || "{}") || {};
+              } catch (_) {
+                return {};
+              }
+            }
+
+            function writeColumnState(storageKey, state) {
+              try {
+                window.localStorage.setItem(storageKey, JSON.stringify(state));
+              } catch (_) {
+              }
+            }
+
+            function asNumber(value, fallback) {
+              var parsed = parseFloat(String(value || ""));
+              return Number.isFinite(parsed) ? parsed : fallback;
+            }
+
+            function initGlobalScheduleTable(table) {
+              if (!table || table.getAttribute("data-global-schedule-ready") === "1") return;
+              table.setAttribute("data-global-schedule-ready", "1");
+
+              var storageKey = table.getAttribute("data-storage-key") || "viso:global-schedule-table:v1";
+              var state = readColumnState(storageKey);
+
+              function applyColumns() {
+                var widths = state.columnWidths && typeof state.columnWidths === "object" ? state.columnWidths : {};
+                var totalWidth = 0;
+                table.querySelectorAll("col[data-global-schedule-column]").forEach(function (column) {
+                  var key = column.getAttribute("data-global-schedule-column");
+                  if (!key) return;
+                  var fallbackWidth = asNumber(column.getAttribute("data-default-width"), 88);
+                  var minWidth = asNumber(column.getAttribute("data-min-width"), 32);
+                  var width = Math.max(minWidth, asNumber(widths[key], fallbackWidth));
+                  column.style.width = width + "px";
+                  totalWidth += width;
+                });
+                table.style.minWidth = Math.max(totalWidth, 420) + "px";
               }
 
-              var reset = closestAction(event.target, "[data-reset-hidden-employees]");
-              if (!reset) return;
-              window.localStorage.removeItem(key);
-              applyHidden();
+              function saveColumns() {
+                writeColumnState(storageKey, state);
+              }
+
+              table.addEventListener("pointerdown", function (event) {
+                var handle = closestAction(event.target, "[data-global-schedule-resize-handle]");
+                if (!handle || !table.contains(handle)) return;
+
+                var key = handle.getAttribute("data-global-schedule-resize-handle");
+                var column = table.querySelector('col[data-global-schedule-column="' + key + '"]');
+                if (!key || !column) return;
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                var startX = event.clientX;
+                var minWidth = asNumber(column.getAttribute("data-min-width"), 32);
+                var fallbackWidth = asNumber(column.getAttribute("data-default-width"), 88);
+                var currentWidths = state.columnWidths && typeof state.columnWidths === "object" ? state.columnWidths : {};
+                var startWidth = asNumber(currentWidths[key], asNumber(column.style.width, fallbackWidth));
+
+                document.body.style.cursor = "col-resize";
+                document.body.style.userSelect = "none";
+
+                function onMove(moveEvent) {
+                  var nextWidth = Math.max(minWidth, Math.round(startWidth + moveEvent.clientX - startX));
+                  state.columnWidths = state.columnWidths && typeof state.columnWidths === "object" ? state.columnWidths : {};
+                  state.columnWidths[key] = nextWidth;
+                  saveColumns();
+                  applyColumns();
+                }
+
+                function onUp() {
+                  document.removeEventListener("pointermove", onMove);
+                  document.removeEventListener("pointerup", onUp);
+                  document.body.style.cursor = "";
+                  document.body.style.userSelect = "";
+                }
+
+                document.addEventListener("pointermove", onMove);
+                document.addEventListener("pointerup", onUp, { once: true });
+              });
+
+              document.querySelectorAll("[data-reset-global-columns]").forEach(function (button) {
+                button.addEventListener("click", function () {
+                  state = {};
+                  window.localStorage.removeItem(storageKey);
+                  applyColumns();
+                });
+              });
+
+              applyColumns();
+            }
+
+            function setHiddenCount(nextCount) {
+              document.querySelectorAll("[data-global-hidden-count]").forEach(function (node) {
+                node.textContent = String(Math.max(0, nextCount));
+              });
+            }
+
+            function getHiddenCount() {
+              var node = document.querySelector("[data-global-hidden-count]");
+              var parsed = parseInt(node ? node.textContent || "0" : "0", 10);
+              return Number.isFinite(parsed) ? parsed : 0;
+            }
+
+            function setEmployeeRowsHidden(employeeId, hidden) {
+              document.querySelectorAll('[data-global-schedule-employee-row="' + employeeId + '"]').forEach(function (row) {
+                row.hidden = hidden;
+              });
+            }
+
+            function moveRestoreFormToEmptyState(form) {
+              if (!form) return;
+              form.remove();
+              if (document.querySelector("[data-global-hidden-employee-form='restore']")) return;
+              var menu = document.querySelector("[data-global-hidden-list]");
+              if (!menu) return;
+              var empty = document.createElement("div");
+              empty.className = "px-2 py-1 text-slate-500";
+              empty.textContent = "No hay personas ocultas.";
+              menu.appendChild(empty);
+            }
+
+            function addRestoreForm(employeeId, label) {
+              var menu = document.querySelector("[data-global-hidden-list]");
+              if (!menu || menu.querySelector('input[name="employee_id"][value="' + employeeId + '"]')) return;
+              menu.querySelectorAll(".text-slate-500").forEach(function (empty) {
+                empty.remove();
+              });
+
+              var form = document.createElement("form");
+              form.setAttribute("data-global-hidden-employee-form", "restore");
+
+              var input = document.createElement("input");
+              input.type = "hidden";
+              input.name = "employee_id";
+              input.value = employeeId;
+              form.appendChild(input);
+
+              var button = document.createElement("button");
+              button.type = "submit";
+              button.className = "block w-full rounded px-2 py-1 text-left font-semibold text-violet-950 hover:bg-violet-50";
+              button.title = "Mostrar " + label + " en la vista global";
+              button.textContent = label;
+              form.appendChild(button);
+
+              menu.appendChild(form);
+            }
+
+            document.addEventListener("submit", function (event) {
+              var form = closestAction(event.target, "[data-global-hidden-employee-form]");
+              if (!form) return;
+              event.preventDefault();
+
+              var mode = form.getAttribute("data-global-hidden-employee-form");
+              var employeeInput = form.querySelector('input[name="employee_id"]');
+              var employeeId = employeeInput ? employeeInput.value : "";
+              if (!employeeId) return;
+
+              var button = form.querySelector("button");
+              if (button) button.disabled = true;
+
+              fetch("/api/viso/staff-schedule-hidden-employees", {
+                method: mode === "restore" ? "DELETE" : "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ employeeId: employeeId }),
+              })
+                .then(function (response) {
+                  return response.json().then(function (payload) {
+                    if (!response.ok || !payload.ok) {
+                      throw new Error(payload.error || "No se pudo actualizar la vista global.");
+                    }
+                    return payload;
+                  });
+                })
+                .then(function () {
+                  if (mode === "restore") {
+                    setEmployeeRowsHidden(employeeId, false);
+                    moveRestoreFormToEmptyState(form);
+                    setHiddenCount(getHiddenCount() - 1);
+                  } else {
+                    var label = button ? button.textContent || employeeId : employeeId;
+                    setEmployeeRowsHidden(employeeId, true);
+                    addRestoreForm(employeeId, label.trim());
+                    setHiddenCount(getHiddenCount() + 1);
+                  }
+                })
+                .catch(function (error) {
+                  alert(error && error.message ? error.message : "No se pudo actualizar la vista global.");
+                })
+                .finally(function () {
+                  if (button) button.disabled = false;
+                });
             });
 
             document.addEventListener("toggle", function (event) {
@@ -826,7 +1188,7 @@ export default async function StaffScheduleGlobalPage({
               });
             });
 
-            applyHidden();
+            document.querySelectorAll("[data-global-schedule-table]").forEach(initGlobalScheduleTable);
           })();
         `}
       </Script>
