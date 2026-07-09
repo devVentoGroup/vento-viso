@@ -1,9 +1,7 @@
 ﻿import { cookies } from "next/headers";
 
-import {
-  checkPermissionWithRoleOverride,
-  isPermissionAllowedForRole,
-} from "@/lib/auth/role-override";
+import { checkPermissionWithRoleOverride } from "@/lib/auth/role-override";
+import { checkOperationalRolePermission } from "@/lib/auth/operational-session";
 import { createClient } from "@/lib/supabase/server";
 import { VentoChrome } from "./vento-chrome";
 
@@ -564,7 +562,11 @@ async function resolveNavigationItemsForSharedDevice({
       const { appId, code } = splitPermissionCode(permissionCode, appCode);
       if (!code) return false;
 
-      return isPermissionAllowedForRole(supabase, navigationRole, appId, code, {
+      return checkOperationalRolePermission({
+        supabase,
+        roleCode: navigationRole,
+        appId,
+        code,
         siteId: sharedDevice.site_id ?? null,
         areaId: sharedDevice.area_id ?? null,
       });
@@ -959,6 +961,7 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
     </VentoChrome>
   );
 }
+
 
 
 
