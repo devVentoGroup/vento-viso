@@ -16,9 +16,17 @@ export const dynamic = "force-dynamic";
 
 type RawPermissionOption = {
     id: string;
-    code: string;
-    name: string | null;
-    app: { code: string } | { code: string }[] | null;
+    app_code: string | null;
+    code: string | null;
+    label: string | null;
+    description: string | null;
+    group_label: string | null;
+    permission_audience: string | null;
+    is_operational: boolean | null;
+    requires_active_work_context: boolean | null;
+    human_sort_order: number | null;
+    is_active: boolean | null;
+    is_human_configured: boolean | null;
 };
 
 type RawSiteOption = {
@@ -47,7 +55,7 @@ type RawRolePermission = {
     scope_area_id: string | null;
     scope_site_type: string | null;
     scope_area_kind: string | null;
-    permission: RawPermissionOption | RawPermissionOption[] | null;
+    permission_id: string | null;
 };
 
 type PermissionScopeType = "global" | "site" | "site_type" | "area" | "area_kind";
@@ -119,17 +127,24 @@ function validatePermissionScope(scope: PermissionScope) {
 }
 
 function normalizePermission(item: RawPermissionOption): RolePermissionOption | null {
-    const app = Array.isArray(item.app) ? item.app[0] ?? null : item.app;
-    const appCode = String(app?.code ?? "").trim();
+    const id = String(item.id ?? "").trim();
+    const appCode = String(item.app_code ?? "").trim();
     const code = String(item.code ?? "").trim();
 
-    if (!item.id || !appCode || !code) return null;
+    if (!id || !appCode || !code) return null;
 
     return {
-        id: item.id,
+        id,
         appCode,
         code,
-        name: item.name,
+        name: item.label,
+        label: item.label || code,
+        description: item.description || "Define qué puede hacer este rol dentro de Vento OS.",
+        groupLabel: item.group_label || "General",
+        sortOrder: Number(item.human_sort_order ?? 1000),
+        audience: item.permission_audience || "administrative",
+        isOperational: Boolean(item.is_operational),
+        requiresActiveWorkContext: Boolean(item.requires_active_work_context),
     };
 }
 
@@ -307,6 +322,7 @@ export default async function RolesPermissionsPage({
     });
 
     const supabase = createAdminClient();
+    const db = supabase as any;
 
     const [
         { data: rolesData },
@@ -320,9 +336,13 @@ export default async function RolesPermissionsPage({
             .select("code,name")
             .eq("is_active", true)
             .order("name", { ascending: true }),
-        supabase
-            .from("app_permissions")
-            .select("id,code,name,app:apps(code)")
+        db
+            .from("permission_catalog_human_v1")
+            .select("id,app_code,code,label,description,group_label,permission_audience,is_operational,requires_active_work_context,human_sort_order,is_active,is_human_configured")
+            .eq("is_active", true)
+            .eq("is_human_configured", true)
+            .order("app_code", { ascending: true })
+            .order("human_sort_order", { ascending: true })
             .order("code", { ascending: true }),
         supabase
             .from("sites")
@@ -376,25 +396,32 @@ export default async function RolesPermissionsPage({
             label: areaKind.name || areaKind.code,
         }));
 
-    const { data: rolePermissionsData } = selectedRole
-        ? await supabase
-            .from("role_permissions")
-            .select("is_allowed,scope_type,scope_site_id,scope_area_id,scope_site_type,scope_area_kind,permission:app_permissions(id,code,name,app:apps(code))")
-            .eq("role", selectedRole)
-        : { data: [] };
-
     const availablePermissions = ((permissionsData ?? []) as RawPermissionOption[])
         .map(normalizePermission)
         .filter((item): item is RolePermissionOption => item !== null)
-        .sort((a, b) => `${a.appCode}.${a.code}`.localeCompare(`${b.appCode}.${b.code}`, "es"));
+        .sort((a, b) => {
+            const appSort = a.appCode.localeCompare(b.appCode, "es");
+            if (appSort !== 0) return appSort;
+            return a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, "es");
+        });
+
+    const permissionById = new Map(
+        availablePermissions.map((permission) => [permission.id, permission])
+    );
+
+    const { data: rolePermissionsData } = selectedRole
+        ? await db
+            .from("role_permissions")
+            .select("permission_id,is_allowed,scope_type,scope_site_id,scope_area_id,scope_site_type,scope_area_kind")
+            .eq("role", selectedRole)
+        : { data: [] };
 
     const rolePermissions: RolePermissionAssignment[] = [];
 
     for (const row of (rolePermissionsData ?? []) as RawRolePermission[]) {
-        const permissionRaw = Array.isArray(row.permission) ? row.permission[0] ?? null : row.permission;
-        if (!permissionRaw) continue;
+        const permissionId = String(row.permission_id ?? "").trim();
+        const permission = permissionById.get(permissionId);
 
-        const permission = normalizePermission(permissionRaw);
         if (!permission) continue;
 
         rolePermissions.push({
@@ -411,8 +438,8 @@ export default async function RolesPermissionsPage({
     return (
         <div className="space-y-6">
             <PageHeader
-                title="Permisos por rol"
-                subtitle="Configura aplicaciones, pantallas y acciones desde una matriz centralizada."
+                title="Qué puede hacer cada rol"
+                subtitle="Configura permisos con nombres humanos desde el catálogo central de Vento OS."
                 actions={
                     <Link href="/staff" className="ui-btn ui-btn--ghost">
                         Volver a trabajadores

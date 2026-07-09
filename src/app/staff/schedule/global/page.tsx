@@ -65,34 +65,6 @@ function buildPlannerHref(siteId: string, weekStartIso: string) {
   return `/staff/schedule?${query.toString()}`;
 }
 
-function buildPlannerQuickHref(
-  siteId: string,
-  weekStartIso: string,
-  employeeId: string,
-  shiftDate: string,
-) {
-  const query = new URLSearchParams();
-  query.set("site_id", siteId);
-  query.set("week", weekStartIso);
-  query.set("view", "table");
-  query.set("quick_employee_id", employeeId);
-  query.set("quick_shift_date", shiftDate);
-  return `/staff/schedule?${query.toString()}`;
-}
-
-function buildPlannerEditHref(
-  siteId: string,
-  weekStartIso: string,
-  shiftId: string,
-) {
-  const query = new URLSearchParams();
-  query.set("site_id", siteId);
-  query.set("week", weekStartIso);
-  query.set("view", "table");
-  query.set("edit_shift", shiftId);
-  return `/staff/schedule?${query.toString()}`;
-}
-
 function buildGlobalHref(
   weekStartIso: string,
   zoom: number,
@@ -789,10 +761,20 @@ export default async function StaffScheduleGlobalPage({
                                       className="block min-h-[18px] cursor-pointer list-none"
                                       title={`Opciones para ${name} el ${day.label} en ${siteLabelById.get(site.id) ?? "esta sede"}`}
                                     >
-                                      {ownText ? (
+                                      {rows.length > 0 ? (
                                         <div className="truncate">
-                                          {ownText}
+                                          {rows.map((shift, index) => (
+                                            <span
+                                              key={shift.id}
+                                              data-global-shift-label={shift.id}
+                                            >
+                                              {index > 0 ? " / " : ""}
+                                              {compactShiftLabel(shift)}
+                                            </span>
+                                          ))}
                                         </div>
+                                      ) : ownText ? (
+                                        <div className="truncate">{ownText}</div>
                                       ) : null}
                                       {otherSiteText ? (
                                         <div className="truncate text-[9px] font-black leading-none text-violet-700">
@@ -801,37 +783,54 @@ export default async function StaffScheduleGlobalPage({
                                       ) : null}
                                     </summary>
                                     <div className="absolute left-0 top-full z-50 mt-1 min-w-32 rounded-lg border border-violet-200 bg-white p-1 text-left text-[11px] font-semibold shadow-xl">
-                                      <Link
-                                        href={buildPlannerQuickHref(
-                                          site.id,
-                                          weekStartIso,
-                                          employee.id,
-                                          day.iso,
-                                        )}
-                                        className="block rounded px-2 py-1 text-violet-950 no-underline hover:bg-violet-50"
+                                      <button
+                                        type="button"
+                                        className="block w-full rounded px-2 py-1 text-left text-violet-950 hover:bg-violet-50"
+                                        data-global-shift-modal-open
+                                        data-mode="create"
+                                        data-employee-id={employee.id}
+                                        data-site-id={site.id}
+                                        data-shift-date={day.iso}
+                                        data-start-time="08:00"
+                                        data-end-time="16:00"
                                       >
                                         {rows.length > 0
                                           ? "Nuevo bloque"
                                           : "Nuevo"}
-                                      </Link>
+                                      </button>
                                       {rows.length > 0
                                         ? rows.map((shift) => (
-                                            <Link
+                                            <button
                                               key={shift.id}
-                                              href={buildPlannerEditHref(
-                                                site.id,
-                                                weekStartIso,
-                                                shift.id,
+                                              type="button"
+                                              className="block w-full rounded px-2 py-1 text-left text-violet-950 hover:bg-violet-50"
+                                              data-global-shift-modal-open
+                                              data-mode="edit"
+                                              data-shift-id={shift.id}
+                                              data-employee-id={employee.id}
+                                              data-site-id={site.id}
+                                              data-shift-date={day.iso}
+                                              data-start-time={shift.start_time.slice(
+                                                0,
+                                                5,
                                               )}
-                                              className="block rounded px-2 py-1 text-violet-950 no-underline hover:bg-violet-50"
+                                              data-end-time={shift.end_time.slice(
+                                                0,
+                                                5,
+                                              )}
                                             >
                                               Editar {compactShiftLabel(shift)}
-                                            </Link>
+                                            </button>
                                           ))
                                         : null}
                                       {rows.length === 0 &&
                                       !hasLaboralShiftThatDay ? (
                                         <form action={saveShiftAction}>
+                                          <input
+                                            type="hidden"
+                                            name="async_action"
+                                            value="rest"
+                                          />
                                           <input
                                             type="hidden"
                                             name="site_id"
@@ -889,6 +888,10 @@ export default async function StaffScheduleGlobalPage({
                                           <button
                                             type="submit"
                                             className="block w-full rounded px-2 py-1 text-left text-violet-950 hover:bg-violet-50"
+                                            data-global-cell-action="rest"
+                                            data-employee-id={employee.id}
+                                            data-site-id={site.id}
+                                            data-shift-date={day.iso}
                                           >
                                             Descanso
                                           </button>
@@ -900,6 +903,11 @@ export default async function StaffScheduleGlobalPage({
                                             key={`${shift.id}-delete`}
                                             action={deleteShiftAction}
                                           >
+                                            <input
+                                              type="hidden"
+                                              name="async_action"
+                                              value="delete"
+                                            />
                                             <input
                                               type="hidden"
                                               name="shift_id"
@@ -917,6 +925,9 @@ export default async function StaffScheduleGlobalPage({
                                             <button
                                               type="submit"
                                               className="block w-full rounded px-2 py-1 text-left text-[var(--ui-danger)] hover:bg-violet-50"
+                                              data-global-cell-action="delete"
+                                              data-shift-id={shift.id}
+                                              data-site-id={site.id}
                                             >
                                               Eliminar{" "}
                                               {compactShiftLabel(shift)}
@@ -960,6 +971,78 @@ export default async function StaffScheduleGlobalPage({
           </div>
         </div>
       </div>
+      <dialog
+        className="w-[min(360px,calc(100vw-2rem))] rounded-lg border border-violet-200 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/20"
+        data-global-shift-dialog
+      >
+        <form className="space-y-3 p-3" data-global-shift-dialog-form>
+          <input type="hidden" name="mode" />
+          <input type="hidden" name="shift_id" />
+          <input type="hidden" name="employee_id" />
+          <input type="hidden" name="site_id" />
+          <input type="hidden" name="shift_date" />
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div
+                className="text-sm font-black text-violet-950"
+                data-global-shift-dialog-title
+              >
+                Turno
+              </div>
+              <div
+                className="text-xs font-semibold text-slate-500"
+                data-global-shift-dialog-subtitle
+              />
+            </div>
+            <button
+              type="button"
+              className="rounded px-2 py-1 text-sm font-black text-slate-500 hover:bg-violet-50"
+              data-global-shift-dialog-close
+            >
+              Cerrar
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1 text-xs font-bold text-slate-600">
+              Inicio
+              <input
+                type="time"
+                name="start_time"
+                className="border border-violet-200 px-2 py-1 text-sm font-semibold"
+                required
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-bold text-slate-600">
+              Fin
+              <input
+                type="time"
+                name="end_time"
+                className="border border-violet-200 px-2 py-1 text-sm font-semibold"
+                required
+              />
+            </label>
+          </div>
+          <div
+            className="hidden rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700"
+            data-global-shift-dialog-error
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="border border-violet-200 bg-white px-3 py-1 text-sm font-bold text-violet-800"
+              data-global-shift-dialog-close
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="border border-violet-700 bg-violet-700 px-3 py-1 text-sm font-bold text-white"
+            >
+              Guardar
+            </button>
+          </div>
+        </form>
+      </dialog>
       <Script id="viso-global-schedule-hidden-workers" strategy="afterInteractive">
         {`
           (function () {
@@ -1120,6 +1203,144 @@ export default async function StaffScheduleGlobalPage({
               menu.appendChild(form);
             }
 
+            function compactTime(value) {
+              var parts = String(value || "00:00").slice(0, 5).split(":");
+              var hour = parseInt(parts[0] || "0", 10);
+              var minute = parseInt(parts[1] || "0", 10);
+              var displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+              var suffix = hour >= 12 ? "pm" : "am";
+              return minute === 0
+                ? String(displayHour) + suffix
+                : String(displayHour) + ":" + String(parts[1] || "00") + suffix;
+            }
+
+            function openShiftDialog(button) {
+              var dialog = document.querySelector("[data-global-shift-dialog]");
+              var form = dialog ? dialog.querySelector("[data-global-shift-dialog-form]") : null;
+              if (!dialog || !form) return;
+
+              form.reset();
+              form.querySelector('[name="mode"]').value = button.getAttribute("data-mode") || "create";
+              form.querySelector('[name="shift_id"]').value = button.getAttribute("data-shift-id") || "";
+              form.querySelector('[name="employee_id"]').value = button.getAttribute("data-employee-id") || "";
+              form.querySelector('[name="site_id"]').value = button.getAttribute("data-site-id") || "";
+              form.querySelector('[name="shift_date"]').value = button.getAttribute("data-shift-date") || "";
+              form.querySelector('[name="start_time"]').value = button.getAttribute("data-start-time") || "08:00";
+              form.querySelector('[name="end_time"]').value = button.getAttribute("data-end-time") || "16:00";
+              form.setAttribute("data-source-cell", "");
+              var cell = button.closest("td");
+              if (cell) {
+                var cellId = "global-cell-" + Math.random().toString(36).slice(2);
+                cell.setAttribute("data-global-active-cell", cellId);
+                form.setAttribute("data-source-cell", cellId);
+              }
+
+              var error = dialog.querySelector("[data-global-shift-dialog-error]");
+              if (error) {
+                error.hidden = true;
+                error.classList.add("hidden");
+                error.textContent = "";
+              }
+              var mode = form.querySelector('[name="mode"]').value;
+              var title = dialog.querySelector("[data-global-shift-dialog-title]");
+              if (title) title.textContent = mode === "edit" ? "Editar turno" : "Nuevo turno";
+              var subtitle = dialog.querySelector("[data-global-shift-dialog-subtitle]");
+              if (subtitle) subtitle.textContent = form.querySelector('[name="shift_date"]').value;
+              dialog.showModal();
+            }
+
+            document.addEventListener("click", function (event) {
+              var openButton = closestAction(event.target, "[data-global-shift-modal-open]");
+              if (openButton) {
+                event.preventDefault();
+                openShiftDialog(openButton);
+                return;
+              }
+
+              var closeButton = closestAction(event.target, "[data-global-shift-dialog-close]");
+              if (!closeButton) return;
+              var dialog = closeButton.closest("[data-global-shift-dialog]");
+              if (dialog) dialog.close();
+            });
+
+            document.addEventListener("submit", function (event) {
+              var form = closestAction(event.target, "[data-global-shift-dialog-form]");
+              if (!form) return;
+              event.preventDefault();
+
+              var dialog = form.closest("[data-global-shift-dialog]");
+              var error = dialog ? dialog.querySelector("[data-global-shift-dialog-error]") : null;
+              var submit = form.querySelector('button[type="submit"]');
+              if (submit) submit.disabled = true;
+              if (error) {
+                error.hidden = true;
+                error.classList.add("hidden");
+                error.textContent = "";
+              }
+
+              var mode = form.querySelector('[name="mode"]').value;
+              var shiftId = form.querySelector('[name="shift_id"]').value;
+              var startTime = form.querySelector('[name="start_time"]').value;
+              var endTime = form.querySelector('[name="end_time"]').value;
+
+              fetch("/api/viso/staff-schedule-shifts", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  action: "labor",
+                  shiftId: shiftId,
+                  employeeId: form.querySelector('[name="employee_id"]').value,
+                  siteId: form.querySelector('[name="site_id"]').value,
+                  shiftDate: form.querySelector('[name="shift_date"]').value,
+                  startTime: startTime,
+                  endTime: endTime,
+                }),
+              })
+                .then(function (response) {
+                  return response.json().then(function (payload) {
+                    if (!response.ok || !payload.ok) {
+                      throw new Error(payload.error || "No se pudo guardar el turno.");
+                    }
+                    return payload;
+                  });
+                })
+                .then(function (payload) {
+                  var label = payload.label || (compactTime(startTime) + " a " + compactTime(endTime));
+                  var sourceCell = form.getAttribute("data-source-cell");
+                  var cell = sourceCell ? document.querySelector('[data-global-active-cell="' + sourceCell + '"]') : null;
+                  var summary = cell ? cell.querySelector("summary") : null;
+                  var existingLabel = shiftId ? document.querySelector('[data-global-shift-label="' + shiftId + '"]') : null;
+
+                  if (existingLabel) {
+                    existingLabel.textContent = label;
+                  } else if (summary && payload.shift && payload.shift.id) {
+                    var line = summary.querySelector(".truncate");
+                    if (!line) {
+                      line = document.createElement("div");
+                      line.className = "truncate";
+                      summary.insertBefore(line, summary.firstChild);
+                    } else if (line.textContent && line.textContent.trim()) {
+                      line.appendChild(document.createTextNode(" / "));
+                    }
+                    var span = document.createElement("span");
+                    span.setAttribute("data-global-shift-label", payload.shift.id);
+                    span.textContent = label;
+                    line.appendChild(span);
+                  }
+                  if (dialog) dialog.close();
+                })
+                .catch(function (err) {
+                  if (error) {
+                    error.textContent = err && err.message ? err.message : "No se pudo guardar el turno.";
+                    error.hidden = false;
+                    error.classList.remove("hidden");
+                  }
+                })
+                .finally(function () {
+                  if (submit) submit.disabled = false;
+                });
+            });
+
             document.addEventListener("submit", function (event) {
               var form = closestAction(event.target, "[data-global-hidden-employee-form]");
               if (!form) return;
@@ -1160,6 +1381,78 @@ export default async function StaffScheduleGlobalPage({
                 })
                 .catch(function (error) {
                   alert(error && error.message ? error.message : "No se pudo actualizar la vista global.");
+                })
+                .finally(function () {
+                  if (button) button.disabled = false;
+                });
+            });
+
+            document.addEventListener("submit", function (event) {
+              var form = closestAction(event.target, "form");
+              if (!form || form.hasAttribute("data-global-hidden-employee-form")) return;
+
+              var actionInput = form.querySelector('input[name="async_action"]');
+              var action = actionInput ? actionInput.value : "";
+              if (action !== "rest" && action !== "delete") return;
+
+              event.preventDefault();
+
+              var submitter = event.submitter || form.querySelector("button[type='submit']");
+              var button = submitter && submitter.tagName === "BUTTON" ? submitter : null;
+              if (button) button.disabled = true;
+
+              var cell = form.closest("td");
+              var menu = form.closest("[data-global-schedule-action-menu]");
+
+              var request =
+                action === "rest"
+                  ? {
+                      method: "POST",
+                      body: {
+                        action: "rest",
+                        employeeId: button ? button.getAttribute("data-employee-id") : "",
+                        siteId: button ? button.getAttribute("data-site-id") : "",
+                        shiftDate: button ? button.getAttribute("data-shift-date") : "",
+                      },
+                    }
+                  : {
+                      method: "DELETE",
+                      body: {
+                        shiftId: button ? button.getAttribute("data-shift-id") : "",
+                        siteId: button ? button.getAttribute("data-site-id") : "",
+                      },
+                    };
+
+              fetch("/api/viso/staff-schedule-shifts", {
+                method: request.method,
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(request.body),
+              })
+                .then(function (response) {
+                  return response.json().then(function (payload) {
+                    if (!response.ok || !payload.ok) {
+                      throw new Error(payload.error || "No se pudo actualizar el turno.");
+                    }
+                    return payload;
+                  });
+                })
+                .then(function () {
+                  if (action === "rest") {
+                    var summary = menu ? menu.querySelector("summary") : null;
+                    if (summary) summary.innerHTML = '<div class="truncate">DESCANSA</div>';
+                    if (cell) cell.title = "DESCANSA · Borrador";
+                  } else {
+                    form.remove();
+                    if (menu) {
+                      var summaryText = menu.querySelector("summary .truncate");
+                      if (summaryText) summaryText.remove();
+                    }
+                    if (cell) cell.title = "";
+                  }
+                  if (menu) menu.removeAttribute("open");
+                })
+                .catch(function (error) {
+                  alert(error && error.message ? error.message : "No se pudo actualizar el turno.");
                 })
                 .finally(function () {
                   if (button) button.disabled = false;

@@ -8,6 +8,13 @@ export type RolePermissionOption = {
     appCode: string;
     code: string;
     name: string | null;
+    label: string;
+    description: string;
+    groupLabel: string;
+    sortOrder: number;
+    audience: string;
+    isOperational: boolean;
+    requiresActiveWorkContext: boolean;
 };
 
 export type RolePermissionAssignment = {
@@ -52,39 +59,43 @@ type PermissionGroup = {
         key: string;
         label: string;
         permissions: RolePermissionOption[];
+        sortOrder: number;
     }[];
     accessPermission: RolePermissionOption | null;
     total: number;
     active: number;
 };
 
-const APP_ORDER = ["fogo", "nexo", "origo", "shell", "viso", "anima"];
+const APP_ORDER = ["shell", "anima", "viso", "nexo", "pulso", "fogo", "origo"];
 
 const APP_LABELS: Record<string, string> = {
-    fogo: "FOGO · Recetas y producción",
-    nexo: "NEXO · Inventario y remisiones",
-    origo: "ORIGO · Compras y proveedores",
     shell: "SHELL · Entrada al ecosistema",
+    anima: "ANIMA · Jornadas y asistencia",
     viso: "VISO · Administración",
-    anima: "ANIMA · Turnos y asistencia",
+    nexo: "NEXO · Inventario y remisiones",
+    pulso: "PULSO · Caja y ventas",
+    fogo: "FOGO · Recetas y producción",
+    origo: "ORIGO · Compras y proveedores",
 };
 
 const APP_SHORT_LABELS: Record<string, string> = {
-    fogo: "FOGO",
-    nexo: "NEXO",
-    origo: "ORIGO",
     shell: "SHELL",
-    viso: "VISO",
     anima: "ANIMA",
+    viso: "VISO",
+    nexo: "NEXO",
+    pulso: "PULSO",
+    fogo: "FOGO",
+    origo: "ORIGO",
 };
 
 const APP_DESCRIPTIONS: Record<string, string> = {
-    fogo: "Recetas, fichas de preparación y lotes de producción.",
+    shell: "Entrada general al ecosistema.",
+    anima: "Jornadas, check-in, check-out, horarios y asistencia.",
+    viso: "Trabajadores, permisos, auditoría y configuración administrativa.",
     nexo: "Inventario, stock, ubicaciones, retiros y remisiones.",
+    pulso: "Operación de caja, POS y ventas.",
+    fogo: "Recetas, fichas de preparación y producción.",
     origo: "Compras, proveedores y recepción de productos.",
-    shell: "Acceso inicial, perfil y navegación general.",
-    viso: "Trabajadores, permisos, documentos y configuración administrativa.",
-    anima: "Turnos, check-in, check-out y asistencia.",
 };
 
 const DEFAULT_SITE_TYPE_OPTIONS: ScopeOption[] = [
@@ -110,7 +121,7 @@ const SCOPE_OPTIONS: Array<{ value: PermissionScopeType; label: string; descript
     {
         value: "site",
         label: "Una sede exacta",
-        description: "Permite esto solo en una sede concreta, por ejemplo Molka o Vento Café.",
+        description: "Permite esto solo en una sede concreta, por ejemplo Vento Café o Saudo.",
     },
     {
         value: "site_type",
@@ -129,92 +140,6 @@ const SCOPE_OPTIONS: Array<{ value: PermissionScopeType; label: string; descript
     },
 ];
 
-const MODULE_LABELS: Record<string, string> = {
-    access: "Acceso general",
-
-    "production.recipe_book": "Recetario",
-    "production.recipes": "Recetas",
-    "production.batches": "Producción",
-
-    staff: "Trabajadores",
-    "staff.documents": "Documentos de trabajador",
-    "staff.employee_photos": "Fotos de trabajador",
-    "staff.permissions": "Permisos de trabajador",
-
-    documents: "Documentos",
-    employee_photos: "Fotos de empleado",
-
-    products: "Productos",
-    inventory: "Inventario",
-    suppliers: "Proveedores",
-    orders: "Pedidos",
-    remissions: "Remisiones",
-    cash: "Caja",
-    costs: "Costos",
-    reports: "Reportes",
-};
-
-const ACTION_LABELS: Record<string, string> = {
-    access: "Entrar a la aplicación",
-    view: "Ver",
-    read: "Ver",
-    list: "Ver lista",
-    create: "Crear",
-    add: "Crear",
-    update: "Editar",
-    edit: "Editar",
-    manage: "Crear y editar",
-    delete: "Eliminar",
-    remove: "Eliminar",
-    publish: "Publicar",
-    approve: "Aprobar",
-    cancel: "Anular",
-    upload: "Subir archivos",
-    download: "Descargar",
-    export: "Exportar",
-    import: "Importar",
-    view_all: "Ver todo",
-};
-
-const FRIENDLY_PERMISSION_LABELS: Record<string, string> = {
-    "fogo.access": "Entrar a FOGO",
-    "fogo.production.recipe_book.view": "Ver libro de recetas",
-    "fogo.production.recipes": "Consultar recetas internas",
-    "fogo.production.recipes.manage": "Crear y editar recetas",
-    "fogo.production.batches": "Ver módulo de producción",
-    "fogo.production.batches.view": "Ver lotes de producción",
-    "fogo.production.batches.create": "Crear lotes de producción",
-    "fogo.production.orders": "Ver órdenes de producción",
-
-    "nexo.access": "Entrar a NEXO",
-    "nexo.inventory.stock": "Ver stock",
-    "nexo.inventory.movements": "Ver movimientos de inventario",
-    "nexo.inventory.withdraw": "Hacer retiros de inventario",
-    "nexo.inventory.remissions": "Ver remisiones",
-    "nexo.inventory.remissions.receive": "Recibir remisiones",
-    "nexo.inventory.remissions.prepare": "Preparar remisiones",
-    "nexo.inventory.locations": "Ver ubicaciones LOC",
-
-    "viso.access": "Entrar a VISO",
-    "viso.staff.manage": "Administrar trabajadores",
-    "viso.staff.permissions.manage": "Administrar permisos",
-    "viso.staff.documents.manage": "Gestionar documentos de trabajadores",
-
-    "anima.access": "Entrar a ANIMA",
-    "anima.attendance.check_in": "Hacer check-in",
-    "anima.attendance.check_out": "Hacer check-out",
-};
-
-const FRIENDLY_PERMISSION_DESCRIPTIONS: Record<string, string> = {
-    "fogo.access": "Hace que la app FOGO aparezca disponible y permite entrar a su operación base.",
-    "fogo.production.recipe_book.view": "Muestra la pantalla Recetario en el menú lateral y permite consultar fichas de preparación publicadas.",
-    "fogo.production.recipes": "Permite consultar información interna de recetas usada por FOGO.",
-    "fogo.production.recipes.manage": "Permite crear, editar y publicar recetas. Úsalo solo para responsables de receta o administración.",
-    "fogo.production.batches.create": "Permite presionar Producir lote y registrar producción real para una receta.",
-    "fogo.production.batches.view": "Permite consultar lotes de producción ya creados.",
-    "fogo.production.orders": "Permite consultar órdenes de producción cuando existan.",
-};
-
 function appLabel(appCode: string) {
     return APP_LABELS[appCode] ?? appCode.toUpperCase();
 }
@@ -227,47 +152,6 @@ function permissionFullCode(permission: RolePermissionOption) {
     return `${permission.appCode}.${permission.code}`;
 }
 
-function humanize(value: string) {
-    return value
-        .replace(/[_-]+/g, " ")
-        .replace(/\.+/g, " ")
-        .trim()
-        .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function moduleKeyFromPermission(code: string) {
-    if (code === "access") return "access";
-
-    const parts = code.split(".").filter(Boolean);
-    if (parts.length <= 1) return parts[0] ?? code;
-
-    return parts.slice(0, -1).join(".");
-}
-
-function actionKeyFromPermission(code: string) {
-    if (code === "access") return "access";
-
-    const parts = code.split(".").filter(Boolean);
-    return parts[parts.length - 1] ?? code;
-}
-
-function moduleLabel(moduleKey: string) {
-    return MODULE_LABELS[moduleKey] ?? humanize(moduleKey);
-}
-
-function actionLabel(permission: RolePermissionOption) {
-    const fullCode = permissionFullCode(permission);
-    if (FRIENDLY_PERMISSION_LABELS[fullCode]) return FRIENDLY_PERMISSION_LABELS[fullCode];
-    if (permission.name) return permission.name;
-    const actionKey = actionKeyFromPermission(permission.code);
-    return ACTION_LABELS[actionKey] ?? humanize(actionKey);
-}
-
-function permissionDescription(permission: RolePermissionOption) {
-    const fullCode = permissionFullCode(permission);
-    return FRIENDLY_PERMISSION_DESCRIPTIONS[fullCode] ?? "Define qué puede hacer este rol y en qué sedes o áreas aplica.";
-}
-
 function normalizeScopeType(value: string | null | undefined): PermissionScopeType {
     if (value === "site") return "site";
     if (value === "site_type") return "site_type";
@@ -276,9 +160,21 @@ function normalizeScopeType(value: string | null | undefined): PermissionScopeTy
     return "global";
 }
 
+function defaultScopeType(permission: RolePermissionOption): PermissionScopeType {
+    if (permission.isOperational || permission.audience === "operational") return "site_type";
+    return "global";
+}
+
 function findScopeLabel(options: ScopeOption[], value: string | null | undefined) {
     if (!value) return "";
     return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function audienceLabel(value: string) {
+    if (value === "operational") return "Operación";
+    if (value === "shared_device") return "Dispositivo compartido";
+    if (value === "system") return "Sistema";
+    return "Administración";
 }
 
 function scopeLabel(
@@ -323,18 +219,7 @@ function sortApps(a: string, b: string) {
 }
 
 function sortPermissions(a: RolePermissionOption, b: RolePermissionOption) {
-    const actionA = actionKeyFromPermission(a.code);
-    const actionB = actionKeyFromPermission(b.code);
-    const order = ["view", "read", "list", "create", "add", "update", "edit", "manage", "publish", "approve", "cancel", "delete", "remove"];
-
-    const aIndex = order.indexOf(actionA);
-    const bIndex = order.indexOf(actionB);
-
-    if (aIndex !== -1 || bIndex !== -1) {
-        return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
-    }
-
-    return a.code.localeCompare(b.code, "es");
+    return a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, "es");
 }
 
 function buildPermissionGroups(
@@ -365,19 +250,20 @@ function buildPermissionGroups(
             for (const permission of permissions) {
                 if (permission.code === "access") continue;
 
-                const moduleKey = moduleKeyFromPermission(permission.code);
+                const moduleKey = permission.groupLabel || "General";
                 const current = moduleMap.get(moduleKey) ?? [];
                 current.push(permission);
                 moduleMap.set(moduleKey, current);
             }
 
             const modules = [...moduleMap.entries()]
-                .sort(([a], [b]) => moduleLabel(a).localeCompare(moduleLabel(b), "es"))
                 .map(([key, modulePermissions]) => ({
                     key,
-                    label: moduleLabel(key),
+                    label: key,
                     permissions: modulePermissions.slice().sort(sortPermissions),
-                }));
+                    sortOrder: Math.min(...modulePermissions.map((permission) => permission.sortOrder)),
+                }))
+                .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, "es"));
 
             return {
                 appCode,
@@ -420,7 +306,7 @@ function ScopeFields({
     if (scopeType === "global") {
         return (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-                Aplica en toda la empresa. Úsalo para propietarios, gerencia o administración. Para operación normal, prefiere sede o tipo de sede.
+                Aplica en toda la empresa. Úsalo para propietarios, gerencia general o administración central.
             </div>
         );
     }
@@ -441,7 +327,7 @@ function ScopeFields({
                 ) : (
                     <input name="scope_site_id" className="ui-input" placeholder="ID de sede" required />
                 )}
-                <span className="block text-xs text-[var(--ui-muted)]">Ejemplo: solo Molka o solo Vento Café.</span>
+                <span className="block text-xs text-[var(--ui-muted)]">Ejemplo: solo Vento Café o solo Saudo.</span>
             </label>
         );
     }
@@ -458,7 +344,7 @@ function ScopeFields({
                         </option>
                     ))}
                 </select>
-                <span className="block text-xs text-[var(--ui-muted)]">Recomendado para roles que deben operar igual en todos los satélites o en todos los centros de producción.</span>
+                <span className="block text-xs text-[var(--ui-muted)]">Recomendado para roles que operan igual en todos los satélites o centros.</span>
             </label>
         );
     }
@@ -564,7 +450,7 @@ function PermissionToggle({
     grantPermissionAction: (formData: FormData) => Promise<void>;
     removePermissionAction: (formData: FormData) => Promise<void>;
 }) {
-    const [scopeType, setScopeType] = useState<PermissionScopeType>("site_type");
+    const [scopeType, setScopeType] = useState<PermissionScopeType>(() => defaultScopeType(permission));
     const allowedAssignments = assignments.filter((assignment) => assignment.isAllowed);
     const deniedAssignments = assignments.filter((assignment) => !assignment.isAllowed);
     const isAllowed = allowedAssignments.length > 0;
@@ -591,11 +477,20 @@ function PermissionToggle({
                     <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0">
                             <span className="block text-base font-semibold text-[var(--ui-text)]">
-                                {actionLabel(permission)}
+                                {permission.label}
                             </span>
                             <span className="mt-1 block text-xs leading-5 text-[var(--ui-muted)]">
-                                {permissionDescription(permission)}
+                                {permission.description}
                             </span>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                <span className="ui-chip">{audienceLabel(permission.audience)}</span>
+                                {permission.isOperational ? <span className="ui-chip">Operativo</span> : null}
+                                {permission.requiresActiveWorkContext ? (
+                                    <span className="ui-chip ui-chip--soft">Requiere jornada</span>
+                                ) : (
+                                    <span className="ui-chip ui-chip--soft">Sin jornada obligatoria</span>
+                                )}
+                            </div>
                         </div>
 
                         {isAllowed ? (
@@ -733,11 +628,11 @@ export function RolePermissionsCascade({
                 <div className="flex flex-wrap items-end justify-between gap-4">
                     <div>
                         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
-                            Matriz de permisos
+                            Matriz humana de permisos
                         </div>
                         <h2 className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">Qué puede hacer cada rol</h2>
                         <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--ui-muted)]">
-                            Primero elige el rol. Luego permite entrar a una app, ver sus pantallas y ejecutar acciones. Cada permiso debe decir dónde aplica: toda la empresa, una sede, un tipo de sede, un área o un tipo de área.
+                            Elige el rol y define qué puede hacer en cada app. Los nombres, grupos y descripciones vienen del catálogo central de permisos, no de textos hardcodeados en esta pantalla.
                         </p>
                     </div>
 
@@ -762,7 +657,7 @@ export function RolePermissionsCascade({
 
                 {!canManagePermissions ? (
                     <div className="ui-alert mt-4">
-                        Tienes acceso de lectura. Para cambiar permisos necesitas viso.staff.permissions.manage.
+                        Tienes acceso de lectura. Para cambiar permisos necesitas el permiso humano “Configurar lo que puede hacer cada rol”.
                     </div>
                 ) : null}
             </div>
@@ -809,7 +704,9 @@ export function RolePermissionsCascade({
                             })}
 
                             {groups.length === 0 ? (
-                                <div className="ui-empty">No hay permisos registrados en app_permissions.</div>
+                                <div className="ui-empty">
+                                    No hay permisos humanos configurados. Revisa el catálogo central en app_permissions.
+                                </div>
                             ) : null}
                         </div>
                     </div>
@@ -856,7 +753,7 @@ export function RolePermissionsCascade({
                                     </div>
                                 ) : (
                                     <div className="ui-alert mt-5">
-                                        Esta app no tiene configurado su permiso de entrada. Crea primero el permiso de acceso para poder mostrarla aquí.
+                                        Esta app no tiene configurado su permiso humano de entrada.
                                     </div>
                                 )}
                             </section>
@@ -877,7 +774,7 @@ export function RolePermissionsCascade({
                                                 <div>
                                                     <h4 className="text-lg font-semibold text-[var(--ui-text)]">{module.label}</h4>
                                                     <p className="text-xs leading-5 text-[var(--ui-muted)]">
-                                                        Configura qué acciones de este módulo quedan permitidas y dónde aplican.
+                                                        Configura qué acciones de este grupo quedan permitidas y dónde aplican.
                                                     </p>
                                                 </div>
                                             </div>
