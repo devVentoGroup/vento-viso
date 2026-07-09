@@ -66,6 +66,7 @@ function sortNumber(value: number | string | null | undefined, fallback = Number
 
 function isVisoCommercialMenuItem(row: MenuItemRow) {
   return (
+    row.is_active === true &&
     hasTextValue(row.product_id) &&
     hasTextValue(row.commercial_category_id) &&
     row.price_amount > 0 &&
@@ -77,11 +78,12 @@ function isVisoCommercialMenuItem(row: MenuItemRow) {
 export default async function MenuPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ ok?: string; error?: string }>;
+  searchParams?: Promise<{ ok?: string; error?: string; site?: string; siteId?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
   const okMsg = sp.ok ? safeDecode(sp.ok) : "";
   const errorMsg = sp.error ? safeDecode(sp.error) : "";
+  const requestedSiteId = safeDecode(sp.siteId ?? sp.site);
 
   await requireAppAccess({
     appId: "viso",
@@ -99,6 +101,7 @@ export default async function MenuPage({
       .select("id,code,name,site_id,product_id,category_label,commercial_collection_id,commercial_collection:commercial_collections(id,name,subtitle,code,kind,sort_order),commercial_category_id,commercial_category:commercial_categories(id,name,code,sort_order),price_amount,sort_order,is_active,is_featured,metadata")
       .not("product_id", "is", null)
       .not("commercial_category_id", "is", null)
+      .eq("is_active", true)
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true }),
     supabase
@@ -225,38 +228,50 @@ export default async function MenuPage({
     collectionGroup.categories.get(categoryId)!.rows.push(row);
   }
 
-  const organizedMenu = Array.from(rowsBySite.entries()).map(([siteId, siteGroup]) => ({
-    siteId,
-    siteLabel: siteGroup.siteLabel,
-    collections: Array.from(siteGroup.collections.entries())
-      .map(([collectionId, collectionGroup]) => ({
-        collectionId,
-        label: collectionGroup.label,
-        subtitle: collectionGroup.subtitle,
-        sortOrder: collectionGroup.sortOrder,
-        categories: Array.from(collectionGroup.categories.entries())
-          .map(([categoryId, categoryGroup]) => ({
-            categoryId,
-            label: categoryGroup.label,
-            sortOrder: categoryGroup.sortOrder,
-            rows: categoryGroup.rows.sort((a, b) => {
-              const aOrder = sortNumber(a.sort_order);
-              const bOrder = sortNumber(b.sort_order);
+  const organizedMenu = Array.from(rowsBySite.entries())
+    .map(([siteId, siteGroup]) => ({
+      siteId,
+      siteLabel: siteGroup.siteLabel,
+      collections: Array.from(siteGroup.collections.entries())
+        .map(([collectionId, collectionGroup]) => ({
+          collectionId,
+          label: collectionGroup.label,
+          subtitle: collectionGroup.subtitle,
+          sortOrder: collectionGroup.sortOrder,
+          categories: Array.from(collectionGroup.categories.entries())
+            .map(([categoryId, categoryGroup]) => ({
+              categoryId,
+              label: categoryGroup.label,
+              sortOrder: categoryGroup.sortOrder,
+              rows: categoryGroup.rows.sort((a, b) => {
+                const aOrder = sortNumber(a.sort_order);
+                const bOrder = sortNumber(b.sort_order);
 
-              if (aOrder !== bOrder) return aOrder - bOrder;
-              return a.name.localeCompare(b.name, "es-CO");
+                if (aOrder !== bOrder) return aOrder - bOrder;
+                return a.name.localeCompare(b.name, "es-CO");
+              }),
+            }))
+            .sort((a, b) => {
+              if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+              return a.label.localeCompare(b.label, "es-CO");
             }),
-          }))
-          .sort((a, b) => {
-            if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
-            return a.label.localeCompare(b.label, "es-CO");
-          }),
-      }))
-      .sort((a, b) => {
-        if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
-        return a.label.localeCompare(b.label, "es-CO");
-      }),
-  }));
+        }))
+        .sort((a, b) => {
+          if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+          return a.label.localeCompare(b.label, "es-CO");
+        }),
+    }))
+    .sort((a, b) => a.siteLabel.localeCompare(b.siteLabel, "es-CO"));
+
+  const selectedSiteId = organizedMenu.some((site) => site.siteId === requestedSiteId)
+    ? requestedSiteId
+    : organizedMenu[0]?.siteId ?? "";
+
+  const selectedMenu = selectedSiteId
+    ? organizedMenu.filter((site) => site.siteId === selectedSiteId)
+    : organizedMenu;
+
+  const selectedSiteQuery = selectedSiteId ? `?site=${encodeURIComponent(selectedSiteId)}` : "";
 
   return (
     <div className="space-y-6">
@@ -265,10 +280,10 @@ export default async function MenuPage({
         subtitle="Catálogo digital de compra por satélite. Usa categorías comerciales propias y no las categorías operacionales ni los canjes de fidelización."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link href="/commercial-collections" className="ui-btn ui-btn--ghost">
+            <Link href={`/commercial-collections${selectedSiteQuery}`} className="ui-btn ui-btn--ghost">
               Colecciones comerciales
             </Link>
-            <Link href="/menu/new" className="ui-btn ui-btn--brand">
+            <Link href={`/menu/new${selectedSiteQuery}`} className="ui-btn ui-btn--brand">
               Crear item comercial
             </Link>
           </div>
@@ -293,11 +308,36 @@ export default async function MenuPage({
         </div>
       ) : null}
 
+      {organizedMenu.length > 0 ? (
+        <div className="ui-panel space-y-3">
+          <div>
+            <div className="text-sm font-black text-[var(--ui-text)]">Sede comercial</div>
+            <p className="ui-caption">Solo aparecen sedes con catálogo comercial activo.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {organizedMenu.map((site) => {
+              const isSelected = site.siteId === selectedSiteId;
+
+              return (
+                <Link
+                  key={site.siteId}
+                  href={`/menu?site=${encodeURIComponent(site.siteId)}`}
+                  className={isSelected ? "ui-chip ui-chip--brand" : "ui-chip"}
+                  aria-current={isSelected ? "page" : undefined}
+                >
+                  {site.siteLabel}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
       <div className="ui-panel">
         {menuError ? (
           <div className="ui-empty">Corrige el error de consulta para ver los ítems comerciales.</div>
         ) : (
-          <CommercialMenuOrganizer initialMenu={organizedMenu} />
+          <CommercialMenuOrganizer initialMenu={selectedMenu} />
         )}
       </div>
     </div>
