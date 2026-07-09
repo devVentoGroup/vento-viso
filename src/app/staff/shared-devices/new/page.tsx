@@ -31,33 +31,28 @@ type AppOption = {
   description: string | null;
 };
 
-const DEVICE_APP_CODES = ["pulso", "nexo", "fogo", "origo", "numera"];
+type TemplatePolicy = {
+  policy_type?: string | null;
+  scope_strategy?: string | null;
+  role_code?: string | null;
+  employee_id?: string | null;
+  notes?: string | null;
+};
 
-const TEMPLATE_APPS: Record<string, { defaultAppCode: string; appCodes: string[] }> = {
-  pos_satellite: {
-    defaultAppCode: "pulso",
-    appCodes: ["pulso", "nexo"],
-  },
-  bar_satellite: {
-    defaultAppCode: "pulso",
-    appCodes: ["pulso", "nexo"],
-  },
-  warehouse_kiosk: {
-    defaultAppCode: "nexo",
-    appCodes: ["nexo"],
-  },
-  procurement_reception: {
-    defaultAppCode: "origo",
-    appCodes: ["origo", "nexo"],
-  },
-  production_center: {
-    defaultAppCode: "fogo",
-    appCodes: ["fogo", "nexo"],
-  },
-  management_terminal: {
-    defaultAppCode: "numera",
-    appCodes: ["numera", "viso"],
-  },
+type SharedDeviceTemplateOption = {
+  id: string;
+  code: string;
+  label: string;
+  description: string | null;
+  device_type: string;
+  default_app_code: string;
+  requires_actor_pin: boolean;
+  requires_active_actor_shift: boolean;
+  allow_actor_without_pin: boolean;
+  allow_actions_without_actor: boolean;
+  app_codes: string[] | null;
+  actor_policies: TemplatePolicy[] | null;
+  sort_order: number;
 };
 
 function normalizeDeviceCode(value: string) {
@@ -83,10 +78,6 @@ function boolValue(formData: FormData, key: string) {
   return formData.get(key) === "on";
 }
 
-function resolveTemplateApps(template: string) {
-  return TEMPLATE_APPS[template] ?? TEMPLATE_APPS.pos_satellite;
-}
-
 function uniqueAppCodes(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean)));
 }
@@ -105,33 +96,22 @@ export async function createSharedDeviceAction(
 
   const admin = createAdminClient();
 
+  const templateId = textValue(formData, "template_id");
   const label = textValue(formData, "label");
   const rawCode = textValue(formData, "code");
   const code = normalizeDeviceCode(rawCode || label);
   const description = textValue(formData, "description") || null;
-  const deviceType = textValue(formData, "device_type") || "shared_terminal";
   const siteId = textValue(formData, "site_id");
   const areaId = textValue(formData, "area_id") || null;
-  const template = textValue(formData, "template") || "pos_satellite";
-  const templateConfig = resolveTemplateApps(template);
   const loginEmail =
     textValue(formData, "login_email") ||
     `${code.toLowerCase()}@devices.ventogroup.co`;
 
-  const requestedAppCodes = uniqueAppCodes(
-    formData.getAll("app_codes").map((value) => String(value)),
-  );
-
-  const requestedDefaultAppCode = textValue(formData, "default_app_code").toLowerCase();
-
-  const defaultAppCode = requestedDefaultAppCode || templateConfig.defaultAppCode;
-
-  const appCodes = uniqueAppCodes(
-    requestedAppCodes.length > 0 ? requestedAppCodes : templateConfig.appCodes,
-  );
-
-  if (!appCodes.includes(defaultAppCode)) {
-    appCodes.unshift(defaultAppCode);
+  if (!templateId) {
+    return {
+      status: "error",
+      message: "Selecciona una plantilla de dispositivo.",
+    };
   }
 
   if (!label) {
@@ -162,10 +142,65 @@ export async function createSharedDeviceAction(
     };
   }
 
+  const { data: template, error: templateError } = await admin
+    .from("shared_operational_device_templates")
+    .select(
+      "id,code,label,device_type,default_app_code,requires_actor_pin,requires_active_actor_shift,allow_actor_without_pin,allow_actions_without_actor,is_active",
+    )
+    .eq("id", templateId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (templateError || !template) {
+    return {
+      status: "error",
+      message: templateError?.message || "La plantilla seleccionada no existe o está inactiva.",
+    };
+  }
+
+  const { data: templateApps, error: templateAppsError } = await admin
+    .from("shared_operational_device_template_apps")
+    .select("app_code,is_default,is_active,sort_order")
+    .eq("template_id", template.id)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+
+  if (templateAppsError) {
+    return {
+      status: "error",
+      message: templateAppsError.message || "No se pudieron leer las apps de la plantilla.",
+    };
+  }
+
+  const templateAppCodes = uniqueAppCodes(
+    (templateApps ?? []).map((item) => String(item.app_code ?? "")),
+  );
+
+  const selectedAppCodes = uniqueAppCodes(
+    formData.getAll("app_codes").map((value) => String(value)),
+  );
+
+  const appCodes = selectedAppCodes.length > 0 ? selectedAppCodes : templateAppCodes;
+
+  const requestedDefaultAppCode = textValue(formData, "default_app_code").toLowerCase();
+  const defaultAppCode =
+    requestedDefaultAppCode ||
+    String(
+      (templateApps ?? []).find((item) => item.is_default)?.app_code ||
+        template.default_app_code,
+    ).toLowerCase();
+
   if (appCodes.length === 0) {
     return {
       status: "error",
-      message: "Selecciona al menos una app permitida.",
+      message: "La plantilla debe tener al menos una app permitida.",
+    };
+  }
+
+  if (!appCodes.includes(defaultAppCode)) {
+    return {
+      status: "error",
+      message: "La app principal debe estar incluida en las apps permitidas.",
     };
   }
 
@@ -192,11 +227,13 @@ export async function createSharedDeviceAction(
       account_type: "shared_operational_device",
       device_code: code,
       device_label: label,
+      template_code: template.code,
       default_app_code: defaultAppCode,
     },
     app_metadata: {
       account_type: "shared_operational_device",
       device_code: code,
+      template_code: template.code,
     },
   });
 
@@ -215,11 +252,12 @@ export async function createSharedDeviceAction(
       code,
       label,
       description,
-      device_type: deviceType,
+      device_type: template.device_type,
       auth_user_id: authUserId,
       site_id: siteId,
       area_id: areaId,
       default_app_code: defaultAppCode,
+      template_id: template.id,
       requires_actor_pin: boolValue(formData, "requires_actor_pin"),
       requires_active_actor_shift: boolValue(formData, "requires_active_actor_shift"),
       allow_actor_without_pin: boolValue(formData, "allow_actor_without_pin"),
@@ -230,7 +268,8 @@ export async function createSharedDeviceAction(
       updated_by: user.id,
       metadata: {
         login_email: loginEmail,
-        template,
+        template_id: template.id,
+        template_code: template.code,
         created_from: "viso_staff_shared_devices",
       },
     })
@@ -265,6 +304,25 @@ export async function createSharedDeviceAction(
     };
   }
 
+  const { error: policiesError } = await admin.rpc(
+    "apply_shared_device_template_actor_policies_v1",
+    {
+      p_device_id: device.id,
+      p_template_id: template.id,
+    },
+  );
+
+  if (policiesError) {
+    await admin.from("shared_operational_devices").delete().eq("id", device.id);
+    await admin.auth.admin.deleteUser(authUserId);
+    return {
+      status: "error",
+      message:
+        policiesError.message ||
+        "No se pudieron copiar las políticas de actor de la plantilla.",
+    };
+  }
+
   await admin.from("shared_operational_device_events").insert({
     device_id: device.id,
     session_user_id: authUserId,
@@ -278,6 +336,8 @@ export async function createSharedDeviceAction(
       code,
       label,
       login_email: loginEmail,
+      template_id: template.id,
+      template_code: template.code,
       app_codes: appCodes,
       default_app_code: defaultAppCode,
     },
@@ -294,6 +354,8 @@ export async function createSharedDeviceAction(
       temporaryPassword,
       defaultAppCode,
       appCodes,
+      templateCode: template.code,
+      templateLabel: template.label,
     },
   };
 }
@@ -305,30 +367,37 @@ export default async function SharedDeviceCreatePage() {
     permissionCode: "staff.manage",
   });
 
-  const [{ data: sites }, { data: areas }, { data: apps }] = await Promise.all([
-    supabase
-      .from("sites")
-      .select("id,name,code")
-      .eq("is_active", true)
-      .order("name", { ascending: true }),
-    supabase
-      .from("areas")
-      .select("id,site_id,name,code,kind")
-      .eq("is_active", true)
-      .order("name", { ascending: true }),
-    supabase
-      .from("apps")
-      .select("code,name,description")
-      .eq("is_active", true)
-      .in("code", DEVICE_APP_CODES)
-      .order("name", { ascending: true }),
-  ]);
+  const [{ data: sites }, { data: areas }, { data: apps }, { data: templates }] =
+    await Promise.all([
+      supabase
+        .from("sites")
+        .select("id,name,code")
+        .eq("is_active", true)
+        .order("name", { ascending: true }),
+      supabase
+        .from("areas")
+        .select("id,site_id,name,code,kind")
+        .eq("is_active", true)
+        .order("name", { ascending: true }),
+      supabase
+        .from("apps")
+        .select("code,name,description")
+        .eq("is_active", true)
+        .order("name", { ascending: true }),
+      supabase
+        .from("shared_operational_device_templates_admin_v1")
+        .select(
+          "id,code,label,description,device_type,default_app_code,requires_actor_pin,requires_active_actor_shift,allow_actor_without_pin,allow_actions_without_actor,app_codes,actor_policies,sort_order,is_active",
+        )
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true }),
+    ]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Crear dispositivo compartido"
-        subtitle="Crea un usuario técnico y asócialo a una sede, área y apps permitidas."
+        subtitle="Crea un usuario técnico y aplica una plantilla configurable de apps y políticas."
         actions={
           <Link href="/staff?tab=devices" className="ui-btn ui-btn--ghost">
             Volver
@@ -342,6 +411,7 @@ export default async function SharedDeviceCreatePage() {
           sites={(sites ?? []) as SiteOption[]}
           areas={(areas ?? []) as AreaOption[]}
           apps={(apps ?? []) as AppOption[]}
+          templates={(templates ?? []) as SharedDeviceTemplateOption[]}
         />
       </div>
     </div>

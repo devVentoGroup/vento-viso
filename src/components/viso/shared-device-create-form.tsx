@@ -22,6 +22,30 @@ type AppOption = {
   description: string | null;
 };
 
+type TemplatePolicy = {
+  policy_type?: string | null;
+  scope_strategy?: string | null;
+  role_code?: string | null;
+  employee_id?: string | null;
+  notes?: string | null;
+};
+
+type SharedDeviceTemplateOption = {
+  id: string;
+  code: string;
+  label: string;
+  description: string | null;
+  device_type: string;
+  default_app_code: string;
+  requires_actor_pin: boolean;
+  requires_active_actor_shift: boolean;
+  allow_actor_without_pin: boolean;
+  allow_actions_without_actor: boolean;
+  app_codes: string[] | null;
+  actor_policies: TemplatePolicy[] | null;
+  sort_order: number;
+};
+
 export type SharedDeviceCreateState = {
   status: "idle" | "success" | "error";
   message?: string;
@@ -33,6 +57,8 @@ export type SharedDeviceCreateState = {
     temporaryPassword: string;
     defaultAppCode: string;
     appCodes: string[];
+    templateCode: string;
+    templateLabel: string;
   };
 };
 
@@ -44,68 +70,11 @@ type SharedDeviceCreateFormProps = {
   sites: SiteOption[];
   areas: AreaOption[];
   apps: AppOption[];
+  templates: SharedDeviceTemplateOption[];
 };
 
 const INITIAL_STATE: SharedDeviceCreateState = {
   status: "idle",
-};
-
-const DEVICE_TYPES = [
-  { value: "pos_terminal", label: "Caja / POS" },
-  { value: "kiosk", label: "Kiosco" },
-  { value: "tablet", label: "Tablet" },
-  { value: "reception_terminal", label: "Recepción" },
-  { value: "production_terminal", label: "Producción" },
-  { value: "warehouse_terminal", label: "Bodega" },
-  { value: "shared_terminal", label: "Terminal compartido" },
-];
-
-const TEMPLATES: Record<
-  string,
-  { label: string; description: string; deviceType: string; defaultAppCode: string; appCodes: string[] }
-> = {
-  pos_satellite: {
-    label: "Caja satélite",
-    description: "PULSO para venta y NEXO para inventario operativo.",
-    deviceType: "pos_terminal",
-    defaultAppCode: "pulso",
-    appCodes: ["pulso", "nexo"],
-  },
-  bar_satellite: {
-    label: "Barra satélite",
-    description: "PULSO para operación rápida y NEXO para movimientos.",
-    deviceType: "tablet",
-    defaultAppCode: "pulso",
-    appCodes: ["pulso", "nexo"],
-  },
-  warehouse_kiosk: {
-    label: "Kiosco bodega",
-    description: "NEXO para retiros, conteos y movimientos.",
-    deviceType: "warehouse_terminal",
-    defaultAppCode: "nexo",
-    appCodes: ["nexo"],
-  },
-  procurement_reception: {
-    label: "Recepción compras",
-    description: "ORIGO para recepciones y NEXO para inventario.",
-    deviceType: "reception_terminal",
-    defaultAppCode: "origo",
-    appCodes: ["origo", "nexo"],
-  },
-  production_center: {
-    label: "Producción centro",
-    description: "FOGO para producción y NEXO para inventario.",
-    deviceType: "production_terminal",
-    defaultAppCode: "fogo",
-    appCodes: ["fogo", "nexo"],
-  },
-  management_terminal: {
-    label: "Gerencia",
-    description: "NUMERA para rentabilidad y VISO para administración.",
-    deviceType: "shared_terminal",
-    defaultAppCode: "numera",
-    appCodes: ["numera", "viso"],
-  },
 };
 
 function slugCode(value: string) {
@@ -123,20 +92,65 @@ function optionLabel(name: string | null, code?: string | null) {
   return name ?? code ?? "Sin nombre";
 }
 
+function appName(apps: AppOption[], code: string) {
+  return apps.find((app) => app.code === code)?.name ?? code.toUpperCase();
+}
+
+function policyLabel(policy: TemplatePolicy) {
+  const type = policy.policy_type ?? "";
+  const role = policy.role_code ? ` · rol ${policy.role_code}` : "";
+
+  switch (type) {
+    case "same_site_active_worker":
+      return `Cualquier trabajador con jornada activa en la sede del dispositivo${role}`;
+    case "same_area_active_worker":
+      return `Cualquier trabajador con jornada activa en el área del dispositivo${role}`;
+    case "role_in_site":
+      return `Rol específico con jornada activa en la sede del dispositivo${role}`;
+    case "role_in_area":
+      return `Rol específico con jornada activa en el área del dispositivo${role}`;
+    case "specific_employee":
+      return "Trabajador específico";
+    case "any_active_worker":
+      return "Cualquier trabajador activo con jornada abierta";
+    default:
+      return type || "Política sin nombre";
+  }
+}
+
+function normalizeCodes(values: string[] | null | undefined) {
+  return Array.from(
+    new Set(
+      (values ?? [])
+        .map((value) => String(value ?? "").trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
 export function SharedDeviceCreateForm({
   action,
   sites,
   areas,
   apps,
+  templates,
 }: SharedDeviceCreateFormProps) {
   const [state, formAction, pending] = useActionState(action, INITIAL_STATE);
-  const [template, setTemplate] = useState("pos_satellite");
+
+  const firstTemplate = templates[0] ?? null;
+  const [templateId, setTemplateId] = useState(firstTemplate?.id ?? "");
+  const selectedTemplate =
+    templates.find((template) => template.id === templateId) ?? firstTemplate;
+
   const [siteId, setSiteId] = useState("");
   const [label, setLabel] = useState("");
   const [code, setCode] = useState("");
-  const [deviceType, setDeviceType] = useState(TEMPLATES.pos_satellite.deviceType);
-  const [defaultAppCode, setDefaultAppCode] = useState(TEMPLATES.pos_satellite.defaultAppCode);
-  const [selectedAppCodes, setSelectedAppCodes] = useState<string[]>(TEMPLATES.pos_satellite.appCodes);
+
+  const initialAppCodes = normalizeCodes(selectedTemplate?.app_codes);
+  const [selectedAppCodes, setSelectedAppCodes] = useState<string[]>(initialAppCodes);
+  const [defaultAppCode, setDefaultAppCode] = useState(
+    selectedTemplate?.default_app_code ?? initialAppCodes[0] ?? "",
+  );
 
   const visibleAreas = useMemo(
     () => areas.filter((area) => !siteId || area.site_id === siteId),
@@ -146,26 +160,30 @@ export function SharedDeviceCreateForm({
   const appOptions = useMemo(() => {
     const byCode = new Map(apps.map((app) => [app.code, app]));
 
-    for (const appCode of ["pulso", "nexo", "fogo", "origo", "numera", "viso"]) {
-      if (!byCode.has(appCode)) {
-        byCode.set(appCode, {
-          code: appCode,
-          name: appCode.toUpperCase(),
-          description: null,
-        });
+    for (const template of templates) {
+      for (const appCode of normalizeCodes(template.app_codes)) {
+        if (!byCode.has(appCode)) {
+          byCode.set(appCode, {
+            code: appCode,
+            name: appCode.toUpperCase(),
+            description: null,
+          });
+        }
       }
     }
 
     return Array.from(byCode.values()).sort((a, b) => a.name.localeCompare(b.name, "es"));
-  }, [apps]);
+  }, [apps, templates]);
 
-  const applyTemplate = (value: string) => {
-    const next = TEMPLATES[value] ?? TEMPLATES.pos_satellite;
+  const applyTemplate = (nextTemplateId: string) => {
+    const nextTemplate =
+      templates.find((template) => template.id === nextTemplateId) ?? templates[0];
 
-    setTemplate(value);
-    setDeviceType(next.deviceType);
-    setDefaultAppCode(next.defaultAppCode);
-    setSelectedAppCodes(next.appCodes);
+    setTemplateId(nextTemplate?.id ?? "");
+
+    const nextAppCodes = normalizeCodes(nextTemplate?.app_codes);
+    setSelectedAppCodes(nextAppCodes);
+    setDefaultAppCode(nextTemplate?.default_app_code ?? nextAppCodes[0] ?? "");
   };
 
   const updateLabel = (value: string) => {
@@ -190,42 +208,62 @@ export function SharedDeviceCreateForm({
     });
   };
 
+  if (templates.length === 0) {
+    return (
+      <div className="ui-empty py-10 text-center text-[var(--ui-muted)]">
+        No hay plantillas activas para crear dispositivos compartidos.
+      </div>
+    );
+  }
+
+  const selectedPolicies = selectedTemplate?.actor_policies ?? [];
+
   return (
     <form action={formAction} className="space-y-6">
-      <input type="hidden" name="template" value={template} />
+      <input type="hidden" name="template_id" value={templateId} />
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <label className="space-y-2 lg:col-span-2">
-          <span className="ui-label">Plantilla operativa</span>
-          <select
-            className="ui-input"
-            value={template}
-            onChange={(event) => applyTemplate(event.target.value)}
-          >
-            {Object.entries(TEMPLATES).map(([value, item]) => (
-              <option key={value} value={value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          <span className="ui-caption block">{TEMPLATES[template]?.description}</span>
-        </label>
-
+      <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4">
         <label className="space-y-2">
-          <span className="ui-label">Tipo de dispositivo</span>
+          <span className="ui-label">Plantilla configurable</span>
           <select
-            name="device_type"
             className="ui-input"
-            value={deviceType}
-            onChange={(event) => setDeviceType(event.target.value)}
+            value={templateId}
+            onChange={(event) => applyTemplate(event.target.value)}
+            required
           >
-            {DEVICE_TYPES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.label}
               </option>
             ))}
           </select>
         </label>
+
+        {selectedTemplate ? (
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            <div className="rounded-xl border border-[var(--ui-border)] bg-white/70 p-3">
+              <div className="ui-caption">Tipo</div>
+              <div className="text-sm font-semibold">{selectedTemplate.device_type}</div>
+            </div>
+
+            <div className="rounded-xl border border-[var(--ui-border)] bg-white/70 p-3">
+              <div className="ui-caption">App principal</div>
+              <div className="text-sm font-semibold">{selectedTemplate.default_app_code.toUpperCase()}</div>
+            </div>
+
+            <div className="rounded-xl border border-[var(--ui-border)] bg-white/70 p-3">
+              <div className="ui-caption">Código plantilla</div>
+              <div className="text-sm font-semibold">{selectedTemplate.code}</div>
+            </div>
+
+            <div className="lg:col-span-3">
+              <div className="ui-caption">Descripción</div>
+              <p className="mt-1 text-sm text-[var(--ui-muted)]">
+                {selectedTemplate.description ?? "Sin descripción."}
+              </p>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -236,7 +274,7 @@ export function SharedDeviceCreateForm({
             className="ui-input"
             value={label}
             onChange={(event) => updateLabel(event.target.value)}
-            placeholder="PC Caja Vento Café 01"
+            placeholder="Caja Vento Café 01"
             required
           />
         </label>
@@ -248,7 +286,7 @@ export function SharedDeviceCreateForm({
             className="ui-input"
             value={code}
             onChange={(event) => setCode(slugCode(event.target.value))}
-            placeholder="PC_CAJA_VENTO_CAFE_01"
+            placeholder="CAJA_VENTO_CAFE_01"
           />
           <span className="ui-caption block">
             Se usa para auditoría, email técnico y configuración del equipo.
@@ -261,7 +299,7 @@ export function SharedDeviceCreateForm({
             name="login_email"
             className="ui-input"
             type="email"
-            placeholder={`${(code || "pc_caja_01").toLowerCase()}@devices.ventogroup.co`}
+            placeholder={`${(code || "caja_vento_cafe_01").toLowerCase()}@devices.ventogroup.co`}
           />
           <span className="ui-caption block">
             Si lo dejas vacío, se genera con el código interno.
@@ -303,7 +341,7 @@ export function SharedDeviceCreateForm({
           <textarea
             name="description"
             className="ui-input min-h-24"
-            placeholder="Equipo fijo de caja para Vento Café. Cada venta debe identificar al trabajador actor."
+            placeholder="Equipo fijo de caja. Cada venta debe identificar al trabajador actor."
           />
         </label>
       </div>
@@ -313,7 +351,7 @@ export function SharedDeviceCreateForm({
           <div>
             <h2 className="text-sm font-semibold text-[var(--ui-text)]">Apps permitidas</h2>
             <p className="mt-1 text-sm text-[var(--ui-muted)]">
-              El dispositivo solo podrá abrir estas apps. La app principal será la primera pantalla recomendada.
+              Se cargan desde la plantilla, pero puedes modificarlas para este dispositivo puntual.
             </p>
           </div>
 
@@ -328,7 +366,7 @@ export function SharedDeviceCreateForm({
             >
               {selectedAppCodes.map((appCode) => (
                 <option key={appCode} value={appCode}>
-                  {appCode.toUpperCase()}
+                  {appName(appOptions, appCode)}
                 </option>
               ))}
             </select>
@@ -370,10 +408,18 @@ export function SharedDeviceCreateForm({
 
       <div className="rounded-2xl border border-[var(--ui-border)] bg-white/80 p-4">
         <h2 className="text-sm font-semibold text-[var(--ui-text)]">Política de operación</h2>
+        <p className="mt-1 text-sm text-[var(--ui-muted)]">
+          Se copia desde la plantilla al crear el dispositivo. Luego se podrá editar en el dispositivo sin modificar la plantilla.
+        </p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="flex gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 text-sm">
-            <input type="checkbox" name="requires_actor_pin" defaultChecked className="mt-1" />
+            <input
+              type="checkbox"
+              name="requires_actor_pin"
+              defaultChecked={selectedTemplate?.requires_actor_pin ?? true}
+              className="mt-1"
+            />
             <span>
               <span className="block font-semibold">Requiere PIN del trabajador</span>
               <span className="ui-caption">Cada acción sensible debe firmarla una persona real.</span>
@@ -381,7 +427,12 @@ export function SharedDeviceCreateForm({
           </label>
 
           <label className="flex gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 text-sm">
-            <input type="checkbox" name="requires_active_actor_shift" defaultChecked className="mt-1" />
+            <input
+              type="checkbox"
+              name="requires_active_actor_shift"
+              defaultChecked={selectedTemplate?.requires_active_actor_shift ?? true}
+              className="mt-1"
+            />
             <span>
               <span className="block font-semibold">Requiere jornada activa</span>
               <span className="ui-caption">El actor debe tener jornada abierta en ANIMA.</span>
@@ -389,7 +440,12 @@ export function SharedDeviceCreateForm({
           </label>
 
           <label className="flex gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 text-sm">
-            <input type="checkbox" name="allow_actor_without_pin" className="mt-1" />
+            <input
+              type="checkbox"
+              name="allow_actor_without_pin"
+              defaultChecked={selectedTemplate?.allow_actor_without_pin ?? false}
+              className="mt-1"
+            />
             <span>
               <span className="block font-semibold">Permitir actor sin PIN</span>
               <span className="ui-caption">Útil solo para pruebas controladas.</span>
@@ -397,12 +453,35 @@ export function SharedDeviceCreateForm({
           </label>
 
           <label className="flex gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 text-sm">
-            <input type="checkbox" name="allow_actions_without_actor" className="mt-1" />
+            <input
+              type="checkbox"
+              name="allow_actions_without_actor"
+              defaultChecked={selectedTemplate?.allow_actions_without_actor ?? false}
+              className="mt-1"
+            />
             <span>
               <span className="block font-semibold">Permitir acciones sin actor</span>
               <span className="ui-caption">No recomendado. Solo para pantallas informativas.</span>
             </span>
           </label>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
+          <div className="ui-label">Políticas que se copiarán desde la plantilla</div>
+          {selectedPolicies.length > 0 ? (
+            <div className="mt-2 space-y-2">
+              {selectedPolicies.map((policy, index) => (
+                <div key={`${policy.policy_type}-${policy.role_code}-${index}`} className="rounded-lg bg-white/70 px-3 py-2 text-sm">
+                  <div className="font-semibold">{policyLabel(policy)}</div>
+                  {policy.notes ? <div className="ui-caption">{policy.notes}</div> : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-2 text-sm text-[var(--ui-muted)]">
+              Esta plantilla no tiene políticas de actor configuradas.
+            </div>
+          )}
         </div>
       </div>
 
@@ -422,6 +501,12 @@ export function SharedDeviceCreateForm({
             </div>
 
             <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Plantilla</div>
+              <div>{state.device.templateLabel}</div>
+              <div className="ui-caption">{state.device.templateCode}</div>
+            </div>
+
+            <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Apps</div>
               <div>{state.device.appCodes.map((app) => app.toUpperCase()).join(", ")}</div>
               <div className="ui-caption">Principal: {state.device.defaultAppCode.toUpperCase()}</div>
@@ -432,7 +517,7 @@ export function SharedDeviceCreateForm({
               <code className="break-all rounded bg-white/70 px-2 py-1">{state.device.loginEmail}</code>
             </div>
 
-            <div>
+            <div className="sm:col-span-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Contraseña temporal</div>
               <code className="break-all rounded bg-white/70 px-2 py-1">{state.device.temporaryPassword}</code>
             </div>
@@ -448,7 +533,7 @@ export function SharedDeviceCreateForm({
         <button
           type="submit"
           className="ui-btn ui-btn--brand"
-          disabled={pending || !label.trim() || !siteId || selectedAppCodes.length === 0}
+          disabled={pending || !label.trim() || !siteId || selectedAppCodes.length === 0 || !defaultAppCode}
         >
           {pending ? "Creando..." : "Crear dispositivo compartido"}
         </button>
