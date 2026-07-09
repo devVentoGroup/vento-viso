@@ -34,6 +34,23 @@ type ActiveWorkContext = {
   operationalRole: string;
 };
 
+type OperatingGateMode =
+  | "anonymous"
+  | "anima"
+  | "privileged_bypass"
+  | "personal_active_work"
+  | "personal_no_work"
+  | "shared_device";
+
+type OperatingGate = {
+  mode: OperatingGateMode;
+  isBlocked: boolean;
+  title: string;
+  description: string;
+  actionHref: string;
+  actionLabel: string;
+};
+
 type AppStatus = "active" | "soon";
 type AppAccess = "enabled" | "disabled" | "soon";
 
@@ -102,6 +119,13 @@ const APP_ENTITY =
 
 const APP_CODE = APP_ENTITY === "default" ? "viso" : APP_ENTITY;
 
+const PRIVILEGED_WORK_CONTEXT_BYPASS_ROLES = new Set([
+  "propietario",
+  "gerente_general",
+]);
+
+const ANIMA_URL = "https://anima.ventogroup.co";
+
 const ICON_NAMES = new Set<IconName>([
   "dashboard",
   "accounting",
@@ -124,6 +148,16 @@ const APP_SWITCHER_ITEMS: Omit<AppSwitcherItem, "access">[] = [
     logoSrc: "/apps/hub.svg",
     brandColor: "#111827",
     href: "https://os.ventogroup.co",
+    status: "active",
+    group: "Workspace",
+  },
+  {
+    id: "anima",
+    name: "ANIMA",
+    description: "Jornadas y asistencia.",
+    logoSrc: "/apps/anima.svg",
+    brandColor: "#14B8A6",
+    href: "https://anima.ventogroup.co",
     status: "active",
     group: "Workspace",
   },
@@ -327,6 +361,82 @@ function buildNavGroups(rows: NavigationRow[]): NavGroup[] {
     .filter((group) => group.items.length > 0);
 }
 
+function resolveOperatingGate({
+  appCode,
+  role,
+  activeWorkContext,
+  isSharedDevice,
+}: {
+  appCode: string;
+  role: string | null;
+  activeWorkContext: ActiveWorkContext | null;
+  isSharedDevice: boolean;
+}): OperatingGate {
+  if (!role) {
+    return {
+      mode: "anonymous",
+      isBlocked: false,
+      title: "",
+      description: "",
+      actionHref: ANIMA_URL,
+      actionLabel: "Ir a ANIMA",
+    };
+  }
+
+  if (appCode === "anima") {
+    return {
+      mode: "anima",
+      isBlocked: false,
+      title: "ANIMA disponible",
+      description: "Desde aquí puedes iniciar o cerrar tu jornada.",
+      actionHref: ANIMA_URL,
+      actionLabel: "Abrir ANIMA",
+    };
+  }
+
+  if (isSharedDevice) {
+    return {
+      mode: "shared_device",
+      isBlocked: false,
+      title: "Dispositivo operativo autorizado",
+      description: "Este equipo puede abrir apps permitidas. Cada acción deberá identificar al trabajador con jornada activa.",
+      actionHref: ANIMA_URL,
+      actionLabel: "Ir a ANIMA",
+    };
+  }
+
+  if (PRIVILEGED_WORK_CONTEXT_BYPASS_ROLES.has(role)) {
+    return {
+      mode: "privileged_bypass",
+      isBlocked: false,
+      title: "Acceso administrativo",
+      description: "Este rol puede entrar sin jornada activa para administrar o corregir la operación.",
+      actionHref: ANIMA_URL,
+      actionLabel: "Ir a ANIMA",
+    };
+  }
+
+  if (activeWorkContext) {
+    return {
+      mode: "personal_active_work",
+      isBlocked: false,
+      title: "Jornada activa",
+      description: "Contexto operativo aplicado desde ANIMA.",
+      actionHref: ANIMA_URL,
+      actionLabel: "Abrir ANIMA",
+    };
+  }
+
+  return {
+    mode: "personal_no_work",
+    isBlocked: true,
+    title: "No tienes jornada activa",
+    description: "Para usar Vento OS debes iniciar tu jornada en ANIMA. Si trabajas sin horario fijo, inicia una jornada flexible.",
+    actionHref: ANIMA_URL,
+    actionLabel: "Ir a ANIMA",
+  };
+}
+
 async function resolveActiveWorkContext({
   supabase,
   userId,
@@ -493,6 +603,7 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
   let effectiveRole: string | null = null;
   let activeContextLabel: string | null = null;
   let activeContextDescription: string | null = null;
+  let operatingGate: OperatingGate | null = null;
   let appSwitcherItems: AppSwitcherItem[] = [];
   let navGroups: NavGroup[] = [];
 
@@ -541,9 +652,27 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
     activeAreaId = asId(activeWorkContext?.areaId);
     effectiveRole = asId(activeWorkContext?.operationalRole) || role;
 
+    const isSharedDevice = false;
+
+    operatingGate = resolveOperatingGate({
+      appCode: APP_CODE,
+      role,
+      activeWorkContext,
+      isSharedDevice,
+    });
+
     if (activeWorkContext) {
-      activeContextLabel = "Turno activo";
+      activeContextLabel = "Jornada activa";
       activeContextDescription = "Contexto operativo aplicado desde ANIMA";
+    } else if (operatingGate.mode === "shared_device") {
+      activeContextLabel = "Dispositivo compartido";
+      activeContextDescription = operatingGate.description;
+    } else if (operatingGate.mode === "privileged_bypass") {
+      activeContextLabel = "Acceso administrativo";
+      activeContextDescription = operatingGate.description;
+    } else if (operatingGate.isBlocked) {
+      activeContextLabel = "Sin jornada activa";
+      activeContextDescription = operatingGate.description;
     }
 
     if (assignedSiteIds.length) {
@@ -580,16 +709,25 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
           activeAreaId,
           actualRole: effectiveRole,
         }),
-        resolveNavigationItems({
-          supabase,
-          appCode: APP_CODE,
-          activeSiteId,
-          activeAreaId,
-          actualRole: effectiveRole,
-        }),
+        operatingGate?.isBlocked
+          ? Promise.resolve([])
+          : resolveNavigationItems({
+              supabase,
+              appCode: APP_CODE,
+              activeSiteId,
+              activeAreaId,
+              actualRole: effectiveRole,
+            }),
       ]);
 
-      appSwitcherItems = resolvedApps;
+      appSwitcherItems = operatingGate?.isBlocked
+        ? resolvedApps.map((app) =>
+            app.id === "hub" || app.id === "anima"
+              ? { ...app, access: app.status === "soon" ? "soon" : "enabled" }
+              : { ...app, access: app.status === "soon" ? "soon" : "disabled" }
+          )
+        : resolvedApps;
+
       navGroups = resolvedNavGroups;
     }
   }
@@ -603,6 +741,7 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
       activeSiteId={activeSiteId}
       activeContextLabel={activeContextLabel}
       activeContextDescription={activeContextDescription}
+      operatingGate={operatingGate}
       appSwitcherItems={appSwitcherItems}
       navGroups={navGroups}
     >

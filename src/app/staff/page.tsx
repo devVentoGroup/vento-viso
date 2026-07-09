@@ -40,6 +40,28 @@ type AttendanceStatusRow = {
   last_site_id: string | null;
 };
 
+type SharedDeviceRow = {
+  id: string;
+  code: string;
+  label: string;
+  description: string | null;
+  device_type: string;
+  site_name: string | null;
+  site_code: string | null;
+  area_name: string | null;
+  area_code: string | null;
+  default_app_code: string;
+  allowed_app_codes: string[] | null;
+  activation_status: string;
+  is_active: boolean;
+  last_seen_at: string | null;
+  requires_actor_pin: boolean;
+  requires_active_actor_shift: boolean;
+  allow_actions_without_actor: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
   try {
@@ -59,10 +81,38 @@ function attendanceLabel(status: AttendanceStatusRow | undefined) {
   return { label: "Fuera de turno", tone: "" };
 }
 
+function deviceStatusLabel(device: SharedDeviceRow) {
+  if (!device.is_active) return { label: "Inactivo", tone: "" };
+  if (device.activation_status === "active") return { label: "Activo", tone: "ui-chip--success" };
+  if (device.activation_status === "pending_activation") return { label: "Pendiente", tone: "ui-chip--warning" };
+  if (device.activation_status === "suspended") return { label: "Suspendido", tone: "ui-chip--warning" };
+  if (device.activation_status === "revoked") return { label: "Revocado", tone: "" };
+  return { label: "Borrador", tone: "" };
+}
+
+function deviceTypeLabel(value: string | null | undefined) {
+  switch (value) {
+    case "pos_terminal":
+      return "Caja / POS";
+    case "kiosk":
+      return "Kiosco";
+    case "tablet":
+      return "Tablet";
+    case "reception_terminal":
+      return "Recepción";
+    case "production_terminal":
+      return "Producción";
+    case "warehouse_terminal":
+      return "Bodega";
+    default:
+      return "Dispositivo compartido";
+  }
+}
+
 export default async function StaffPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ site?: string; status?: string; role?: string }>;
+  searchParams?: Promise<{ site?: string; status?: string; role?: string; tab?: string }>;
 }) {
   await requireAppAccess({
     appId: "viso",
@@ -72,16 +122,25 @@ export default async function StaffPage({
 
   const supabase = createAdminClient();
   const resolvedSearchParams = (await searchParams) ?? {};
+  const tabFilter = resolvedSearchParams.tab === "devices" ? "devices" : "employees";
   const siteFilter = typeof resolvedSearchParams.site === "string" ? resolvedSearchParams.site : "all";
   const statusFilter = typeof resolvedSearchParams.status === "string" ? resolvedSearchParams.status : "active";
   const roleFilter = typeof resolvedSearchParams.role === "string" ? resolvedSearchParams.role : "all";
 
-  const [{ data, error: employeesError }, { data: sitesData }] = await Promise.all([
+  const [
+    { data, error: employeesError },
+    { data: sitesData },
+    { data: sharedDevicesData, error: sharedDevicesError },
+  ] = await Promise.all([
     supabase
       .from("employees")
       .select("id,full_name,alias,document_type,document_number,role,is_active,site_id,site:sites!employees_site_id_fkey(id,name,code)")
       .order("full_name", { ascending: true }),
     supabase.from("sites").select("id,name,code").order("name", { ascending: true }),
+    supabase
+      .from("shared_operational_devices_admin_v1")
+      .select("id,code,label,description,device_type,site_name,site_code,area_name,area_code,default_app_code,allowed_app_codes,activation_status,is_active,last_seen_at,requires_actor_pin,requires_active_actor_shift,allow_actions_without_actor,created_at,updated_at")
+      .order("label", { ascending: true }),
   ]);
 
   if (employeesError) {
@@ -103,7 +162,12 @@ export default async function StaffPage({
     );
   }
 
+  if (sharedDevicesError) {
+    console.error("Shared devices query error:", sharedDevicesError);
+  }
+
   const employees = (data ?? []) as EmployeeRow[];
+  const sharedDevices = (sharedDevicesData ?? []) as SharedDeviceRow[];
   const sites = ((sitesData ?? []) as SiteLite[]).sort((a, b) => (a.name ?? a.code ?? "").localeCompare(b.name ?? b.code ?? "", "es"));
   const roleOptions = Array.from(new Set(employees.map((employee) => employee.role).filter((role): role is string => Boolean(role)))).sort((a, b) => a.localeCompare(b, "es"));
   const employeeIds = employees.map((employee) => employee.id);
@@ -168,18 +232,30 @@ export default async function StaffPage({
     return matchesSite && matchesStatus && matchesRole;
   });
 
+  const activeDeviceCount = sharedDevices.filter((device) => device.is_active).length;
+  const filteredSharedDevices = sharedDevices.filter((device) => {
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilter === "active" ? device.is_active === true : device.is_active !== true);
+
+    return matchesStatus;
+  });
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Trabajadores"
-        subtitle="Gestiona empleados, sedes asignadas, estado y asistencia reciente."
+        subtitle="Gestiona trabajadores, sedes, asistencia y dispositivos compartidos de operación."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Link href="/staff/attendance" className="ui-btn ui-btn--ghost">
               Reportes
             </Link>
             <Link href="/staff/schedule" className="ui-btn ui-btn--ghost">
               Horario semanal
+            </Link>
+            <Link href="/staff/shared-devices/new" className="ui-btn ui-btn--ghost">
+              Crear dispositivo compartido
             </Link>
             <Link href="/staff/new" className="ui-btn ui-btn--brand">
               Invitar trabajador
@@ -188,7 +264,9 @@ export default async function StaffPage({
         }
       />
 
-      <form method="get" className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--ui-border)] bg-white/80 px-4 py-3">
+      {tabFilter === "employees" ? (
+        <form method="get" className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--ui-border)] bg-white/80 px-4 py-3">
+        <input type="hidden" name="tab" value="employees" />
         <input type="hidden" name="status" value={statusFilter} />
         <label className="min-w-[180px] flex-1 text-sm text-[var(--ui-muted)]">
           <span className="mb-1 block text-xs font-medium uppercase tracking-[0.16em] text-[var(--ui-muted)]/80">Sede</span>
@@ -220,31 +298,115 @@ export default async function StaffPage({
             Limpiar
           </Link>
         </div>
-      </form>
+        </form>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         {[
-          { value: "active", label: "Activos", count: activeEmployeeCount },
-          { value: "inactive", label: "Inactivos", count: inactiveEmployeeCount },
-          { value: "all", label: "Todos", count: employees.length },
-        ].map((option) => {
-          const active = statusFilter === option.value;
-          const href = `/staff?site=${encodeURIComponent(siteFilter)}&role=${encodeURIComponent(roleFilter)}&status=${option.value}`;
-          return (
-            <Link
-              key={option.value}
-              href={href}
-              className={`ui-chip px-4 py-2 text-sm ${active ? "ui-chip--brand" : ""}`}
-            >
-              {option.label}
-              <span className="ml-2 text-xs opacity-70">{option.count}</span>
-            </Link>
-          );
-        })}
+          { value: "employees:active", href: `/staff?tab=employees&site=${encodeURIComponent(siteFilter)}&role=${encodeURIComponent(roleFilter)}&status=active`, label: "Activos", count: activeEmployeeCount, active: tabFilter === "employees" && statusFilter === "active" },
+          { value: "employees:inactive", href: `/staff?tab=employees&site=${encodeURIComponent(siteFilter)}&role=${encodeURIComponent(roleFilter)}&status=inactive`, label: "Inactivos", count: inactiveEmployeeCount, active: tabFilter === "employees" && statusFilter === "inactive" },
+          { value: "employees:all", href: `/staff?tab=employees&site=${encodeURIComponent(siteFilter)}&role=${encodeURIComponent(roleFilter)}&status=all`, label: "Todos", count: employees.length, active: tabFilter === "employees" && statusFilter === "all" },
+          { value: "devices", href: "/staff?tab=devices&status=all", label: "Dispositivos compartidos", count: sharedDevices.length, active: tabFilter === "devices" },
+        ].map((option) => (
+          <Link
+            key={option.value}
+            href={option.href}
+            className={`ui-chip px-4 py-2 text-sm ${option.active ? "ui-chip--brand" : ""}`}
+          >
+            {option.label}
+            <span className="ml-2 text-xs opacity-70">{option.count}</span>
+          </Link>
+        ))}
       </div>
 
       <div className="ui-panel ui-panel--accent-brand">
-        {filteredEmployees.length === 0 ? (
+        {tabFilter === "devices" ? (
+          filteredSharedDevices.length === 0 ? (
+            <div className="ui-empty flex flex-col items-center gap-4 py-12">
+              <p className="text-[var(--ui-muted)]">
+                {sharedDevices.length === 0
+                  ? "Aún no hay dispositivos compartidos registrados."
+                  : "No hay dispositivos que coincidan con esos filtros."}
+              </p>
+              <Link href="/staff/shared-devices/new" className="ui-btn ui-btn--brand">
+                Crear dispositivo compartido
+              </Link>
+            </div>
+          ) : (
+            <Table className="ui-table--accent">
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Dispositivo</TableHeaderCell>
+                  <TableHeaderCell>Ubicación</TableHeaderCell>
+                  <TableHeaderCell>Apps</TableHeaderCell>
+                  <TableHeaderCell>Política</TableHeaderCell>
+                  <TableHeaderCell>Último uso</TableHeaderCell>
+                  <TableHeaderCell>Estado</TableHeaderCell>
+                  <TableHeaderCell></TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {filteredSharedDevices.map((device) => {
+                  const status = deviceStatusLabel(device);
+                  const apps = device.allowed_app_codes ?? [];
+
+                  return (
+                    <TableRow key={device.id}>
+                      <TableCell>
+                        <div className="font-semibold">{device.label}</div>
+                        <div className="ui-caption">{device.code}</div>
+                        <div className="ui-caption">{deviceTypeLabel(device.device_type)}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div>{device.site_name ?? device.site_code ?? "Sin sede"}</div>
+                        <div className="ui-caption">{device.area_name ?? device.area_code ?? "Sin área específica"}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {apps.length > 0 ? (
+                            apps.map((app) => (
+                              <span key={app} className={`ui-chip ${app === device.default_app_code ? "ui-chip--brand" : ""}`}>
+                                {app.toUpperCase()}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="ui-caption">Sin apps asignadas</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          <span className={`ui-chip ${device.requires_actor_pin ? "ui-chip--success" : ""}`}>
+                            {device.requires_actor_pin ? "PIN requerido" : "Sin PIN"}
+                          </span>
+                          <span className={`ui-chip ${device.requires_active_actor_shift ? "ui-chip--success" : ""}`}>
+                            {device.requires_active_actor_shift ? "Jornada requerida" : "Sin jornada"}
+                          </span>
+                          {device.allow_actions_without_actor ? (
+                            <span className="ui-chip ui-chip--warning">Permite operar sin actor</span>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div>{formatDateTime(device.last_seen_at)}</div>
+                        <div className="ui-caption">Actualizado {formatDateTime(device.updated_at)}</div>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`ui-chip ${status.tone}`}>{status.label}</span>
+                        <div className="ui-caption">{device.activation_status}</div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Link href={`/staff/shared-devices/${device.id}`} className="ui-btn ui-btn--ghost ui-btn--sm">
+                          Editar
+                        </Link>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )
+        ) : filteredEmployees.length === 0 ? (
           <div className="ui-empty flex flex-col items-center gap-4 py-12">
             <p className="text-[var(--ui-muted)]">{employees.length === 0 ? "Aún no hay trabajadores registrados." : "No hay trabajadores que coincidan con esos filtros."}</p>
             {employees.length === 0 ? (
