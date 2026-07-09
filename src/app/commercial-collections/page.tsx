@@ -131,6 +131,26 @@ function collectionKindLabel(kind: string | null | undefined) {
   }
 }
 
+function commercialCollectionsPath(siteId?: string | null, status?: "ok" | "error", message?: string) {
+  const params = new URLSearchParams();
+  const cleanSiteId = String(siteId ?? "").trim();
+
+  if (cleanSiteId) params.set("site", cleanSiteId);
+  if (status && message) params.set(status, message);
+
+  const query = params.toString();
+  return query ? `/commercial-collections?${query}` : "/commercial-collections";
+}
+
+function pathWithSite(path: string, siteId?: string | null) {
+  const cleanSiteId = String(siteId ?? "").trim();
+  if (!cleanSiteId) return path;
+
+  const params = new URLSearchParams();
+  params.set("site", cleanSiteId);
+  return `${path}?${params.toString()}`;
+}
+
 async function saveCollection(formData: FormData) {
   "use server";
 
@@ -143,7 +163,7 @@ async function saveCollection(formData: FormData) {
   const kind = asText(formData.get("kind")) || "seasonal";
 
   if (!siteId || !name || !code) {
-    redirect("/commercial-collections?error=" + encodeURIComponent("Sede y nombre son obligatorios."));
+    redirect(commercialCollectionsPath(siteId, "error", "Sede y nombre son obligatorios."));
   }
 
   let sortOrder = 0;
@@ -196,12 +216,12 @@ async function saveCollection(formData: FormData) {
       .upsert(payload, { onConflict: "site_id,code" });
 
   if (error) {
-    redirect("/commercial-collections?error=" + encodeURIComponent(error.message));
+    redirect(commercialCollectionsPath(siteId, "error", error.message));
   }
 
   revalidatePath("/commercial-collections");
   revalidatePath("/menu");
-  redirect("/commercial-collections?ok=" + encodeURIComponent("Coleccion guardada."));
+  redirect(commercialCollectionsPath(siteId, "ok", "Coleccion guardada."));
 }
 
 async function saveCollectionCategories(formData: FormData) {
@@ -220,7 +240,7 @@ async function saveCollectionCategories(formData: FormData) {
   );
 
   if (!collectionId) {
-    redirect("/commercial-collections?error=" + encodeURIComponent("Coleccion invalida."));
+    redirect(commercialCollectionsPath(null, "error", "Coleccion invalida."));
   }
 
   const { data: collection, error: collectionError } = await supabase
@@ -230,10 +250,15 @@ async function saveCollectionCategories(formData: FormData) {
     .eq("id", collectionId)
     .maybeSingle();
 
+  const redirectSiteId = collection?.site_id ?? null;
+
   if (collectionError || !collection) {
     redirect(
-      "/commercial-collections?error=" +
-      encodeURIComponent(collectionError?.message || "La coleccion no existe."),
+      commercialCollectionsPath(
+        redirectSiteId,
+        "error",
+        collectionError?.message || "La coleccion no existe.",
+      ),
     );
   }
 
@@ -245,7 +270,7 @@ async function saveCollectionCategories(formData: FormData) {
       .in("id", selectedCategoryIds);
 
     if (categoriesError) {
-      redirect("/commercial-collections?error=" + encodeURIComponent(categoriesError.message));
+      redirect(commercialCollectionsPath(collection.site_id, "error", categoriesError.message));
     }
 
     const validCategoryIds = new Set(
@@ -260,8 +285,11 @@ async function saveCollectionCategories(formData: FormData) {
 
     if (hasInvalidCategory) {
       redirect(
-        "/commercial-collections?error=" +
-        encodeURIComponent("Una o mas categorías no pertenecen a la sede de la coleccion."),
+        commercialCollectionsPath(
+          collection.site_id,
+          "error",
+          "Una o mas categorias no pertenecen a la sede de la coleccion.",
+        ),
       );
     }
   }
@@ -274,7 +302,7 @@ async function saveCollectionCategories(formData: FormData) {
     .order("sort_order", { ascending: true });
 
   if (existingLinksError) {
-    redirect("/commercial-collections?error=" + encodeURIComponent(existingLinksError.message));
+    redirect(commercialCollectionsPath(collection.site_id, "error", existingLinksError.message));
   }
 
   const existingOrderByCategoryId = new Map<string, number>();
@@ -319,7 +347,7 @@ async function saveCollectionCategories(formData: FormData) {
     .eq("collection_id", collectionId);
 
   if (deactivateError) {
-    redirect("/commercial-collections?error=" + encodeURIComponent(deactivateError.message));
+    redirect(commercialCollectionsPath(collection.site_id, "error", deactivateError.message));
   }
 
   if (orderedCategoryIds.length > 0) {
@@ -336,13 +364,13 @@ async function saveCollectionCategories(formData: FormData) {
       .upsert(payload, { onConflict: "collection_id,commercial_category_id" });
 
     if (upsertError) {
-      redirect("/commercial-collections?error=" + encodeURIComponent(upsertError.message));
+      redirect(commercialCollectionsPath(collection.site_id, "error", upsertError.message));
     }
   }
 
   revalidatePath("/commercial-collections");
   revalidatePath("/menu");
-  redirect("/commercial-collections?ok=" + encodeURIComponent("Secciones de coleccion guardadas."));
+  redirect(commercialCollectionsPath(collection.site_id, "ok", "Secciones de coleccion guardadas."));
 }
 
 async function saveCollectionCategoryOrder(collectionId: string, orderedLinkIds: string[]) {
@@ -462,7 +490,26 @@ async function deleteCollection(formData: FormData) {
   const id = asText(formData.get("id"));
 
   if (!id) {
-    redirect("/commercial-collections?error=" + encodeURIComponent("Coleccion invalida."));
+    redirect(commercialCollectionsPath(null, "error", "Coleccion invalida."));
+  }
+
+  const { data: collectionForRedirect, error: collectionForRedirectError } = await supabase
+    .schema("pass")
+    .from("commercial_collections")
+    .select("id,site_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  const redirectSiteId = collectionForRedirect?.site_id ?? null;
+
+  if (collectionForRedirectError || !collectionForRedirect) {
+    redirect(
+      commercialCollectionsPath(
+        redirectSiteId,
+        "error",
+        collectionForRedirectError?.message || "La coleccion no existe.",
+      ),
+    );
   }
 
   const [
@@ -486,8 +533,9 @@ async function deleteCollection(formData: FormData) {
 
   if (canonicalItemsError || pricedItemsError) {
     redirect(
-      "/commercial-collections?error=" +
-      encodeURIComponent(
+      commercialCollectionsPath(
+        redirectSiteId,
+        "error",
         canonicalItemsError?.message ||
         pricedItemsError?.message ||
         "No se pudo validar si la coleccion tiene items asignados.",
@@ -497,8 +545,9 @@ async function deleteCollection(formData: FormData) {
 
   if ((canonicalItemsCount ?? 0) > 0 || (pricedItemsCount ?? 0) > 0) {
     redirect(
-      "/commercial-collections?error=" +
-      encodeURIComponent(
+      commercialCollectionsPath(
+        redirectSiteId,
+        "error",
         "No puedes eliminar una coleccion con items comerciales asignados. Desactivala o mueve esos productos primero.",
       ),
     );
@@ -511,7 +560,7 @@ async function deleteCollection(formData: FormData) {
     .eq("collection_id", id);
 
   if (linksError) {
-    redirect("/commercial-collections?error=" + encodeURIComponent(linksError.message));
+    redirect(commercialCollectionsPath(redirectSiteId, "error", linksError.message));
   }
 
   const { error } = await supabase
@@ -521,26 +570,27 @@ async function deleteCollection(formData: FormData) {
     .eq("id", id);
 
   if (error) {
-    redirect("/commercial-collections?error=" + encodeURIComponent(error.message));
+    redirect(commercialCollectionsPath(redirectSiteId, "error", error.message));
   }
 
   revalidatePath("/commercial-collections");
   revalidatePath("/menu");
-  redirect("/commercial-collections?ok=" + encodeURIComponent("Coleccion eliminada."));
+  redirect(commercialCollectionsPath(redirectSiteId, "ok", "Coleccion eliminada."));
 }
 
 export default async function CommercialCollectionsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ ok?: string; error?: string }>;
+  searchParams?: Promise<{ ok?: string; error?: string; site?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
+  const requestedSiteId = safeDecode(sp.site);
   const okMsg = safeDecode(sp.ok);
   const errorMsg = safeDecode(sp.error);
 
   await requireAppAccess({
     appId: "viso",
-    returnTo: "/commercial-collections",
+    returnTo: commercialCollectionsPath(requestedSiteId),
   });
 
   const supabase = createAdminClient();
@@ -617,6 +667,11 @@ export default async function CommercialCollectionsPage({
       (siteOrderById.get(b.id) ?? Number.MAX_SAFE_INTEGER),
   );
 
+  const selectedSiteId = sites.some((site) => site.id === requestedSiteId)
+    ? requestedSiteId
+    : sites[0]?.id ?? "";
+  const selectedSite = sites.find((site) => site.id === selectedSiteId);
+
   const collections = (collectionsRaw ?? []) as CollectionRow[];
   const categories = (categoriesRaw ?? []) as CategoryRow[];
   const links = (linksRaw ?? []) as CollectionCategoryRow[];
@@ -658,6 +713,9 @@ export default async function CommercialCollectionsPage({
     });
   }
 
+  const selectedSiteCollections = selectedSiteId ? collectionsBySite.get(selectedSiteId) ?? [] : [];
+  const selectedSiteCategories = selectedSiteId ? categoriesBySite.get(selectedSiteId) ?? [] : [];
+
   const effectiveError =
     errorMsg ||
     businessesError?.message ||
@@ -674,10 +732,10 @@ export default async function CommercialCollectionsPage({
         subtitle="Agrupa productos publicados en Vento Pass por menu principal, temporadas, campanas o menus especiales."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link href="/commercial-categories" className="ui-btn ui-btn--ghost">
+            <Link href={pathWithSite("/commercial-categories", selectedSiteId)} className="ui-btn ui-btn--ghost">
               Categorias comerciales
             </Link>
-            <Link href="/menu" className="ui-btn ui-btn--ghost">
+            <Link href={pathWithSite("/menu", selectedSiteId)} className="ui-btn ui-btn--ghost">
               Volver al menu
             </Link>
           </div>
@@ -687,289 +745,313 @@ export default async function CommercialCollectionsPage({
       {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
-      <div className="ui-panel space-y-4">
-        <h2 className="ui-h3">Crear coleccion</h2>
-        <form action={saveCollection} className="grid gap-4 xl:grid-cols-[1fr_1fr_1fr_auto]">
-          <label className="space-y-2">
-            <span className="ui-label">Sede</span>
-            <select name="site_id" className="ui-input" required>
-              <option value="">Selecciona sede</option>
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {siteLabel(site)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="space-y-2">
-            <span className="ui-label">Tipo</span>
-            <select name="kind" className="ui-input" defaultValue="seasonal">
-              <option value="main">Menu principal</option>
-              <option value="seasonal">Temporada</option>
-              <option value="special">Menu especial</option>
-              <option value="campaign">Campana</option>
-              <option value="event">Evento</option>
-            </select>
-          </label>
-
-          <label className="space-y-2">
-            <span className="ui-label">Nombre</span>
-            <input name="name" className="ui-input" placeholder="Menu especial de mayo" required />
-          </label>
-
-          <div className="flex items-end">
-            <input type="hidden" name="is_active" value="on" />
-            <button type="submit" className="ui-btn ui-btn--brand w-full">
-              Crear
-            </button>
+      {sites.length > 0 ? (
+        <div className="ui-panel space-y-3">
+          <div>
+            <h2 className="ui-h3">Sede comercial</h2>
+            <p className="ui-caption">Solo aparecen sedes habilitadas para venta.</p>
           </div>
 
-          <label className="space-y-2 xl:col-span-2">
-            <span className="ui-label">Subtitulo</span>
-            <input name="subtitle" className="ui-input" placeholder="Coleccion Madres 2026" />
-          </label>
+          <div className="flex flex-wrap gap-2">
+            {sites.map((site) => {
+              const isSelected = site.id === selectedSiteId;
 
-          <label className="space-y-2 xl:col-span-2">
-            <span className="ui-label">Imagen hero</span>
-            <input name="hero_image_url" className="ui-input" placeholder="https://..." />
-          </label>
-        </form>
-      </div>
+              return (
+                <Link
+                  key={site.id}
+                  href={commercialCollectionsPath(site.id)}
+                  className={isSelected ? "ui-chip ui-chip--brand" : "ui-chip"}
+                >
+                  {siteLabel(site)}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {sites.length === 0 ? (
         <div className="ui-panel">
           <div className="ui-empty">No hay negocios activos con sede asociada.</div>
         </div>
       ) : (
-        <div className="space-y-8">
-          {sites.map((site) => {
-            const siteCollections = collectionsBySite.get(site.id) ?? [];
-            const siteCategories = categoriesBySite.get(site.id) ?? [];
+        <>
+          <div className="ui-panel space-y-4">
+            <h2 className="ui-h3">Crear coleccion</h2>
+            <form action={saveCollection} className="grid gap-4 xl:grid-cols-[1fr_1fr_1fr_auto]">
+              <label className="space-y-2">
+                <span className="ui-label">Sede</span>
+                <select name="site_id" className="ui-input" defaultValue={selectedSiteId} required>
+                  <option value="">Selecciona sede</option>
+                  {sites.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {siteLabel(site)}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            return (
-              <div key={site.id} className="ui-panel space-y-4">
-                <h2 className="text-lg font-semibold text-[var(--ui-text)]">
-                  {siteLabel(site)}
-                  <span className="ml-2 text-sm font-normal text-[var(--ui-muted)]">
-                    ({siteCollections.length} {siteCollections.length === 1 ? "coleccion" : "colecciones"})
-                  </span>
-                </h2>
+              <label className="space-y-2">
+                <span className="ui-label">Tipo</span>
+                <select name="kind" className="ui-input" defaultValue="seasonal">
+                  <option value="main">Menu principal</option>
+                  <option value="seasonal">Temporada</option>
+                  <option value="special">Menu especial</option>
+                  <option value="campaign">Campana</option>
+                  <option value="event">Evento</option>
+                </select>
+              </label>
 
-                {siteCategories.length === 0 ? (
-                  <div className="ui-alert ui-alert--warning">
-                    Esta sede todavia no tiene categorias comerciales activas. Crea categorias antes de asignar secciones a una coleccion.
-                  </div>
-                ) : null}
+              <label className="space-y-2">
+                <span className="ui-label">Nombre</span>
+                <input name="name" className="ui-input" placeholder="Menu especial de mayo" required />
+              </label>
 
-                {siteCollections.length === 0 ? (
-                  <div className="ui-empty">Esta sede no tiene colecciones comerciales.</div>
-                ) : (
-                  <div className="grid gap-4">
-                    {siteCollections.map((collection) => {
-                      const assignedCategoryLinks = categoryLinksByCollection.get(collection.id) ?? [];
-                      const assignedCategoryIds = new Set(
-                        assignedCategoryLinks.map((link) => link.commercial_category_id),
-                      );
-                      const assignedCategories = assignedCategoryLinks
-                        .map((link) => ({
-                          link,
-                          category: categoriesById.get(link.commercial_category_id),
-                        }))
-                        .filter(
-                          (entry): entry is { link: CollectionCategoryRow; category: CategoryRow } =>
-                            Boolean(entry.category),
-                        );
-
-                      return (
-                        <article
-                          key={collection.id}
-                          className="rounded-3xl border border-[var(--ui-border)] bg-white p-4 shadow-sm"
-                        >
-                          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.7fr)]">
-                            <div className="space-y-4">
-                              <form
-                                id={`collection-${collection.id}`}
-                                action={saveCollection}
-                                className="grid gap-3 md:grid-cols-2"
-                              >
-                                <input type="hidden" name="id" value={collection.id} />
-                                <input type="hidden" name="site_id" value={collection.site_id} />
-
-                                <label className="space-y-1">
-                                  <span className="ui-label">Nombre</span>
-                                  <input
-                                    name="name"
-                                    className="ui-input h-10"
-                                    defaultValue={collection.name}
-                                    required
-                                  />
-                                </label>
-
-                                <label className="space-y-1">
-                                  <span className="ui-label">Subtítulo</span>
-                                  <input
-                                    name="subtitle"
-                                    className="ui-input h-10"
-                                    defaultValue={collection.subtitle ?? ""}
-                                    placeholder="Subtítulo opcional"
-                                  />
-                                </label>
-
-                                <label className="space-y-1 md:col-span-2">
-                                  <span className="ui-label">Descripción</span>
-                                  <input
-                                    name="description"
-                                    className="ui-input h-10"
-                                    defaultValue={collection.description ?? ""}
-                                    placeholder="Descripción opcional"
-                                  />
-                                </label>
-
-                                <label className="space-y-1 md:col-span-2">
-                                  <span className="ui-label">Imagen hero</span>
-                                  <input
-                                    name="hero_image_url"
-                                    className="ui-input h-10"
-                                    defaultValue={collection.hero_image_url ?? ""}
-                                    placeholder="Imagen hero opcional"
-                                  />
-                                </label>
-                              </form>
-
-                              <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                                <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
-                                  Secciones asignadas
-                                </summary>
-
-                                <form action={saveCollectionCategories} className="mt-3 space-y-3">
-                                  <input type="hidden" name="collection_id" value={collection.id} />
-
-                                  {siteCategories.length === 0 ? (
-                                    <div className="ui-empty">No hay categorías disponibles para esta sede.</div>
-                                  ) : (
-                                    <div className="grid max-h-56 gap-2 overflow-auto pr-2 sm:grid-cols-2 xl:grid-cols-3">
-                                      {siteCategories.map((category) => (
-                                        <label key={category.id} className="flex items-center gap-2 text-sm">
-                                          <input
-                                            type="checkbox"
-                                            name="category_ids"
-                                            value={category.id}
-                                            defaultChecked={assignedCategoryIds.has(category.id)}
-                                          />
-                                          {category.name}
-                                        </label>
-                                      ))}
-                                    </div>
-                                  )}
-
-                                  <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0 text-xs text-[var(--ui-muted)]">
-                                      {assignedCategories.length > 0
-                                        ? assignedCategories.map(({ category }) => category.name).join(" · ")
-                                        : "Sin secciones asignadas"}
-                                    </div>
-
-                                    <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
-                                      Guardar secciones
-                                    </button>
-                                  </div>
-                                </form>
-                              </details>
-
-                              <CommercialCollectionCategoryOrderEditor
-                                collectionId={collection.id}
-                                items={assignedCategories.map(({ link, category }) => ({
-                                  linkId: link.id,
-                                  categoryId: category.id,
-                                  name: category.name,
-                                  description: category.description,
-                                }))}
-                                saveOrderAction={saveCollectionCategoryOrder}
-                              />
-                            </div>
-
-                            <aside className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                              <div className="grid gap-3">
-                                <label className="space-y-1">
-                                  <span className="ui-label">Tipo</span>
-                                  <select
-                                    form={`collection-${collection.id}`}
-                                    name="kind"
-                                    className="ui-input h-10"
-                                    defaultValue={collection.kind || "seasonal"}
-                                  >
-                                    <option value="main">Menú principal</option>
-                                    <option value="seasonal">Temporada</option>
-                                    <option value="special">Menú especial</option>
-                                    <option value="campaign">Campaña</option>
-                                    <option value="event">Evento</option>
-                                  </select>
-                                  <div className="text-xs text-[var(--ui-muted)]">
-                                    {collectionKindLabel(collection.kind)}
-                                  </div>
-                                </label>
-
-                                <label className="space-y-1">
-                                  <span className="ui-label">Desde</span>
-                                  <input
-                                    form={`collection-${collection.id}`}
-                                    type="datetime-local"
-                                    name="starts_at"
-                                    className="ui-input h-10"
-                                    defaultValue={toDateTimeLocalValue(collection.starts_at)}
-                                  />
-                                </label>
-
-                                <label className="space-y-1">
-                                  <span className="ui-label">Hasta</span>
-                                  <input
-                                    form={`collection-${collection.id}`}
-                                    type="datetime-local"
-                                    name="ends_at"
-                                    className="ui-input h-10"
-                                    defaultValue={toDateTimeLocalValue(collection.ends_at)}
-                                  />
-                                </label>
-
-                                <label className="flex items-center gap-2 text-sm">
-                                  <input
-                                    form={`collection-${collection.id}`}
-                                    type="checkbox"
-                                    name="is_active"
-                                    defaultChecked={collection.is_active !== false}
-                                  />
-                                  Activa
-                                </label>
-
-                                <div className="flex flex-wrap justify-end gap-2 pt-2">
-                                  <button
-                                    form={`collection-${collection.id}`}
-                                    type="submit"
-                                    className="ui-btn ui-btn--ghost ui-btn--sm"
-                                  >
-                                    Guardar
-                                  </button>
-
-                                  <form action={deleteCollection}>
-                                    <input type="hidden" name="id" value={collection.id} />
-                                    <button type="submit" className="ui-btn ui-btn--danger ui-btn--sm">
-                                      Eliminar
-                                    </button>
-                                  </form>
-                                </div>
-                              </div>
-                            </aside>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
+              <div className="flex items-end">
+                <input type="hidden" name="is_active" value="on" />
+                <button type="submit" className="ui-btn ui-btn--brand w-full">
+                  Crear
+                </button>
               </div>
-            );
-          })}
-        </div>
+
+              <label className="space-y-2 xl:col-span-2">
+                <span className="ui-label">Subtitulo</span>
+                <input name="subtitle" className="ui-input" placeholder="Coleccion Madres 2026" />
+              </label>
+
+              <label className="space-y-2 xl:col-span-2">
+                <span className="ui-label">Imagen hero</span>
+                <input name="hero_image_url" className="ui-input" placeholder="https://..." />
+              </label>
+            </form>
+          </div>
+
+          {!selectedSite ? (
+            <div className="ui-panel">
+              <div className="ui-empty">Selecciona una sede comercial.</div>
+            </div>
+          ) : (
+            <div key={selectedSite.id} className="ui-panel space-y-4">
+              <h2 className="text-lg font-semibold text-[var(--ui-text)]">
+                {siteLabel(selectedSite)}
+                <span className="ml-2 text-sm font-normal text-[var(--ui-muted)]">
+                  ({selectedSiteCollections.length} {selectedSiteCollections.length === 1 ? "coleccion" : "colecciones"})
+                </span>
+              </h2>
+
+              {selectedSiteCategories.length === 0 ? (
+                <div className="ui-alert ui-alert--warning">
+                  Esta sede todavia no tiene categorias comerciales activas. Crea categorias antes de asignar secciones a una coleccion.
+                </div>
+              ) : null}
+
+              {selectedSiteCollections.length === 0 ? (
+                <div className="ui-empty">Esta sede no tiene colecciones comerciales.</div>
+              ) : (
+                <div className="grid gap-4">
+                  {selectedSiteCollections.map((collection) => {
+                    const assignedCategoryLinks = categoryLinksByCollection.get(collection.id) ?? [];
+                    const assignedCategoryIds = new Set(
+                      assignedCategoryLinks.map((link) => link.commercial_category_id),
+                    );
+                    const assignedCategories = assignedCategoryLinks
+                      .map((link) => ({
+                        link,
+                        category: categoriesById.get(link.commercial_category_id),
+                      }))
+                      .filter(
+                        (entry): entry is { link: CollectionCategoryRow; category: CategoryRow } =>
+                          Boolean(entry.category),
+                      );
+
+                    return (
+                      <article
+                        key={collection.id}
+                        className="rounded-3xl border border-[var(--ui-border)] bg-white p-4 shadow-sm"
+                      >
+                        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.7fr)]">
+                          <div className="space-y-4">
+                            <form
+                              id={`collection-${collection.id}`}
+                              action={saveCollection}
+                              className="grid gap-3 md:grid-cols-2"
+                            >
+                              <input type="hidden" name="id" value={collection.id} />
+                              <input type="hidden" name="site_id" value={collection.site_id} />
+
+                              <label className="space-y-1">
+                                <span className="ui-label">Nombre</span>
+                                <input
+                                  name="name"
+                                  className="ui-input h-10"
+                                  defaultValue={collection.name}
+                                  required
+                                />
+                              </label>
+
+                              <label className="space-y-1">
+                                <span className="ui-label">Subtítulo</span>
+                                <input
+                                  name="subtitle"
+                                  className="ui-input h-10"
+                                  defaultValue={collection.subtitle ?? ""}
+                                  placeholder="Subtítulo opcional"
+                                />
+                              </label>
+
+                              <label className="space-y-1 md:col-span-2">
+                                <span className="ui-label">Descripción</span>
+                                <input
+                                  name="description"
+                                  className="ui-input h-10"
+                                  defaultValue={collection.description ?? ""}
+                                  placeholder="Descripción opcional"
+                                />
+                              </label>
+
+                              <label className="space-y-1 md:col-span-2">
+                                <span className="ui-label">Imagen hero</span>
+                                <input
+                                  name="hero_image_url"
+                                  className="ui-input h-10"
+                                  defaultValue={collection.hero_image_url ?? ""}
+                                  placeholder="Imagen hero opcional"
+                                />
+                              </label>
+                            </form>
+
+                            <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
+                                Secciones asignadas
+                              </summary>
+
+                              <form action={saveCollectionCategories} className="mt-3 space-y-3">
+                                <input type="hidden" name="collection_id" value={collection.id} />
+
+                                {selectedSiteCategories.length === 0 ? (
+                                  <div className="ui-empty">No hay categorías disponibles para esta sede.</div>
+                                ) : (
+                                  <div className="grid max-h-56 gap-2 overflow-auto pr-2 sm:grid-cols-2 xl:grid-cols-3">
+                                    {selectedSiteCategories.map((category) => (
+                                      <label key={category.id} className="flex items-center gap-2 text-sm">
+                                        <input
+                                          type="checkbox"
+                                          name="category_ids"
+                                          value={category.id}
+                                          defaultChecked={assignedCategoryIds.has(category.id)}
+                                        />
+                                        {category.name}
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
+
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="min-w-0 text-xs text-[var(--ui-muted)]">
+                                    {assignedCategories.length > 0
+                                      ? assignedCategories.map(({ category }) => category.name).join(" · ")
+                                      : "Sin secciones asignadas"}
+                                  </div>
+
+                                  <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+                                    Guardar secciones
+                                  </button>
+                                </div>
+                              </form>
+                            </details>
+
+                            <CommercialCollectionCategoryOrderEditor
+                              collectionId={collection.id}
+                              items={assignedCategories.map(({ link, category }) => ({
+                                linkId: link.id,
+                                categoryId: category.id,
+                                name: category.name,
+                                description: category.description,
+                              }))}
+                              saveOrderAction={saveCollectionCategoryOrder}
+                            />
+                          </div>
+
+                          <aside className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                            <div className="grid gap-3">
+                              <label className="space-y-1">
+                                <span className="ui-label">Tipo</span>
+                                <select
+                                  form={`collection-${collection.id}`}
+                                  name="kind"
+                                  className="ui-input h-10"
+                                  defaultValue={collection.kind || "seasonal"}
+                                >
+                                  <option value="main">Menú principal</option>
+                                  <option value="seasonal">Temporada</option>
+                                  <option value="special">Menú especial</option>
+                                  <option value="campaign">Campaña</option>
+                                  <option value="event">Evento</option>
+                                </select>
+                                <div className="text-xs text-[var(--ui-muted)]">
+                                  {collectionKindLabel(collection.kind)}
+                                </div>
+                              </label>
+
+                              <label className="space-y-1">
+                                <span className="ui-label">Desde</span>
+                                <input
+                                  form={`collection-${collection.id}`}
+                                  type="datetime-local"
+                                  name="starts_at"
+                                  className="ui-input h-10"
+                                  defaultValue={toDateTimeLocalValue(collection.starts_at)}
+                                />
+                              </label>
+
+                              <label className="space-y-1">
+                                <span className="ui-label">Hasta</span>
+                                <input
+                                  form={`collection-${collection.id}`}
+                                  type="datetime-local"
+                                  name="ends_at"
+                                  className="ui-input h-10"
+                                  defaultValue={toDateTimeLocalValue(collection.ends_at)}
+                                />
+                              </label>
+
+                              <label className="flex items-center gap-2 text-sm">
+                                <input
+                                  form={`collection-${collection.id}`}
+                                  type="checkbox"
+                                  name="is_active"
+                                  defaultChecked={collection.is_active !== false}
+                                />
+                                Activa
+                              </label>
+
+                              <div className="flex flex-wrap justify-end gap-2 pt-2">
+                                <button
+                                  form={`collection-${collection.id}`}
+                                  type="submit"
+                                  className="ui-btn ui-btn--ghost ui-btn--sm"
+                                >
+                                  Guardar
+                                </button>
+
+                                <form action={deleteCollection}>
+                                  <input type="hidden" name="id" value={collection.id} />
+                                  <button type="submit" className="ui-btn ui-btn--danger ui-btn--sm">
+                                    Eliminar
+                                  </button>
+                                </form>
+                              </div>
+                            </div>
+                          </aside>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
