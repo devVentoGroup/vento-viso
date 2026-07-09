@@ -794,7 +794,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
           effect_type: finalEffectType === "replacement" ? "replacement" : "additive",
           quantity_per_option: optionQuantityPerOption,
           stock_unit_code: optionStockUnitCode,
-          input_quantity_per_option: optionQuantityPerOption,
+          input_quantity_per_option: optionStockUnitCode ? optionQuantityPerOption : null,
           input_unit_code: optionStockUnitCode,
           conversion_factor_to_stock: 1,
           input_uom_profile_id: null,
@@ -990,6 +990,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       const optionId = readString(payload.optionId);
       const productId = readString(payload.productId);
       const quantityPerOption = Math.max(0, readNumber(payload.quantityPerOption, 0));
+      const stockUnitCode = readOptionalText(payload.stockUnitCode);
       if (!optionId || !productId || quantityPerOption <= 0) return jsonError("Faltan datos para crear la regla de consumo.");
 
       const { data: option } = await supabase.schema("pass").from("catalog_item_options").select("id,code,name").eq("id", optionId).maybeSingle();
@@ -1002,9 +1003,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
         product_id: productId,
         effect_type: parseOptionEffectType(payload.effectType) === "replacement" ? "replacement" : "additive",
         quantity_per_option: quantityPerOption,
-        stock_unit_code: readOptionalText(payload.stockUnitCode),
-        input_quantity_per_option: quantityPerOption,
-        input_unit_code: readOptionalText(payload.stockUnitCode),
+        stock_unit_code: stockUnitCode,
+        input_quantity_per_option: stockUnitCode ? quantityPerOption : null,
+        input_unit_code: stockUnitCode,
         conversion_factor_to_stock: 1,
         input_uom_profile_id: null,
         source_location_strategy: "product_production_location",
