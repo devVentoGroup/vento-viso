@@ -34,6 +34,23 @@ type ActiveWorkContext = {
   operationalRole: string;
 };
 
+type SharedOperationalDeviceRow = {
+  id: string;
+  code: string;
+  label: string;
+  description: string | null;
+  device_type: string;
+  site_id: string;
+  area_id: string | null;
+  default_app_code: string;
+  requires_actor_pin: boolean;
+  requires_active_actor_shift: boolean;
+  allow_actor_without_pin: boolean;
+  allow_actions_without_actor: boolean;
+  allowed_app_codes: string[] | null;
+  metadata: Record<string, unknown> | null;
+};
+
 type OperatingGateMode =
   | "anonymous"
   | "anima"
@@ -372,17 +389,6 @@ function resolveOperatingGate({
   activeWorkContext: ActiveWorkContext | null;
   isSharedDevice: boolean;
 }): OperatingGate {
-  if (!role) {
-    return {
-      mode: "anonymous",
-      isBlocked: false,
-      title: "",
-      description: "",
-      actionHref: ANIMA_URL,
-      actionLabel: "Ir a ANIMA",
-    };
-  }
-
   if (appCode === "anima") {
     return {
       mode: "anima",
@@ -400,6 +406,17 @@ function resolveOperatingGate({
       isBlocked: false,
       title: "Dispositivo operativo autorizado",
       description: "Este equipo puede abrir apps permitidas. Cada acción deberá identificar al trabajador con jornada activa.",
+      actionHref: ANIMA_URL,
+      actionLabel: "Ir a ANIMA",
+    };
+  }
+
+  if (!role) {
+    return {
+      mode: "anonymous",
+      isBlocked: false,
+      title: "",
+      description: "",
       actionHref: ANIMA_URL,
       actionLabel: "Ir a ANIMA",
     };
@@ -435,6 +452,101 @@ function resolveOperatingGate({
     actionHref: ANIMA_URL,
     actionLabel: "Ir a ANIMA",
   };
+}
+
+function normalizeAppCodes(value: string[] | null | undefined) {
+  return Array.from(
+    new Set(
+      (value ?? [])
+        .map((item) => String(item ?? "").trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function sharedDeviceAllowsApp(
+  sharedDevice: SharedOperationalDeviceRow,
+  appCode: string,
+) {
+  return normalizeAppCodes(sharedDevice.allowed_app_codes).includes(
+    appCode.trim().toLowerCase(),
+  );
+}
+
+function sharedDeviceDefaultHref(sharedDevice: SharedOperationalDeviceRow) {
+  const defaultAppCode = String(sharedDevice.default_app_code || APP_CODE)
+    .trim()
+    .toLowerCase();
+
+  const app = APP_SWITCHER_ITEMS.find((item) => item.id === defaultAppCode);
+  return app?.href ?? "https://os.ventogroup.co";
+}
+
+async function resolveSharedOperationalDevice({
+  supabase,
+}: {
+  supabase: SupabaseClient;
+}): Promise<SharedOperationalDeviceRow | null> {
+  const { data, error } = await supabase
+    .rpc("current_shared_operational_device_v1")
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return data as SharedOperationalDeviceRow;
+}
+
+function resolveAllowedAppsForSharedDevice(
+  sharedDevice: SharedOperationalDeviceRow,
+): AppSwitcherItem[] {
+  const allowedAppCodes = new Set(normalizeAppCodes(sharedDevice.allowed_app_codes));
+
+  return APP_SWITCHER_ITEMS.map((app): AppSwitcherItem => {
+    if (app.id === "hub" || app.id === "anima") {
+      return {
+        ...app,
+        access: "enabled",
+      };
+    }
+
+    if (app.status === "soon") {
+      return {
+        ...app,
+        access: "soon",
+      };
+    }
+
+    return {
+      ...app,
+      access: allowedAppCodes.has(app.id) ? "enabled" : "disabled",
+    };
+  });
+}
+
+async function resolveNavigationItemsForSharedDevice({
+  supabase,
+  appCode,
+  sharedDevice,
+}: {
+  supabase: SupabaseClient;
+  appCode: string;
+  sharedDevice: SharedOperationalDeviceRow;
+}): Promise<NavGroup[]> {
+  if (!sharedDeviceAllowsApp(sharedDevice, appCode)) return [];
+
+  const { data, error } = await supabase
+    .from("app_navigation_items")
+    .select(
+      "group_label,group_order,label,description,href,icon,required_permission_code,sort_order"
+    )
+    .eq("app_code", appCode)
+    .eq("is_active", true)
+    .order("group_order", { ascending: true })
+    .order("sort_order", { ascending: true });
+
+  if (error || !data) return [];
+
+  return buildNavGroups(data as NavigationRow[]);
 }
 
 async function resolveActiveWorkContext({
@@ -601,6 +713,7 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
   let activeSiteId = "";
   let activeAreaId = "";
   let effectiveRole: string | null = null;
+  let activeWorkContext: ActiveWorkContext | null = null;
   let activeContextLabel: string | null = null;
   let activeContextDescription: string | null = null;
   let operatingGate: OperatingGate | null = null;
@@ -608,127 +721,199 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
   let navGroups: NavGroup[] = [];
 
   if (user) {
-    const { data: employeeRow } = await supabase
-      .from("employees")
-      .select("role,full_name,alias,site_id")
-      .eq("id", user.id)
-      .single();
+    const sharedDevice = await resolveSharedOperationalDevice({ supabase });
 
-    role = employeeRow?.role ?? null;
-    displayName =
-      employeeRow?.alias ?? employeeRow?.full_name ?? user.email ?? "Usuario";
+    if (sharedDevice) {
+      const currentAppAllowed = sharedDeviceAllowsApp(sharedDevice, APP_CODE);
 
-    const [{ data: employeeSites }, activeWorkContext] = await Promise.all([
-      supabase
-        .from("employee_sites")
-        .select("site_id,is_primary")
-        .eq("employee_id", user.id)
-        .eq("is_active", true)
-        .order("is_primary", { ascending: false })
-        .limit(50),
-      resolveActiveWorkContext({ supabase, userId: user.id }),
-    ]);
+      displayName =
+        sharedDevice.label ||
+        sharedDevice.code ||
+        user.email ||
+        "Dispositivo compartido";
+      role = "dispositivo_compartido";
+      activeSiteId = asId(sharedDevice.site_id);
+      activeAreaId = asId(sharedDevice.area_id);
 
-    const employeeSiteRows = (employeeSites ?? []) as EmployeeSiteRow[];
+      operatingGate = currentAppAllowed
+        ? resolveOperatingGate({
+            appCode: APP_CODE,
+            role: null,
+            activeWorkContext: null,
+            isSharedDevice: true,
+          })
+        : {
+            mode: "shared_device",
+            isBlocked: true,
+            title: "App no habilitada para este dispositivo",
+            description: `Este dispositivo solo puede abrir las apps asignadas. App principal: ${sharedDevice.default_app_code.toUpperCase()}.`,
+            actionHref: sharedDeviceDefaultHref(sharedDevice),
+            actionLabel: "Abrir app principal",
+          };
 
-    const assignedSiteIds = uniqueIds([
-      activeWorkContext?.siteId ?? null,
-      ...employeeSiteRows.map((row) => row.site_id),
-      employeeRow?.site_id ?? null,
-    ]);
-
-    const preferredSiteId = asId(
-      activeWorkContext?.siteId ||
-        employeeSiteRows[0]?.site_id ||
-        employeeRow?.site_id ||
-        "",
-    );
-
-    activeSiteId =
-      preferredSiteId && assignedSiteIds.includes(preferredSiteId)
-        ? preferredSiteId
-        : (assignedSiteIds[0] ?? "");
-
-    activeAreaId = asId(activeWorkContext?.areaId);
-    effectiveRole = asId(activeWorkContext?.operationalRole) || role;
-
-    const isSharedDevice = false;
-
-    operatingGate = resolveOperatingGate({
-      appCode: APP_CODE,
-      role,
-      activeWorkContext,
-      isSharedDevice,
-    });
-
-    if (activeWorkContext) {
-      activeContextLabel = "Jornada activa";
-      activeContextDescription = "Contexto operativo aplicado desde ANIMA";
-    } else if (operatingGate.mode === "shared_device") {
       activeContextLabel = "Dispositivo compartido";
-      activeContextDescription = operatingGate.description;
-    } else if (operatingGate.mode === "privileged_bypass") {
-      activeContextLabel = "Acceso administrativo";
-      activeContextDescription = operatingGate.description;
-    } else if (operatingGate.isBlocked) {
-      activeContextLabel = "Sin jornada activa";
-      activeContextDescription = operatingGate.description;
-    }
+      activeContextDescription = currentAppAllowed
+        ? `${sharedDevice.label} · Cada acción sensible requiere trabajador con jornada activa.`
+        : operatingGate.description;
 
-    if (assignedSiteIds.length) {
-      const { data: siteRows } = await supabase
-        .from("sites")
-        .select("id,name,site_type,operational_visibility")
-        .in("id", assignedSiteIds)
-        .order("name", { ascending: true });
+      if (activeSiteId) {
+        const { data: siteRows } = await supabase
+          .from("sites")
+          .select("id,name,site_type,operational_visibility")
+          .eq("id", activeSiteId)
+          .limit(1);
 
-      sites = ((siteRows ?? []) as SiteRow[]).filter(isOperationalSite);
-
-      if (activeSiteId && !sites.some((site) => site.id === activeSiteId)) {
-        activeSiteId = sites[0]?.id ?? "";
+        sites = ((siteRows ?? []) as SiteRow[]).filter(isOperationalSite);
       }
-    }
 
-    if (activeAreaId) {
-      const { data: activeArea } = await supabase
-        .from("areas")
-        .select("site_id")
-        .eq("id", activeAreaId)
-        .maybeSingle();
-
-      if (String(activeArea?.site_id ?? "") !== activeSiteId) {
-        activeAreaId = "";
-      }
-    }
-
-    if (effectiveRole) {
       const [resolvedApps, resolvedNavGroups] = await Promise.all([
-        resolveAllowedApps({
-          supabase,
-          activeSiteId,
-          activeAreaId,
-          actualRole: effectiveRole,
-        }),
-        operatingGate?.isBlocked
+        Promise.resolve(resolveAllowedAppsForSharedDevice(sharedDevice)),
+        operatingGate.isBlocked
           ? Promise.resolve([])
-          : resolveNavigationItems({
+          : resolveNavigationItemsForSharedDevice({
               supabase,
               appCode: APP_CODE,
-              activeSiteId,
-              activeAreaId,
-              actualRole: effectiveRole,
+              sharedDevice,
             }),
       ]);
 
-      appSwitcherItems = operatingGate?.isBlocked
-        ? resolvedApps.map((app) =>
-            app.id === "hub" || app.id === "anima"
-              ? { ...app, access: app.status === "soon" ? "soon" : "enabled" }
-              : { ...app, access: app.status === "soon" ? "soon" : "disabled" }
-          )
-        : resolvedApps;
-
+      appSwitcherItems = resolvedApps;
       navGroups = resolvedNavGroups;
+    } else {
+      const { data: employeeRow } = await supabase
+        .from("employees")
+        .select("role,full_name,alias,site_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      role = employeeRow?.role ?? null;
+      displayName =
+        employeeRow?.alias ?? employeeRow?.full_name ?? user.email ?? "Usuario";
+
+      const [
+        { data: employeeSites },
+        { data: employeeSettings },
+        resolvedActiveWorkContext,
+      ] = await Promise.all([
+        supabase
+          .from("employee_sites")
+          .select("site_id,is_primary")
+          .eq("employee_id", user.id)
+          .eq("is_active", true)
+          .order("is_primary", { ascending: false })
+          .limit(50),
+        supabase
+          .from("employee_settings")
+          .select("selected_site_id")
+          .eq("employee_id", user.id)
+          .maybeSingle(),
+        resolveActiveWorkContext({ supabase, userId: user.id }),
+      ]);
+
+      activeWorkContext = resolvedActiveWorkContext;
+
+      const employeeSiteRows = (employeeSites ?? []) as EmployeeSiteRow[];
+      
+
+      const assignedSiteIds = uniqueIds([
+        activeWorkContext?.siteId ?? null,
+        ...employeeSiteRows.map((row) => row.site_id),
+        employeeRow?.site_id ?? null,
+      ]);
+
+      const cookieStore = await cookies();
+      const siteOverrideId = asId(cookieStore.get("viso_site_override_id")?.value);
+
+      const preferredSiteId = asId(
+        activeWorkContext?.siteId ||
+          siteOverrideId ||
+          employeeSettings?.selected_site_id ||
+          employeeSiteRows[0]?.site_id ||
+          employeeRow?.site_id ||
+          "",
+      );
+
+      activeSiteId =
+        preferredSiteId && assignedSiteIds.includes(preferredSiteId)
+          ? preferredSiteId
+          : (assignedSiteIds[0] ?? "");
+
+      activeAreaId = asId(activeWorkContext?.areaId);
+      effectiveRole = asId(activeWorkContext?.operationalRole) || role;
+
+      operatingGate = resolveOperatingGate({
+        appCode: APP_CODE,
+        role,
+        activeWorkContext,
+        isSharedDevice: false,
+      });
+
+      if (activeWorkContext) {
+        activeContextLabel = "Jornada activa";
+        activeContextDescription = "Contexto operativo aplicado desde ANIMA";
+      } else if (operatingGate.mode === "privileged_bypass") {
+        activeContextLabel = "Acceso administrativo";
+        activeContextDescription = operatingGate.description;
+      } else if (operatingGate.isBlocked) {
+        activeContextLabel = "Sin jornada activa";
+        activeContextDescription = operatingGate.description;
+      }
+
+      if (assignedSiteIds.length) {
+        const { data: siteRows } = await supabase
+          .from("sites")
+          .select("id,name,site_type,operational_visibility")
+          .in("id", assignedSiteIds)
+          .order("name", { ascending: true });
+
+        sites = ((siteRows ?? []) as SiteRow[]).filter(isOperationalSite);
+
+        if (activeSiteId && !sites.some((site) => site.id === activeSiteId)) {
+          activeSiteId = sites[0]?.id ?? "";
+        }
+      }
+
+      if (activeAreaId) {
+        const { data: activeArea } = await supabase
+          .from("areas")
+          .select("site_id")
+          .eq("id", activeAreaId)
+          .maybeSingle();
+
+        if (String(activeArea?.site_id ?? "") !== activeSiteId) {
+          activeAreaId = "";
+        }
+      }
+
+      if (effectiveRole) {
+        const [resolvedApps, resolvedNavGroups] = await Promise.all([
+          resolveAllowedApps({
+                supabase,
+                activeSiteId,
+                activeAreaId,
+                actualRole: effectiveRole,
+              }),
+          operatingGate?.isBlocked
+            ? Promise.resolve([])
+            : resolveNavigationItems({
+                  supabase,
+                  appCode: APP_CODE,
+                  activeSiteId,
+                  activeAreaId,
+                  actualRole: effectiveRole,
+                }),
+        ]);
+
+        appSwitcherItems = operatingGate?.isBlocked
+          ? resolvedApps.map((app) =>
+              app.id === "hub" || app.id === "anima"
+                ? { ...app, access: app.status === "soon" ? "soon" : "enabled" }
+                : { ...app, access: app.status === "soon" ? "soon" : "disabled" }
+            )
+          : resolvedApps;
+
+        navGroups = resolvedNavGroups;
+      }
     }
   }
 
