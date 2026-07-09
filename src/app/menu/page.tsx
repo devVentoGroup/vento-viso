@@ -337,7 +337,10 @@ export default async function MenuPage({
         {menuError ? (
           <div className="ui-empty">Corrige el error de consulta para ver los ítems comerciales.</div>
         ) : (
-          <CommercialMenuOrganizer initialMenu={selectedMenu} />
+          <CommercialMenuOrganizer
+            key={selectedSiteId || "commercial-menu"}
+            initialMenu={selectedMenu}
+          />
         )}
       </div>
     </div>
