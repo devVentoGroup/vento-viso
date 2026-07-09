@@ -145,6 +145,7 @@ export function SharedDeviceCreateForm({
   const [siteId, setSiteId] = useState("");
   const [label, setLabel] = useState("");
   const [code, setCode] = useState("");
+  const [customEmail, setCustomEmail] = useState("");
 
   const initialAppCodes = normalizeCodes(selectedTemplate?.app_codes);
   const [selectedAppCodes, setSelectedAppCodes] = useState<string[]>(initialAppCodes);
@@ -188,10 +189,6 @@ export function SharedDeviceCreateForm({
 
   const updateLabel = (value: string) => {
     setLabel(value);
-
-    if (!code.trim()) {
-      setCode(slugCode(value));
-    }
   };
 
   const toggleApp = (appCode: string) => {
@@ -217,6 +214,11 @@ export function SharedDeviceCreateForm({
   }
 
   const selectedPolicies = selectedTemplate?.actor_policies ?? [];
+  const automaticCode = slugCode(label || "DISPOSITIVO_COMPARTIDO");
+  const previewCode = code.trim() ? code : automaticCode;
+  const previewEmail = customEmail.trim()
+    ? customEmail.trim()
+    : `${previewCode.toLowerCase()}@devices.ventogroup.co`;
 
   return (
     <form action={formAction} className="space-y-6">
@@ -277,32 +279,8 @@ export function SharedDeviceCreateForm({
             placeholder="Caja Vento Café 01"
             required
           />
-        </label>
-
-        <label className="space-y-2">
-          <span className="ui-label">Código interno</span>
-          <input
-            name="code"
-            className="ui-input"
-            value={code}
-            onChange={(event) => setCode(slugCode(event.target.value))}
-            placeholder="CAJA_VENTO_CAFE_01"
-          />
           <span className="ui-caption block">
-            Se usa para auditoría, email técnico y configuración del equipo.
-          </span>
-        </label>
-
-        <label className="space-y-2">
-          <span className="ui-label">Email técnico</span>
-          <input
-            name="login_email"
-            className="ui-input"
-            type="email"
-            placeholder={`${(code || "caja_vento_cafe_01").toLowerCase()}@devices.ventogroup.co`}
-          />
-          <span className="ui-caption block">
-            Si lo dejas vacío, se genera con el código interno.
+            Con este nombre se generan automáticamente el código interno y el correo técnico.
           </span>
         </label>
 
@@ -336,8 +314,25 @@ export function SharedDeviceCreateForm({
           </select>
         </label>
 
+        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4">
+          <div className="ui-label">Identidad automática</div>
+          <div className="mt-2 space-y-2 text-sm">
+            <div>
+              <span className="ui-caption block">Código interno</span>
+              <code className="break-all rounded bg-white/70 px-2 py-1">{previewCode}</code>
+            </div>
+            <div>
+              <span className="ui-caption block">Correo técnico</span>
+              <code className="break-all rounded bg-white/70 px-2 py-1">{previewEmail}</code>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-[var(--ui-muted)]">
+            Si el código ya existe, el sistema agregará un sufijo automático como _02.
+          </p>
+        </div>
+
         <label className="space-y-2 lg:col-span-2">
-          <span className="ui-label">Descripción</span>
+          <span className="ui-label">Descripción opcional</span>
           <textarea
             name="description"
             className="ui-input min-h-24"
@@ -345,6 +340,40 @@ export function SharedDeviceCreateForm({
           />
         </label>
       </div>
+
+      <details className="rounded-2xl border border-[var(--ui-border)] bg-white/80 p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-[var(--ui-text)]">
+          Configuración avanzada de identidad
+        </summary>
+        <p className="mt-2 text-sm text-[var(--ui-muted)]">
+          Normalmente no se toca. Úsalo solo si necesitas forzar un código o correo técnico específico.
+        </p>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <label className="space-y-2">
+            <span className="ui-label">Código personalizado</span>
+            <input
+              name="code"
+              className="ui-input"
+              value={code}
+              onChange={(event) => setCode(slugCode(event.target.value))}
+              placeholder={automaticCode}
+            />
+          </label>
+
+          <label className="space-y-2">
+            <span className="ui-label">Correo técnico personalizado</span>
+            <input
+              name="login_email"
+              className="ui-input"
+              type="email"
+              value={customEmail}
+              onChange={(event) => setCustomEmail(event.target.value.trim().toLowerCase())}
+              placeholder={`${previewCode.toLowerCase()}@devices.ventogroup.co`}
+            />
+          </label>
+        </div>
+      </details>
 
       <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">

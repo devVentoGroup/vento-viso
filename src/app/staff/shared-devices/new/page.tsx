@@ -99,13 +99,11 @@ export async function createSharedDeviceAction(
   const templateId = textValue(formData, "template_id");
   const label = textValue(formData, "label");
   const rawCode = textValue(formData, "code");
-  const code = normalizeDeviceCode(rawCode || label);
+  let code = normalizeDeviceCode(rawCode || label);
   const description = textValue(formData, "description") || null;
   const siteId = textValue(formData, "site_id");
   const areaId = textValue(formData, "area_id") || null;
-  const loginEmail =
-    textValue(formData, "login_email") ||
-    `${code.toLowerCase()}@devices.ventogroup.co`;
+  const requestedLoginEmail = textValue(formData, "login_email");
 
   if (!templateId) {
     return {
@@ -132,13 +130,6 @@ export async function createSharedDeviceAction(
     return {
       status: "error",
       message: "Selecciona la sede del dispositivo.",
-    };
-  }
-
-  if (!loginEmail.includes("@")) {
-    return {
-      status: "error",
-      message: "El email técnico no es válido.",
     };
   }
 
@@ -204,16 +195,40 @@ export async function createSharedDeviceAction(
     };
   }
 
-  const { data: existingDevice } = await admin
-    .from("shared_operational_devices")
-    .select("id")
-    .eq("code", code)
-    .maybeSingle();
+  const baseCode = code;
+  let resolvedCode = "";
 
-  if (existingDevice) {
+  for (let suffix = 1; suffix <= 99; suffix += 1) {
+    const candidateCode =
+      suffix === 1 ? baseCode : `${baseCode}_${String(suffix).padStart(2, "0")}`;
+
+    const { data: existingDevice } = await admin
+      .from("shared_operational_devices")
+      .select("id")
+      .eq("code", candidateCode)
+      .maybeSingle();
+
+    if (!existingDevice) {
+      resolvedCode = candidateCode;
+      break;
+    }
+  }
+
+  if (!resolvedCode) {
     return {
       status: "error",
-      message: `Ya existe un dispositivo con el código ${code}.`,
+      message: `No se pudo generar un código disponible para ${baseCode}.`,
+    };
+  }
+
+  code = resolvedCode;
+
+  const loginEmail = requestedLoginEmail || `${code.toLowerCase()}@devices.ventogroup.co`;
+
+  if (!loginEmail.includes("@")) {
+    return {
+      status: "error",
+      message: "El email técnico no es válido.",
     };
   }
 
