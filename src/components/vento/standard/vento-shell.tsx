@@ -1,4 +1,9 @@
-﻿import { checkPermissionWithRoleOverride } from "@/lib/auth/role-override";
+﻿import { cookies } from "next/headers";
+
+import {
+  checkPermissionWithRoleOverride,
+  isPermissionAllowedForRole,
+} from "@/lib/auth/role-override";
 import { createClient } from "@/lib/supabase/server";
 import { VentoChrome } from "./vento-chrome";
 
@@ -49,6 +54,7 @@ type SharedOperationalDeviceRow = {
   allow_actions_without_actor: boolean;
   allowed_app_codes: string[] | null;
   metadata: Record<string, unknown> | null;
+  navigation_role?: string | null;
 };
 
 type OperatingGateMode =
@@ -546,7 +552,26 @@ async function resolveNavigationItemsForSharedDevice({
 
   if (error || !data) return [];
 
-  return buildNavGroups(data as NavigationRow[]);
+  const rows = data as NavigationRow[];
+  const navigationRole = String(sharedDevice.navigation_role ?? "").trim();
+  if (!navigationRole) return [];
+
+  const permissionResults = await Promise.all(
+    rows.map(async (row) => {
+      const permissionCode = String(row.required_permission_code ?? "").trim();
+      if (!permissionCode) return false;
+
+      const { appId, code } = splitPermissionCode(permissionCode, appCode);
+      if (!code) return false;
+
+      return isPermissionAllowedForRole(supabase, navigationRole, appId, code, {
+        siteId: sharedDevice.site_id ?? null,
+        areaId: sharedDevice.area_id ?? null,
+      });
+    })
+  );
+
+  return buildNavGroups(rows.filter((_, index) => permissionResults[index]));
 }
 
 async function resolveActiveWorkContext({
@@ -934,3 +959,6 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
     </VentoChrome>
   );
 }
+
+
+

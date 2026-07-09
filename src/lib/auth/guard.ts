@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+﻿import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -11,6 +11,11 @@ import {
   getRoleOverrideFromCookies,
   isPermissionAllowedForRole,
 } from "@/lib/auth/role-override";
+import {
+  checkOperationalSessionPermission,
+  isOperationalSessionAppAllowed,
+  resolveOperationalSession,
+} from "@/lib/auth/operational-session";
 
 type GuardOptions = {
   appId: string;
@@ -32,10 +37,6 @@ export async function requireAppAccess({
   allowPermissionAccess = false,
 }: GuardOptions) {
   const client = supabase ?? (await createClient());
-  const context: PermissionContext = {
-    siteId: siteId ?? null,
-    areaId: areaId ?? null,
-  };
 
   const { data: userRes } = await client.auth.getUser();
   const user = userRes.user ?? null;
@@ -46,6 +47,17 @@ export async function requireAppAccess({
     redirect(`/login?${qs.toString()}`);
   }
 
+  const operationalSession = await resolveOperationalSession({
+    supabase: client,
+    userId: user.id,
+    appId,
+    preferredSiteId: siteId ?? null,
+    preferredAreaId: areaId ?? null,
+  });
+  const context: PermissionContext = {
+    siteId: operationalSession.siteId,
+    areaId: operationalSession.areaId,
+  };
   const permissionCodes = Array.isArray(permissionCode)
     ? permissionCode.filter(Boolean)
     : permissionCode
@@ -55,86 +67,124 @@ export async function requireAppAccess({
     normalizePermissionCode(appId, code),
   );
 
-  const canAccess = await checkPermission(client, appId, "access", context);
+  if (operationalSession.isSharedDevice) {
+    const canAccess = isOperationalSessionAppAllowed(operationalSession, appId);
+    let canAccessByPermission = false;
+    if (!canAccess && allowPermissionAccess && normalizedCodes.length > 0) {
+      const checks = await Promise.all(
+        normalizedCodes.map((code) =>
+          checkOperationalSessionPermission({
+            supabase: client,
+            session: operationalSession,
+            appId,
+            code,
+          }),
+        ),
+      );
+      canAccessByPermission = checks.every(Boolean);
+    }
 
-  let canAccessByPermission = false;
-  if (!canAccess && allowPermissionAccess && normalizedCodes.length > 0) {
-    const checks = await Promise.all(
-      normalizedCodes.map((code) =>
-        checkPermission(client, appId, code, context),
-      ),
-    );
-    canAccessByPermission = checks.every(Boolean);
-  }
+    if (!canAccess && !canAccessByPermission) {
+      const qs = new URLSearchParams();
+      qs.set("returnTo", returnTo);
+      qs.set("reason", "shared_device_app_not_allowed");
+      qs.set("permission", `${appId}.access`);
+      redirect(`/no-access?${qs.toString()}`);
+    }
+  } else {
+    const canAccess = await checkPermission(client, appId, "access", context);
+    let canAccessByPermission = false;
+    if (!canAccess && allowPermissionAccess && normalizedCodes.length > 0) {
+      const checks = await Promise.all(
+        normalizedCodes.map((code) => checkPermission(client, appId, code, context)),
+      );
+      canAccessByPermission = checks.every(Boolean);
+    }
 
-  if (!canAccess && !canAccessByPermission) {
-    const qs = new URLSearchParams();
-    qs.set("returnTo", returnTo);
-    qs.set("reason", "no_access");
-    qs.set("permission", `${appId}.access`);
-    redirect(`/no-access?${qs.toString()}`);
+    if (!canAccess && !canAccessByPermission) {
+      const qs = new URLSearchParams();
+      qs.set("returnTo", returnTo);
+      qs.set("reason", "no_access");
+      qs.set("permission", `${appId}.access`);
+      redirect(`/no-access?${qs.toString()}`);
+    }
   }
 
   if (normalizedCodes.length) {
-    const overrideRole = await getRoleOverrideFromCookies();
-    let canOverride = false;
-    let actualRole = "";
-    let defaultSiteId: string | null = null;
-
-    if (overrideRole) {
-      const { data: employee } = await client
-        .from("employees")
-        .select("role,site_id")
-        .eq("id", user.id)
-        .maybeSingle();
-      actualRole = String(employee?.role ?? "");
-      defaultSiteId = employee?.site_id ?? null;
-      canOverride = canUseRoleOverride(actualRole, overrideRole);
-    }
-
-    if (canOverride) {
-      const overrideContext: PermissionContext = {
-        siteId: context.siteId ?? defaultSiteId,
-        areaId: context.areaId ?? null,
-      };
-
+    if (operationalSession.isSharedDevice) {
       const checks = await Promise.all(
         normalizedCodes.map((code) =>
-          isPermissionAllowedForRole(
-            client,
-            overrideRole!,
+          checkOperationalSessionPermission({
+            supabase: client,
+            session: operationalSession,
             appId,
             code,
-            overrideContext,
-          ),
+          }),
         ),
       );
-      const deniedIndex = checks.findIndex((allowed) => !allowed);
-      const deniedCode = deniedIndex >= 0 ? normalizedCodes[deniedIndex] : null;
-      if (deniedCode) {
-        const qs = new URLSearchParams();
-        qs.set("returnTo", returnTo);
-        qs.set("reason", "role_override");
-        qs.set("permission", String(deniedCode ?? ""));
-        redirect(`/no-access?${qs.toString()}`);
-      }
-    } else {
-      const checks = await Promise.all(
-        normalizedCodes.map((code) =>
-          checkPermission(client, appId, code, context),
-        ),
-      );
-
       const deniedIndex = checks.findIndex((allowed) => !allowed);
       if (deniedIndex !== -1) {
         const qs = new URLSearchParams();
         qs.set("returnTo", returnTo);
-        qs.set("reason", "no_permission");
+        qs.set("reason", "shared_device_no_permission");
         qs.set("permission", String(normalizedCodes[deniedIndex] ?? ""));
         redirect(`/no-access?${qs.toString()}`);
+      }
+    } else {
+      const overrideRole = await getRoleOverrideFromCookies();
+      const canOverride = Boolean(
+        overrideRole &&
+          operationalSession.role &&
+          canUseRoleOverride(operationalSession.role, overrideRole),
+      );
+
+      if (canOverride) {
+        const checks = await Promise.all(
+          normalizedCodes.map((code) =>
+            isPermissionAllowedForRole(client, overrideRole!, appId, code, context),
+          ),
+        );
+        const deniedIndex = checks.findIndex((allowed) => !allowed);
+        const deniedCode = deniedIndex >= 0 ? normalizedCodes[deniedIndex] : null;
+        if (deniedCode) {
+          const qs = new URLSearchParams();
+          qs.set("returnTo", returnTo);
+          qs.set("reason", "role_override");
+          qs.set("permission", String(deniedCode ?? ""));
+          redirect(`/no-access?${qs.toString()}`);
+        }
+      } else {
+        const checks = await Promise.all(
+          normalizedCodes.map((code) => checkPermission(client, appId, code, context)),
+        );
+
+        const deniedIndex = checks.findIndex((allowed) => !allowed);
+        if (deniedIndex !== -1) {
+          const qs = new URLSearchParams();
+          qs.set("returnTo", returnTo);
+          qs.set("reason", "no_permission");
+          qs.set("permission", String(normalizedCodes[deniedIndex] ?? ""));
+          redirect(`/no-access?${qs.toString()}`);
+        }
       }
     }
   }
 
-  return { supabase: client, user };
+  return {
+    supabase: client,
+    user,
+    siteId: operationalSession.siteId,
+    operationalSession,
+    sharedDevice: operationalSession.isSharedDevice
+      ? {
+          id: operationalSession.sharedDeviceId,
+          code: operationalSession.sharedDeviceCode,
+          label: operationalSession.sharedDeviceLabel,
+          site_id: operationalSession.siteId,
+          area_id: operationalSession.areaId,
+          navigation_role: operationalSession.navigationRole,
+          appAllowed: isOperationalSessionAppAllowed(operationalSession, appId),
+        }
+      : null,
+  };
 }
