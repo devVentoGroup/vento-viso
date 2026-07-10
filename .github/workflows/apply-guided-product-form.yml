@@ -1,0 +1,30 @@
+name: Apply guided commercial product form
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/patch-guided-product-form.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Apply patch
+        run: python scripts/patch-guided-product-form.py
+      - name: Commit result
+        run: |
+          git config user.name "vento-viso-bot"
+          git config user.email "viso-bot@ventogroup.co"
+          git add src/components/viso/menu-item-form.tsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "feat(menu): simplify commercial product creation flow"
+          git push origin HEAD:main
