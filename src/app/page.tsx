@@ -69,10 +69,10 @@ export default async function VisoHomePage() {
             <div className="mt-2 text-3xl font-bold tracking-tight text-[var(--ui-text)]">{businessCount}</div>
             <p className="mt-2 text-sm leading-relaxed text-[var(--ui-muted)]">Sedes y configuración Pass.</p>
           </Link>
-          <Link href="/commercial-collections" className="ui-card ui-card--accent-blue group">
-            <div className="ui-caption text-[var(--ui-accent-blue)] font-semibold">Colecciones</div>
+          <Link href="/commercial-menu" className="ui-card ui-card--accent-blue group">
+            <div className="ui-caption text-[var(--ui-accent-blue)] font-semibold">Menú comercial</div>
             <div className="mt-2 text-3xl font-bold tracking-tight text-[var(--ui-text)]">{collectionCount}</div>
-            <p className="mt-2 text-sm leading-relaxed text-[var(--ui-muted)]">Temporadas, campañas y menús especiales.</p>
+            <p className="mt-2 text-sm leading-relaxed text-[var(--ui-muted)]">Productos, secciones, menús y temporadas.</p>
           </Link>
           <div className="ui-card ui-card--accent-blue">
             <div className="ui-caption text-[var(--ui-accent-blue)] font-semibold">Productos</div>
@@ -90,9 +90,9 @@ export default async function VisoHomePage() {
       <section className="space-y-4">
         <h2 className="ui-section-label ui-section-label--amber">Acciones rápidas</h2>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <Link href="/commercial-audit" className="ui-panel-soft ui-panel-soft--accent-teal block">
-            <div className="ui-title ui-title--accent-teal">Diagnosticar menú comercial</div>
-            <p className="mt-2 ui-body-muted">Detecta productos incompletos y sigue un flujo guiado para organizar el catálogo.</p>
+          <Link href="/commercial-menu" className="ui-panel-soft ui-panel-soft--accent-teal block">
+            <div className="ui-title ui-title--accent-teal">Administrar menú comercial</div>
+            <p className="mt-2 ui-body-muted">Flujo guiado para productos, secciones, temporadas y revisión.</p>
           </Link>
           <Link href="/businesses/new" className="ui-panel-soft ui-panel-soft--accent-amber block">
             <div className="ui-title ui-title--accent-amber">Crear negocio</div>
@@ -102,13 +102,9 @@ export default async function VisoHomePage() {
             <div className="ui-title ui-title--accent-brand">Invitar trabajador</div>
             <p className="mt-2 ui-body-muted">Genera invitaciones con rol y sede.</p>
           </Link>
-          <Link href="/products/new" className="ui-panel-soft ui-panel-soft--accent-blue block">
-            <div className="ui-title ui-title--accent-blue">Crear producto</div>
-            <p className="mt-2 ui-body-muted">Agrega ítems que se muestran en Vento Pass.</p>
-          </Link>
-          <Link href="/commercial-collections" className="ui-panel-soft ui-panel-soft--accent-blue block">
-            <div className="ui-title ui-title--accent-blue">Colecciones comerciales</div>
-            <p className="mt-2 ui-body-muted">Organiza menú principal, temporadas, campañas y menús especiales.</p>
+          <Link href="/menu/new" className="ui-panel-soft ui-panel-soft--accent-blue block">
+            <div className="ui-title ui-title--accent-blue">Crear producto comercial</div>
+            <p className="mt-2 ui-body-muted">Agrega un producto vendible al catálogo de Vento Pass.</p>
           </Link>
           <Link href="/vacancies/new" className="ui-panel-soft ui-panel-soft--accent-brand block">
             <div className="ui-title ui-title--accent-brand">Crear vacante</div>
@@ -120,11 +116,11 @@ export default async function VisoHomePage() {
           </Link>
           <Link href="/website-cms" className="ui-panel-soft ui-panel-soft--accent-blue block">
             <div className="ui-title ui-title--accent-blue">Website CMS</div>
-            <p className="mt-2 ui-body-muted">Contenido dinamico de ventogroup.co.</p>
+            <p className="mt-2 ui-body-muted">Contenido dinámico de ventogroup.co.</p>
           </Link>
           <Link href="/website-cms/venues" className="ui-panel-soft ui-panel-soft--accent-amber block">
             <div className="ui-title ui-title--accent-amber">Venue Detail CMS</div>
-            <p className="mt-2 ui-body-muted">Hero, gallery y contenido de detalle por restaurante.</p>
+            <p className="mt-2 ui-body-muted">Hero, galería y contenido de detalle por restaurante.</p>
           </Link>
         </div>
       </section>
