@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "python3 scripts/patch-guided-product-form.py && python3 scripts/patch-create-commercial-product.py",
     "dev": "next dev",
+    "prebuild": "python3 scripts/patch-guided-product-form.py && python3 scripts/patch-create-commercial-product.py",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
