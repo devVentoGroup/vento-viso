@@ -90,6 +90,10 @@ export default async function VisoHomePage() {
       <section className="space-y-4">
         <h2 className="ui-section-label ui-section-label--amber">Acciones rápidas</h2>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <Link href="/commercial-audit" className="ui-panel-soft ui-panel-soft--accent-teal block">
+            <div className="ui-title ui-title--accent-teal">Diagnosticar menú comercial</div>
+            <p className="mt-2 ui-body-muted">Detecta productos incompletos y sigue un flujo guiado para organizar el catálogo.</p>
+          </Link>
           <Link href="/businesses/new" className="ui-panel-soft ui-panel-soft--accent-amber block">
             <div className="ui-title ui-title--accent-amber">Crear negocio</div>
             <p className="mt-2 ui-body-muted">Alta rápida de sede y satélite de Pass.</p>
