@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "python3 scripts/patch-guided-product-form.py && python3 scripts/patch-guided-product-copy.py && python3 scripts/patch-create-commercial-product.py",
+    "predev": "python3 scripts/patch-guided-product-form.py && python3 scripts/patch-guided-product-copy.py && python3 scripts/patch-create-commercial-product.py && python3 scripts/patch-product-family-variants.py",
     "dev": "next dev",
-    "prebuild": "python3 scripts/patch-guided-product-form.py && python3 scripts/patch-guided-product-copy.py && python3 scripts/patch-create-commercial-product.py",
+    "prebuild": "python3 scripts/patch-guided-product-form.py && python3 scripts/patch-guided-product-copy.py && python3 scripts/patch-create-commercial-product.py && python3 scripts/patch-product-family-variants.py",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
