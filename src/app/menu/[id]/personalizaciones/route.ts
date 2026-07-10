@@ -390,10 +390,11 @@ async function fetchSnapshot(supabase: ReturnType<typeof createAdminClient>, ite
     supabase
       .schema("pass")
       .from("catalog_items")
-      .select("id,name,product_id,description,price_amount,image_url,category_label,is_active")
+      .select("id,name,product_id,description,price_amount,image_url,category_label,is_active,sort_order,commercial_collection_id,commercial_category_id,commercial_collection:commercial_collections(id,name,subtitle,code,kind,sort_order),commercial_category:commercial_categories(id,name,code,sort_order)")
       .eq("site_id", currentItem.site_id)
       .eq("is_active", true)
       .neq("id", itemId)
+      .order("sort_order", { ascending: true })
       .order("name", { ascending: true }),
     supabase
       .schema("pass")

@@ -150,6 +150,26 @@ function isLegacyCommercialCategory(category: CategoryRow) {
   );
 }
 
+function commercialCategoriesPath(siteId?: string | null, status?: "ok" | "error", message?: string) {
+  const params = new URLSearchParams();
+  const cleanSiteId = String(siteId ?? "").trim();
+
+  if (cleanSiteId) params.set("site", cleanSiteId);
+  if (status && message) params.set(status, message);
+
+  const query = params.toString();
+  return query ? `/commercial-categories?${query}` : "/commercial-categories";
+}
+
+function pathWithSite(path: string, siteId?: string | null) {
+  const cleanSiteId = String(siteId ?? "").trim();
+  if (!cleanSiteId) return path;
+
+  const params = new URLSearchParams();
+  params.set("site", cleanSiteId);
+  return `${path}?${params.toString()}`;
+}
+
 async function saveCategory(formData: FormData) {
   "use server";
   const supabase = createAdminClient();
@@ -159,7 +179,7 @@ async function saveCategory(formData: FormData) {
   const code = slugify(name);
 
   if (!siteId || !name || !code) {
-    redirect("/commercial-categories?error=" + encodeURIComponent("Sede y nombre son obligatorios."));
+    redirect(commercialCategoriesPath(siteId, "error", "Sede y nombre son obligatorios."));
   }
 
   let sortOrder = 0;
@@ -200,12 +220,13 @@ async function saveCategory(formData: FormData) {
       .upsert(payload, { onConflict: "site_id,code" });
 
   if (error) {
-    redirect("/commercial-categories?error=" + encodeURIComponent(error.message));
+    redirect(commercialCategoriesPath(siteId, "error", error.message));
   }
 
   revalidatePath("/commercial-categories");
+  revalidatePath("/commercial-collections");
   revalidatePath("/menu");
-  redirect("/commercial-categories?ok=" + encodeURIComponent("Categoría guardada."));
+  redirect(commercialCategoriesPath(siteId, "ok", "Categoría guardada."));
 }
 
 async function saveCategoriesBulk(formData: FormData) {
@@ -223,8 +244,11 @@ async function saveCategoriesBulk(formData: FormData) {
 
   if (!siteId || categoriesToCreate.length === 0) {
     redirect(
-      "/commercial-categories?error=" +
-      encodeURIComponent("Selecciona una sede y pega al menos una categoría valida."),
+      commercialCategoriesPath(
+        siteId,
+        "error",
+        "Selecciona una sede y pega al menos una categoría valida.",
+      ),
     );
   }
 
@@ -238,7 +262,7 @@ async function saveCategoriesBulk(formData: FormData) {
     .in("code", codes);
 
   if (existingError) {
-    redirect("/commercial-categories?error=" + encodeURIComponent(existingError.message));
+    redirect(commercialCategoriesPath(siteId, "error", existingError.message));
   }
 
   const existingCodes = new Set(
@@ -253,8 +277,11 @@ async function saveCategoriesBulk(formData: FormData) {
 
   if (newCategories.length === 0) {
     redirect(
-      "/commercial-categories?ok=" +
-      encodeURIComponent("No se crearon categorías nuevas. Todas ya existian o estaban repetidas."),
+      commercialCategoriesPath(
+        siteId,
+        "ok",
+        "No se crearon categorías nuevas. Todas ya existian o estaban repetidas.",
+      ),
     );
   }
 
@@ -268,7 +295,7 @@ async function saveCategoriesBulk(formData: FormData) {
     .maybeSingle();
 
   if (latestError) {
-    redirect("/commercial-categories?error=" + encodeURIComponent(latestError.message));
+    redirect(commercialCategoriesPath(siteId, "error", latestError.message));
   }
 
   const baseSortOrder = Number(latest?.sort_order ?? 0);
@@ -288,17 +315,19 @@ async function saveCategoriesBulk(formData: FormData) {
     .insert(payload);
 
   if (error) {
-    redirect("/commercial-categories?error=" + encodeURIComponent(error.message));
+    redirect(commercialCategoriesPath(siteId, "error", error.message));
   }
 
   const skippedCount = Math.max(0, rawLineCount - newCategories.length);
 
   revalidatePath("/commercial-categories");
+  revalidatePath("/commercial-collections");
   revalidatePath("/menu");
 
   redirect(
-    "/commercial-categories?ok=" +
-    encodeURIComponent(
+    commercialCategoriesPath(
+      siteId,
+      "ok",
       `Categorías creadas: ${newCategories.length}. Omitidas existentes o repetidas: ${skippedCount}.`,
     ),
   );
@@ -309,7 +338,26 @@ async function deleteCategory(formData: FormData) {
   const supabase = createAdminClient();
   const id = asText(formData.get("id"));
   if (!id) {
-    redirect("/commercial-categories?error=" + encodeURIComponent("Categoría invalida."));
+    redirect(commercialCategoriesPath(null, "error", "Categoría invalida."));
+  }
+
+  const { data: categoryForRedirect, error: categoryForRedirectError } = await supabase
+    .schema("pass")
+    .from("commercial_categories")
+    .select("id,site_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  const redirectSiteId = categoryForRedirect?.site_id ?? null;
+
+  if (categoryForRedirectError || !categoryForRedirect) {
+    redirect(
+      commercialCategoriesPath(
+        redirectSiteId,
+        "error",
+        categoryForRedirectError?.message || "La categoría no existe.",
+      ),
+    );
   }
 
   const [
@@ -333,8 +381,9 @@ async function deleteCategory(formData: FormData) {
 
   if (canonicalItemsError || pricedItemsError) {
     redirect(
-      "/commercial-categories?error=" +
-      encodeURIComponent(
+      commercialCategoriesPath(
+        redirectSiteId,
+        "error",
         canonicalItemsError?.message ||
         pricedItemsError?.message ||
         "No se pudo validar si la categoría tiene items asignados.",
@@ -344,8 +393,9 @@ async function deleteCategory(formData: FormData) {
 
   if ((canonicalItemsCount ?? 0) > 0 || (pricedItemsCount ?? 0) > 0) {
     redirect(
-      "/commercial-categories?error=" +
-      encodeURIComponent(
+      commercialCategoriesPath(
+        redirectSiteId,
+        "error",
         "No puedes eliminar una categoría con items comerciales reales asignados. Mueve o desactiva esos productos primero.",
       ),
     );
@@ -363,33 +413,38 @@ async function deleteCategory(formData: FormData) {
 
   if (detachError) {
     redirect(
-      "/commercial-categories?error=" +
-      encodeURIComponent(`No se pudieron desasignar los items legacy: ${detachError.message}`),
+      commercialCategoriesPath(
+        redirectSiteId,
+        "error",
+        `No se pudieron desasignar los items legacy: ${detachError.message}`,
+      ),
     );
   }
 
   const { error } = await supabase.schema("pass").from("commercial_categories").delete().eq("id", id);
   if (error) {
-    redirect("/commercial-categories?error=" + encodeURIComponent(error.message));
+    redirect(commercialCategoriesPath(redirectSiteId, "error", error.message));
   }
 
   revalidatePath("/commercial-categories");
+  revalidatePath("/commercial-collections");
   revalidatePath("/menu");
-  redirect("/commercial-categories?ok=" + encodeURIComponent("Categoría eliminada."));
+  redirect(commercialCategoriesPath(redirectSiteId, "ok", "Categoría eliminada."));
 }
 
 export default async function CommercialCategoriesPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ ok?: string; error?: string }>;
+  searchParams?: Promise<{ ok?: string; error?: string; site?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
+  const requestedSiteId = safeDecode(sp.site);
   const okMsg = safeDecode(sp.ok);
   const errorMsg = safeDecode(sp.error);
 
   await requireAppAccess({
     appId: "viso",
-    returnTo: "/commercial-categories",
+    returnTo: commercialCategoriesPath(requestedSiteId),
   });
 
   const supabase = createAdminClient();
@@ -444,6 +499,11 @@ export default async function CommercialCategoriesPage({
       (siteOrderById.get(b.id) ?? Number.MAX_SAFE_INTEGER),
   );
 
+  const selectedSiteId = sites.some((site) => site.id === requestedSiteId)
+    ? requestedSiteId
+    : sites[0]?.id ?? "";
+  const selectedSite = sites.find((site) => site.id === selectedSiteId);
+
   const categories = ((categoriesRaw ?? []) as CategoryRow[]).filter(
     (category) => !isLegacyCommercialCategory(category),
   );
@@ -492,154 +552,187 @@ export default async function CommercialCategoriesPage({
     categoriesBySite.get(category.site_id)!.push(category);
   }
 
+  const selectedSiteCategories = selectedSiteId ? categoriesBySite.get(selectedSiteId) ?? [] : [];
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Categorías comerciales"
         subtitle="Crea categorías por sede para ordenar el menu de compras en Vento Pass. No son categorías operacionales ni canjes de fidelización."
         actions={
-          <Link href="/menu" className="ui-btn ui-btn--ghost">
-            Volver al menú
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href={pathWithSite("/commercial-collections", selectedSiteId)} className="ui-btn ui-btn--ghost">
+              Colecciones comerciales
+            </Link>
+            <Link href={pathWithSite("/menu", selectedSiteId)} className="ui-btn ui-btn--ghost">
+              Volver al menú
+            </Link>
+          </div>
         }
       />
 
       {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
-      <div className="ui-panel space-y-4">
-        <h2 className="ui-h3">Crear categoría</h2>
-        <form action={saveCategory} className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
-          <label className="space-y-2">
-            <span className="ui-label">Sede</span>
-            <select name="site_id" className="ui-input" required>
-              <option value="">Selecciona sede</option>
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {siteLabel(site)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2">
-            <span className="ui-label">Nombre</span>
-            <input name="name" className="ui-input" placeholder="Bebidas frías" required />
-          </label>
-          <div className="flex items-end">
-            <input type="hidden" name="is_active" value="on" />
-            <button type="submit" className="ui-btn ui-btn--brand w-full">
-              Crear
-            </button>
+      {sites.length > 0 ? (
+        <div className="ui-panel space-y-3">
+          <div>
+            <h2 className="ui-h3">Sede comercial</h2>
+            <p className="ui-caption">Solo aparecen sedes habilitadas para venta.</p>
           </div>
-        </form>
-      </div>
 
-      <div className="ui-panel space-y-4">
-        <div>
-          <h2 className="ui-h3">Crear varias categorías</h2>
-          <p className="ui-caption">
-            Pega una categoria por linea. VISO creara las nuevas y omitira las que ya existan en la sede seleccionada.
-          </p>
+          <div className="flex flex-wrap gap-2">
+            {sites.map((site) => {
+              const isSelected = site.id === selectedSiteId;
+
+              return (
+                <Link
+                  key={site.id}
+                  href={commercialCategoriesPath(site.id)}
+                  className={isSelected ? "ui-chip ui-chip--brand" : "ui-chip"}
+                >
+                  {siteLabel(site)}
+                </Link>
+              );
+            })}
+          </div>
         </div>
-
-        <form action={saveCategoriesBulk} className="grid gap-4 lg:grid-cols-[280px_1fr_auto]">
-          <label className="space-y-2">
-            <span className="ui-label">Sede</span>
-            <select name="site_id" className="ui-input" required>
-              <option value="">Selecciona sede</option>
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {siteLabel(site)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="space-y-2">
-            <span className="ui-label">Categorías</span>
-            <textarea
-              name="bulk_names"
-              className="ui-input min-h-52"
-              placeholder="Una categoría por linea"
-              required
-            />
-          </label>
-
-          <div className="flex items-end">
-            <button type="submit" className="ui-btn ui-btn--brand w-full">
-              Crear lote
-            </button>
-          </div>
-        </form>
-      </div>
+      ) : null}
 
       {sites.length === 0 ? (
         <div className="ui-panel">
           <div className="ui-empty">No hay negocios activos con sede asociada.</div>
         </div>
       ) : (
-        <div className="space-y-8">
-          {sites.map((site) => {
-            const siteCategories = categoriesBySite.get(site.id) ?? [];
-            return (
-              <div key={site.id} className="ui-panel space-y-4">
-                <h2 className="text-lg font-semibold text-[var(--ui-text)]">
-                  {siteLabel(site)}
-                  <span className="ml-2 text-sm font-normal text-[var(--ui-muted)]">
-                    ({siteCategories.length} {siteCategories.length === 1 ? "categoría" : "categorías"})
-                  </span>
-                </h2>
-
-                {siteCategories.length === 0 ? (
-                  <div className="ui-empty">Esta sede no tiene categorías comerciales.</div>
-                ) : (
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableHeaderCell>Categoría</TableHeaderCell>
-                        <TableHeaderCell>Estado</TableHeaderCell>
-                        <TableHeaderCell></TableHeaderCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {siteCategories.map((category) => (
-                        <TableRow key={category.id}>
-                          <TableCell>
-                            <form id={`category-${category.id}`} action={saveCategory} className="space-y-2">
-                              <input type="hidden" name="id" value={category.id} />
-                              <input type="hidden" name="site_id" value={category.site_id} />
-                              <input name="name" className="ui-input h-10" defaultValue={category.name} required />
-                              <input name="description" className="ui-input h-10" defaultValue={category.description ?? ""} placeholder="Descripción opcional" />
-                            </form>
-                          </TableCell>
-                          <TableCell>
-                            <label className="flex items-center gap-2 text-sm">
-                              <input form={`category-${category.id}`} type="checkbox" name="is_active" defaultChecked={category.is_active !== false} />
-                              Activa
-                            </label>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
-                              <button form={`category-${category.id}`} type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
-                                Guardar
-                              </button>
-                              <form action={deleteCategory}>
-                                <input type="hidden" name="id" value={category.id} />
-                                <button type="submit" className="ui-btn ui-btn--danger ui-btn--sm">
-                                  Eliminar
-                                </button>
-                              </form>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+        <>
+          <div className="ui-panel space-y-4">
+            <h2 className="ui-h3">Crear categoría</h2>
+            <form action={saveCategory} className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
+              <label className="space-y-2">
+                <span className="ui-label">Sede</span>
+                <select name="site_id" className="ui-input" defaultValue={selectedSiteId} required>
+                  <option value="">Selecciona sede</option>
+                  {sites.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {siteLabel(site)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="ui-label">Nombre</span>
+                <input name="name" className="ui-input" placeholder="Bebidas frías" required />
+              </label>
+              <div className="flex items-end">
+                <input type="hidden" name="is_active" value="on" />
+                <button type="submit" className="ui-btn ui-btn--brand w-full">
+                  Crear
+                </button>
               </div>
-            );
-          })}
-        </div>
+            </form>
+          </div>
+
+          <div className="ui-panel space-y-4">
+            <div>
+              <h2 className="ui-h3">Crear varias categorías</h2>
+              <p className="ui-caption">
+                Pega una categoria por linea. VISO creara las nuevas y omitira las que ya existan en la sede seleccionada.
+              </p>
+            </div>
+
+            <form action={saveCategoriesBulk} className="grid gap-4 lg:grid-cols-[280px_1fr_auto]">
+              <label className="space-y-2">
+                <span className="ui-label">Sede</span>
+                <select name="site_id" className="ui-input" defaultValue={selectedSiteId} required>
+                  <option value="">Selecciona sede</option>
+                  {sites.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {siteLabel(site)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-2">
+                <span className="ui-label">Categorías</span>
+                <textarea
+                  name="bulk_names"
+                  className="ui-input min-h-52"
+                  placeholder="Una categoría por linea"
+                  required
+                />
+              </label>
+
+              <div className="flex items-end">
+                <button type="submit" className="ui-btn ui-btn--brand w-full">
+                  Crear lote
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {!selectedSite ? (
+            <div className="ui-panel">
+              <div className="ui-empty">Selecciona una sede comercial.</div>
+            </div>
+          ) : (
+            <div key={selectedSite.id} className="ui-panel space-y-4">
+              <h2 className="text-lg font-semibold text-[var(--ui-text)]">
+                {siteLabel(selectedSite)}
+                <span className="ml-2 text-sm font-normal text-[var(--ui-muted)]">
+                  ({selectedSiteCategories.length} {selectedSiteCategories.length === 1 ? "categoría" : "categorías"})
+                </span>
+              </h2>
+
+              {selectedSiteCategories.length === 0 ? (
+                <div className="ui-empty">Esta sede no tiene categorías comerciales.</div>
+              ) : (
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableHeaderCell>Categoría</TableHeaderCell>
+                      <TableHeaderCell>Estado</TableHeaderCell>
+                      <TableHeaderCell></TableHeaderCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {selectedSiteCategories.map((category) => (
+                      <TableRow key={category.id}>
+                        <TableCell>
+                          <form id={`category-${category.id}`} action={saveCategory} className="space-y-2">
+                            <input type="hidden" name="id" value={category.id} />
+                            <input type="hidden" name="site_id" value={category.site_id} />
+                            <input name="name" className="ui-input h-10" defaultValue={category.name} required />
+                            <input name="description" className="ui-input h-10" defaultValue={category.description ?? ""} placeholder="Descripción opcional" />
+                          </form>
+                        </TableCell>
+                        <TableCell>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input form={`category-${category.id}`} type="checkbox" name="is_active" defaultChecked={category.is_active !== false} />
+                            Activa
+                          </label>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <button form={`category-${category.id}`} type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+                              Guardar
+                            </button>
+                            <form action={deleteCategory}>
+                              <input type="hidden" name="id" value={category.id} />
+                              <button type="submit" className="ui-btn ui-btn--danger ui-btn--sm">
+                                Eliminar
+                              </button>
+                            </form>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

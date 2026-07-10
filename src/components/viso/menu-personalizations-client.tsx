@@ -90,6 +90,13 @@ type InventoryUnitRow = {
   is_active: boolean | null;
 };
 
+type CommercialCatalogRelationRow = {
+  id: string;
+  name: string | null;
+  code: string | null;
+  sort_order?: number | string | null;
+};
+
 type CommercialCatalogItemOptionRow = {
   id: string;
   name: string | null;
@@ -98,6 +105,11 @@ type CommercialCatalogItemOptionRow = {
   price_amount: number | string | null;
   image_url: string | null;
   category_label: string | null;
+  commercial_collection_id?: string | null;
+  commercial_category_id?: string | null;
+  commercial_collection?: CommercialCatalogRelationRow | CommercialCatalogRelationRow[] | null;
+  commercial_category?: CommercialCatalogRelationRow | CommercialCatalogRelationRow[] | null;
+  sort_order?: number | string | null;
   is_active: boolean | null;
 };
 
@@ -260,6 +272,107 @@ function getCurrentDisplayGroup(item: CurrentCatalogItemSnapshot | null | undefi
 
 function getVariantLabel(item: VisualVariantRow) {
   return getMetadataText(item.metadata, "variant_label") || item.name;
+}
+
+function relationOne<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function sortNumber(value: number | string | null | undefined, fallback = Number.MAX_SAFE_INTEGER) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getCommercialCatalogCollection(item: CommercialCatalogItemOptionRow) {
+  return relationOne(item.commercial_collection);
+}
+
+function getCommercialCatalogCategory(item: CommercialCatalogItemOptionRow) {
+  return relationOne(item.commercial_category);
+}
+
+function getCommercialCatalogCollectionLabel(item: CommercialCatalogItemOptionRow) {
+  const collection = getCommercialCatalogCollection(item);
+  return collection?.name || collection?.code || "Sin colección";
+}
+
+function getCommercialCatalogCategoryLabel(item: CommercialCatalogItemOptionRow) {
+  const category = getCommercialCatalogCategory(item);
+  return category?.name || category?.code || item.category_label || "Sin categoría";
+}
+
+function buildCommercialCatalogGroups(items: CommercialCatalogItemOptionRow[]) {
+  const collectionMap = new Map<
+    string,
+    {
+      key: string;
+      label: string;
+      sortOrder: number;
+      categories: Map<
+        string,
+        {
+          key: string;
+          label: string;
+          sortOrder: number;
+          items: CommercialCatalogItemOptionRow[];
+        }
+      >;
+    }
+  >();
+
+  for (const item of items.filter((catalogItem) => catalogItem.is_active !== false)) {
+    const collection = getCommercialCatalogCollection(item);
+    const category = getCommercialCatalogCategory(item);
+    const collectionKey = item.commercial_collection_id || collection?.id || "__sin_coleccion__";
+    const categoryKey = item.commercial_category_id || category?.id || item.category_label || "__sin_categoria__";
+
+    if (!collectionMap.has(collectionKey)) {
+      collectionMap.set(collectionKey, {
+        key: collectionKey,
+        label: getCommercialCatalogCollectionLabel(item),
+        sortOrder: sortNumber(collection?.sort_order),
+        categories: new Map(),
+      });
+    }
+
+    const collectionGroup = collectionMap.get(collectionKey)!;
+
+    if (!collectionGroup.categories.has(categoryKey)) {
+      collectionGroup.categories.set(categoryKey, {
+        key: categoryKey,
+        label: getCommercialCatalogCategoryLabel(item),
+        sortOrder: sortNumber(category?.sort_order),
+        items: [],
+      });
+    }
+
+    collectionGroup.categories.get(categoryKey)!.items.push(item);
+  }
+
+  return Array.from(collectionMap.values())
+    .map((collection) => ({
+      ...collection,
+      categories: Array.from(collection.categories.values())
+        .map((category) => ({
+          ...category,
+          items: category.items.sort((a, b) => {
+            const aOrder = sortNumber(a.sort_order);
+            const bOrder = sortNumber(b.sort_order);
+
+            if (aOrder !== bOrder) return aOrder - bOrder;
+            return (a.name || "").localeCompare(b.name || "", "es-CO");
+          }),
+        }))
+        .sort((a, b) => {
+          if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+          return a.label.localeCompare(b.label, "es-CO");
+        }),
+    }))
+    .sort((a, b) => {
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+      return a.label.localeCompare(b.label, "es-CO");
+    });
 }
 
 function toggleStringValue(values: string[], value: string) {
@@ -529,6 +642,14 @@ export function MenuPersonalizationsClient({
 
   const consumptionProductById = useMemo(() => new Map(snapshot.consumptionProducts.map((product) => [product.id, product])), [snapshot.consumptionProducts]);
   const commercialCatalogItemsById = useMemo(() => new Map(snapshot.commercialCatalogItems.map((item) => [item.id, item])), [snapshot.commercialCatalogItems]);
+  const groupedCommercialCatalogItems = useMemo(
+    () => buildCommercialCatalogGroups(snapshot.commercialCatalogItems),
+    [snapshot.commercialCatalogItems],
+  );
+  const groupedOperationalCommercialCatalogItems = useMemo(
+    () => buildCommercialCatalogGroups(snapshot.commercialCatalogItems.filter((catalogItem) => catalogItem.product_id)),
+    [snapshot.commercialCatalogItems],
+  );
 
   const sharedTemplateGroupsByTemplate = useMemo(() => {
     const map = new Map<string, SharedCustomizationTemplateGroupRow[]>();
@@ -1313,9 +1434,15 @@ export function MenuPersonalizationsClient({
                                 <span className="ui-label">Producto sugerido</span>
                                 <select name="linked_catalog_item_id" className="ui-input" required>
                                   <option value="">Selecciona producto sugerido</option>
-                                  {snapshot.commercialCatalogItems.map((catalogItem) => (
-                                    <option key={catalogItem.id} value={catalogItem.id}>{catalogItem.name || "Producto sin nombre"} · {formatCopAdmin(catalogItem.price_amount)}</option>
-                                  ))}
+                                  {groupedCommercialCatalogItems.map((collection) =>
+                                    collection.categories.map((category) => (
+                                      <optgroup key={`${collection.key}:${category.key}`} label={`${collection.label} / ${category.label}`}>
+                                        {category.items.map((catalogItem) => (
+                                          <option key={catalogItem.id} value={catalogItem.id}>{catalogItem.name || "Producto sin nombre"} · {formatCopAdmin(catalogItem.price_amount)}</option>
+                                        ))}
+                                      </optgroup>
+                                    )),
+                                  )}
                                 </select>
                               </label>
                               <label className="space-y-2">
@@ -1333,11 +1460,17 @@ export function MenuPersonalizationsClient({
                                   <span className="ui-label">Usar producto comercial existente</span>
                                   <select name="linked_catalog_item_id" className="ui-input" defaultValue="">
                                     <option value="">No usar producto comercial existente</option>
-                                    {snapshot.commercialCatalogItems.filter((catalogItem) => catalogItem.product_id).map((catalogItem) => (
-                                      <option key={catalogItem.id} value={catalogItem.id}>
-                                        {catalogItem.name || "Producto sin nombre"} · {formatCopAdmin(catalogItem.price_amount)}
-                                      </option>
-                                    ))}
+                                    {groupedOperationalCommercialCatalogItems.map((collection) =>
+                                      collection.categories.map((category) => (
+                                        <optgroup key={`${collection.key}:${category.key}`} label={`${collection.label} / ${category.label}`}>
+                                          {category.items.map((catalogItem) => (
+                                            <option key={catalogItem.id} value={catalogItem.id}>
+                                              {catalogItem.name || "Producto sin nombre"} · {formatCopAdmin(catalogItem.price_amount)}
+                                            </option>
+                                          ))}
+                                        </optgroup>
+                                      )),
+                                    )}
                                   </select>
                                 </label>
                                 <p className="ui-caption mt-2">
