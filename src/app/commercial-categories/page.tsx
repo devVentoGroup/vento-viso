@@ -608,17 +608,13 @@ export default async function CommercialCategoriesPage({
           <div className="ui-panel space-y-4">
             <h2 className="ui-h3">Crear categoría</h2>
             <form action={saveCategory} className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
-              <label className="space-y-2">
-                <span className="ui-label">Sede</span>
-                <select name="site_id" className="ui-input" defaultValue={selectedSiteId} required>
-                  <option value="">Selecciona sede</option>
-                  {sites.map((site) => (
-                    <option key={site.id} value={site.id}>
-                      {siteLabel(site)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <input type="hidden" name="site_id" value={selectedSiteId} />
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
+                <div className="ui-label">Sede activa</div>
+                <div className="text-sm font-black text-[var(--ui-text)]">
+                  {siteLabel(selectedSite)}
+                </div>
+              </div>
               <label className="space-y-2">
                 <span className="ui-label">Nombre</span>
                 <input name="name" className="ui-input" placeholder="Bebidas frías" required />
@@ -641,17 +637,13 @@ export default async function CommercialCategoriesPage({
             </div>
 
             <form action={saveCategoriesBulk} className="grid gap-4 lg:grid-cols-[280px_1fr_auto]">
-              <label className="space-y-2">
-                <span className="ui-label">Sede</span>
-                <select name="site_id" className="ui-input" defaultValue={selectedSiteId} required>
-                  <option value="">Selecciona sede</option>
-                  {sites.map((site) => (
-                    <option key={site.id} value={site.id}>
-                      {siteLabel(site)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <input type="hidden" name="site_id" value={selectedSiteId} />
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
+                <div className="ui-label">Sede activa</div>
+                <div className="text-sm font-black text-[var(--ui-text)]">
+                  {siteLabel(selectedSite)}
+                </div>
+              </div>
 
               <label className="space-y-2">
                 <span className="ui-label">Categorías</span>
