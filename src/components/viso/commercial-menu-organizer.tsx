@@ -75,15 +75,15 @@ function swapRows(rows: MenuItemRow[], itemId: string, direction: "up" | "down")
 
 export function CommercialMenuOrganizer({ initialMenu }: CommercialMenuOrganizerProps) {
   const [menu, setMenu] = useState(initialMenu);
-  const [pendingItemId, setPendingItemId] = useState<string | null>(null);
+  const [pendingItemKey, setPendingItemKey] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  async function moveItem(itemId: string, direction: "up" | "down") {
-    if (pendingItemId) return;
+  async function moveItem({ itemId, collectionId, categoryId, direction }: { itemId: string; collectionId: string; categoryId: string; direction: "up" | "down" }) {
+    if (pendingItemKey) return;
 
     const previousMenu = menu;
     setError("");
-    setPendingItemId(itemId);
+    setPendingItemKey(`${collectionId}:${categoryId}:${itemId}`);
     setMenu((current) =>
       current.map((site) => ({
         ...site,
@@ -91,7 +91,7 @@ export function CommercialMenuOrganizer({ initialMenu }: CommercialMenuOrganizer
           ...collection,
           categories: collection.categories.map((category) => ({
             ...category,
-            rows: category.rows.some((row) => row.id === itemId)
+            rows: collection.collectionId === collectionId && category.categoryId === categoryId
               ? swapRows(category.rows, itemId, direction)
               : category.rows,
           })),
@@ -103,7 +103,7 @@ export function CommercialMenuOrganizer({ initialMenu }: CommercialMenuOrganizer
       const response = await fetch("/api/viso/menu/reorder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemId, direction }),
+        body: JSON.stringify({ itemId, collectionId, categoryId, direction }),
       });
       const payload = await response.json().catch(() => null) as { error?: string } | null;
 
@@ -114,7 +114,7 @@ export function CommercialMenuOrganizer({ initialMenu }: CommercialMenuOrganizer
       setMenu(previousMenu);
       setError(err instanceof Error ? err.message : "No se pudo guardar el orden.");
     } finally {
-      setPendingItemId(null);
+      setPendingItemKey(null);
     }
   }
 
@@ -185,10 +185,11 @@ export function CommercialMenuOrganizer({ initialMenu }: CommercialMenuOrganizer
                           const recipeCost = readNumericMeta(row.metadata, "recipe_cost_amount");
                           const marginAmount = readNumericMeta(row.metadata, "margin_amount");
                           const marginPct = readNumericMeta(row.metadata, "margin_pct");
-                          const isPending = pendingItemId === row.id;
+                          const rowKey = `${collectionGroup.collectionId}:${categoryGroup.categoryId}:${row.id}`;
+                          const isPending = pendingItemKey === rowKey;
 
                           return (
-                            <TableRow key={row.id}>
+                            <TableRow key={rowKey}>
                               <TableCell>
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm font-semibold text-[var(--ui-text)]">
@@ -199,8 +200,8 @@ export function CommercialMenuOrganizer({ initialMenu }: CommercialMenuOrganizer
                                     <button
                                       type="button"
                                       className="ui-btn ui-btn--ghost ui-btn--sm"
-                                      disabled={index === 0 || Boolean(pendingItemId)}
-                                      onClick={() => void moveItem(row.id, "up")}
+                                      disabled={index === 0 || Boolean(pendingItemKey)}
+                                      onClick={() => void moveItem({ itemId: row.id, collectionId: collectionGroup.collectionId, categoryId: categoryGroup.categoryId, direction: "up" })}
                                     >
                                       {isPending ? "Guardando..." : "Subir"}
                                     </button>
@@ -208,8 +209,8 @@ export function CommercialMenuOrganizer({ initialMenu }: CommercialMenuOrganizer
                                     <button
                                       type="button"
                                       className="ui-btn ui-btn--ghost ui-btn--sm"
-                                      disabled={index === categoryGroup.rows.length - 1 || Boolean(pendingItemId)}
-                                      onClick={() => void moveItem(row.id, "down")}
+                                      disabled={index === categoryGroup.rows.length - 1 || Boolean(pendingItemKey)}
+                                      onClick={() => void moveItem({ itemId: row.id, collectionId: collectionGroup.collectionId, categoryId: categoryGroup.categoryId, direction: "down" })}
                                     >
                                       {isPending ? "Guardando..." : "Bajar"}
                                     </button>

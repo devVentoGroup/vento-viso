@@ -4,9 +4,9 @@ import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type MenuItemMoveRow = {
-  id: string;
-  name: string;
-  sort_order: number | null;
+  catalog_item_id: string;
+  relation_sort_order: number | null;
+  catalog_item?: { id: string; name: string; site_id: string; commercial_category_id: string | null; product_id: string | null; price_amount: number; is_active: boolean; metadata?: Record<string, unknown> | null } | { id: string; name: string; site_id: string; commercial_category_id: string | null; product_id: string | null; price_amount: number; is_active: boolean; metadata?: Record<string, unknown> | null }[] | null;
 };
 
 function sortNumber(value: number | string | null | undefined, fallback = Number.MAX_SAFE_INTEGER) {
@@ -24,13 +24,17 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => null) as {
       itemId?: unknown;
+      collectionId?: unknown;
+      categoryId?: unknown;
       direction?: unknown;
     } | null;
 
     const itemId = typeof body?.itemId === "string" ? body.itemId.trim() : "";
+    const collectionId = typeof body?.collectionId === "string" ? body.collectionId.trim() : "";
+    const categoryId = typeof body?.categoryId === "string" ? body.categoryId.trim() : "";
     const direction = typeof body?.direction === "string" ? body.direction.trim() : "";
 
-    if (!itemId || (direction !== "up" && direction !== "down")) {
+    if (!itemId || !collectionId || !categoryId || (direction !== "up" && direction !== "down")) {
       return jsonError("Movimiento inválido.");
     }
 
@@ -38,50 +42,51 @@ export async function POST(request: NextRequest) {
     const { data: current, error: currentError } = await supabase
       .schema("pass")
       .from("catalog_items")
-      .select("id,site_id,commercial_collection_id,commercial_category_id")
+      .select("id,site_id,commercial_category_id")
       .eq("id", itemId)
+      .eq("commercial_category_id", categoryId)
       .maybeSingle();
 
     if (currentError || !current) {
       return jsonError(currentError?.message || "No se encontró el item comercial.", 404);
     }
 
-    if (!current.commercial_category_id) {
-      return jsonError("El item no tiene categoría comercial.");
+    const { data: currentRelation, error: currentRelationError } = await supabase
+      .schema("pass")
+      .from("catalog_item_collections")
+      .select("catalog_item_id,commercial_collection_id")
+      .eq("catalog_item_id", itemId)
+      .eq("commercial_collection_id", collectionId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (currentRelationError || !currentRelation) {
+      return jsonError(currentRelationError?.message || "El item no pertenece a esta colección activa.", 404);
     }
 
-    let groupQuery = supabase
+    const { data: groupRaw, error: groupError } = await supabase
       .schema("pass")
-      .from("catalog_items")
-      .select("id,name,sort_order")
-      .eq("site_id", current.site_id)
-      .eq("commercial_category_id", current.commercial_category_id)
-      .not("product_id", "is", null)
-      .gt("price_amount", 0)
-      .eq("metadata->>source_app", "viso")
-      .eq("metadata->>source_module", "menu_comercial")
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true });
-
-    groupQuery = current.commercial_collection_id
-      ? groupQuery.eq("commercial_collection_id", current.commercial_collection_id)
-      : groupQuery.is("commercial_collection_id", null);
-
-    const { data: groupRaw, error: groupError } = await groupQuery;
+      .from("catalog_item_collections")
+      .select("catalog_item_id,relation_sort_order:sort_order,catalog_item:catalog_items!inner(id,name,site_id,commercial_category_id,product_id,price_amount,is_active,metadata)")
+      .eq("commercial_collection_id", collectionId)
+      .eq("is_active", true);
 
     if (groupError) {
       return jsonError(groupError.message, 500);
     }
 
-    const group = ((groupRaw ?? []) as MenuItemMoveRow[]).sort((a, b) => {
-      const aOrder = sortNumber(a.sort_order);
-      const bOrder = sortNumber(b.sort_order);
+    const group = ((groupRaw ?? []) as MenuItemMoveRow[]).map((relation) => ({ ...relation, catalog_item: Array.isArray(relation.catalog_item) ? relation.catalog_item[0] ?? null : relation.catalog_item })).filter((relation) => {
+      const item = relation.catalog_item;
+      return item && item.site_id === current.site_id && item.commercial_category_id === categoryId && item.is_active === true && Boolean(item.product_id) && item.price_amount > 0 && item.metadata?.source_app === "viso" && item.metadata?.source_module === "menu_comercial";
+    }).sort((a, b) => {
+      const aOrder = sortNumber(a.relation_sort_order);
+      const bOrder = sortNumber(b.relation_sort_order);
 
       if (aOrder !== bOrder) return aOrder - bOrder;
-      return a.name.localeCompare(b.name, "es-CO");
+      return a.catalog_item!.name.localeCompare(b.catalog_item!.name, "es-CO");
     });
 
-    const currentIndex = group.findIndex((item) => item.id === itemId);
+    const currentIndex = group.findIndex((item) => item.catalog_item_id === itemId);
     const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
 
     if (currentIndex < 0 || targetIndex < 0 || targetIndex >= group.length) {
@@ -97,9 +102,11 @@ export async function POST(request: NextRequest) {
       reordered.map((item, index) =>
         supabase
           .schema("pass")
-          .from("catalog_items")
+          .from("catalog_item_collections")
           .update({ sort_order: index * 10 })
-          .eq("id", item.id),
+          .eq("catalog_item_id", item.catalog_item_id)
+          .eq("commercial_collection_id", collectionId)
+          .eq("is_active", true),
       ),
     );
 
@@ -111,7 +118,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      order: reordered.map((item) => item.id),
+      collectionId,
+      categoryId,
+      order: reordered.map((item) => item.catalog_item_id),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo guardar el orden.";

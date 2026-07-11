@@ -14,12 +14,7 @@ type MenuItemRow = {
   site_id: string;
   product_id: string | null;
   category_label: string | null;
-  commercial_collection_id: string | null;
   commercial_category_id: string | null;
-  commercial_collection?:
-  | { id: string; name: string | null; subtitle: string | null; code: string | null; kind: string | null; sort_order: number | null }
-  | { id: string; name: string | null; subtitle: string | null; code: string | null; kind: string | null; sort_order: number | null }[]
-  | null;
   commercial_category?:
   | { id: string; name: string | null; code: string | null; sort_order: number | null }
   | { id: string; name: string | null; code: string | null; sort_order: number | null }[]
@@ -30,6 +25,33 @@ type MenuItemRow = {
   is_featured: boolean;
   metadata?: Record<string, unknown> | null;
   site?: { id: string; name: string | null; code: string | null } | { id: string; name: string | null; code: string | null }[] | null;
+};
+
+type CommercialCollection = {
+  id: string;
+  site_id: string | null;
+  name: string | null;
+  subtitle: string | null;
+  code: string | null;
+  kind: string | null;
+  sort_order: number | null;
+  is_active: boolean | null;
+};
+
+type CatalogItemCollectionRelation = {
+  catalog_item_id: string;
+  commercial_collection_id: string;
+  sort_order: number | null;
+  is_active: boolean | null;
+  is_primary: boolean | null;
+  commercial_collection?: CommercialCollection | CommercialCollection[] | null;
+};
+
+type ExpandedMenuItemRow = MenuItemRow & {
+  commercial_collection_id: string;
+  commercial_collection: CommercialCollection;
+  relation_sort_order: number;
+  is_primary_collection: boolean;
 };
 
 type CollectionCategoryLinkRow = {
@@ -98,7 +120,7 @@ export default async function MenuPage({
     supabase
       .schema("pass")
       .from("catalog_items")
-      .select("id,code,name,site_id,product_id,category_label,commercial_collection_id,commercial_collection:commercial_collections(id,name,subtitle,code,kind,sort_order),commercial_category_id,commercial_category:commercial_categories(id,name,code,sort_order),price_amount,sort_order,is_active,is_featured,metadata")
+      .select("id,code,name,site_id,product_id,category_label,commercial_category_id,commercial_category:commercial_categories(id,name,code,sort_order),price_amount,sort_order,is_active,is_featured,metadata")
       .not("product_id", "is", null)
       .not("commercial_category_id", "is", null)
       .eq("is_active", true)
@@ -116,9 +138,37 @@ export default async function MenuPage({
     ? []
     : ((data ?? []) as MenuItemRow[]).filter(isVisoCommercialMenuItem);
 
+  const itemIds = commercialRows.map((row) => row.id).filter(Boolean);
+  const { data: collectionRelationsRaw, error: collectionRelationsError } = itemIds.length
+    ? await supabase
+      .schema("pass")
+      .from("catalog_item_collections")
+      .select("catalog_item_id,commercial_collection_id,sort_order,is_active,is_primary,commercial_collection:commercial_collections!inner(id,site_id,name,subtitle,code,kind,sort_order,is_active)")
+      .in("catalog_item_id", itemIds)
+      .eq("is_active", true)
+      .eq("commercial_collection.is_active", true)
+    : { data: [], error: null };
+
+  const commercialRowsById = new Map(commercialRows.map((row) => [row.id, row]));
+  const expandedCommercialRows: ExpandedMenuItemRow[] = collectionRelationsError
+    ? []
+    : ((collectionRelationsRaw ?? []) as CatalogItemCollectionRelation[]).flatMap((relation) => {
+      const row = commercialRowsById.get(relation.catalog_item_id);
+      const collection = relationOne(relation.commercial_collection);
+      if (!row || !collection || relation.is_active === false || collection.is_active === false) return [];
+
+      return [{
+        ...row,
+        commercial_collection_id: relation.commercial_collection_id,
+        commercial_collection: collection,
+        relation_sort_order: sortNumber(relation.sort_order, sortNumber(row.sort_order)),
+        is_primary_collection: relation.is_primary === true,
+      }];
+    });
+
   const siteIds = Array.from(
     new Set(
-      commercialRows
+      expandedCommercialRows
         .map((row) => row.site_id)
         .filter(Boolean),
     ),
@@ -142,7 +192,7 @@ export default async function MenuPage({
     ]),
   );
 
-  const rows = commercialRows.map((row) => ({
+  const rows = expandedCommercialRows.map((row) => ({
     ...row,
     site: siteById.get(row.site_id) ?? null,
   }));
@@ -178,7 +228,7 @@ export default async function MenuPage({
             {
               label: string;
               sortOrder: number;
-              rows: MenuItemRow[];
+              rows: ExpandedMenuItemRow[];
             }
           >;
         }
@@ -192,7 +242,7 @@ export default async function MenuPage({
     const category = relationOne(row.commercial_category);
 
     const siteId = row.site_id;
-    const collectionId = row.commercial_collection_id || collection?.id || "__sin_coleccion__";
+    const collectionId = row.commercial_collection_id;
     const categoryId = row.commercial_category_id || category?.id || "__sin_categoria__";
 
     if (!rowsBySite.has(siteId)) {
@@ -244,8 +294,8 @@ export default async function MenuPage({
               label: categoryGroup.label,
               sortOrder: categoryGroup.sortOrder,
               rows: categoryGroup.rows.sort((a, b) => {
-                const aOrder = sortNumber(a.sort_order);
-                const bOrder = sortNumber(b.sort_order);
+                const aOrder = sortNumber(a.relation_sort_order, sortNumber(a.sort_order));
+                const bOrder = sortNumber(b.relation_sort_order, sortNumber(b.sort_order));
 
                 if (aOrder !== bOrder) return aOrder - bOrder;
                 return a.name.localeCompare(b.name, "es-CO");
@@ -300,6 +350,11 @@ export default async function MenuPage({
       {categoryLinksError ? (
         <div className="ui-alert ui-alert--error">
           No se pudo cargar el orden de categorias por coleccion: {categoryLinksError.message}
+        </div>
+      ) : null}
+      {collectionRelationsError ? (
+        <div className="ui-alert ui-alert--error">
+          No se pudieron cargar las relaciones de colecciones del menú: {collectionRelationsError.message}
         </div>
       ) : null}
       {sitesError ? (
