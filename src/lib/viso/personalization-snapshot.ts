@@ -131,8 +131,13 @@ type InventoryUnitRow = {
 type CommercialCatalogRelationRow = {
   id: string;
   name: string | null;
+  subtitle?: string | null;
   code: string | null;
+  kind?: string | null;
   sort_order?: number | string | null;
+  is_active?: boolean | null;
+  starts_at?: string | null;
+  ends_at?: string | null;
 };
 
 type CommercialCatalogItemOptionRow = {
@@ -143,9 +148,9 @@ type CommercialCatalogItemOptionRow = {
   price_amount: number | string | null;
   image_url: string | null;
   category_label: string | null;
-  commercial_collection_id?: string | null;
+  commercial_collection_id: string;
   commercial_category_id?: string | null;
-  commercial_collection?: CommercialCatalogRelationRow | CommercialCatalogRelationRow[] | null;
+  commercial_collection: CommercialCatalogRelationRow;
   commercial_category?: CommercialCatalogRelationRow | CommercialCatalogRelationRow[] | null;
   sort_order?: number | string | null;
   is_active: boolean | null;
@@ -301,7 +306,7 @@ export async function fetchPersonalizationSnapshot(
     supabase
       .schema("pass")
       .from("catalog_items")
-      .select("id,name,product_id,description,price_amount,image_url,category_label,is_active,sort_order,commercial_collection_id,commercial_category_id,commercial_collection:commercial_collections(id,name,subtitle,code,kind,sort_order),commercial_category:commercial_categories(id,name,code,sort_order)")
+      .select("id,name,product_id,description,price_amount,image_url,category_label,is_active,sort_order,commercial_category_id,commercial_category:commercial_categories(id,name,code,sort_order)")
       .eq("site_id", currentItem.site_id)
       .eq("is_active", true)
       .neq("id", itemId)
@@ -379,6 +384,47 @@ export async function fetchPersonalizationSnapshot(
       : Promise.resolve({ data: [] }),
   ]);
 
+  const commercialCatalogItems = (commercialCatalogItemsRaw ?? []) as Array<Omit<CommercialCatalogItemOptionRow, "commercial_collection_id" | "commercial_collection">>;
+  const commercialCatalogItemIds = commercialCatalogItems.map((item) => item.id);
+  const { data: catalogRelationsRaw } = commercialCatalogItemIds.length > 0
+    ? await supabase
+      .schema("pass")
+      .from("catalog_item_collections")
+      .select("catalog_item_id,commercial_collection_id,sort_order,is_active,is_primary,commercial_collection:commercial_collections(id,name,subtitle,code,kind,sort_order,is_active,starts_at,ends_at)")
+      .in("catalog_item_id", commercialCatalogItemIds)
+      .eq("is_active", true)
+    : { data: [] };
+  const itemById = new Map(commercialCatalogItems.map((item) => [item.id, item]));
+  const seenRelations = new Set<string>();
+  const expandedCommercialCatalogItems = ((catalogRelationsRaw ?? []) as Array<{
+    catalog_item_id: string;
+    commercial_collection_id: string;
+    sort_order: number | string | null;
+    is_active: boolean | null;
+    commercial_collection: CommercialCatalogRelationRow | CommercialCatalogRelationRow[] | null;
+  }>)
+    .flatMap((relation) => {
+      const item = itemById.get(relation.catalog_item_id);
+      const collection = Array.isArray(relation.commercial_collection)
+        ? relation.commercial_collection[0] ?? null
+        : relation.commercial_collection;
+      const key = `${relation.catalog_item_id}:${relation.commercial_collection_id}`;
+      if (!item || !collection || collection.is_active === false || seenRelations.has(key)) return [];
+      seenRelations.add(key);
+      return [{
+        ...item,
+        commercial_collection_id: relation.commercial_collection_id,
+        commercial_collection: collection,
+        sort_order: relation.sort_order ?? item.sort_order,
+      }];
+    })
+    .sort((a, b) =>
+      `${a.commercial_collection.name ?? a.commercial_collection.code ?? ""}:${a.commercial_category_id ?? ""}:${String(a.sort_order ?? "")}:${a.name ?? ""}`.localeCompare(
+        `${b.commercial_collection.name ?? b.commercial_collection.code ?? ""}:${b.commercial_category_id ?? ""}:${String(b.sort_order ?? "")}:${b.name ?? ""}`,
+        "es-CO",
+      ),
+    );
+
   return {
     currentItem,
     visualVariants,
@@ -392,7 +438,7 @@ export async function fetchPersonalizationSnapshot(
     recipeIngredients,
     consumptionProducts,
     inventoryUnits: (inventoryUnitsRaw ?? []) as InventoryUnitRow[],
-    commercialCatalogItems: ((commercialCatalogItemsRaw ?? []) as CommercialCatalogItemOptionRow[]).filter((entry) => entry.is_active !== false),
+    commercialCatalogItems: expandedCommercialCatalogItems,
     visualAssets: ((visualAssetsRaw ?? []) as CatalogOptionVisualAssetRow[]).filter((entry) => entry.is_active !== false),
   };
 }

@@ -105,9 +105,9 @@ type CommercialCatalogItemOptionRow = {
   price_amount: number | string | null;
   image_url: string | null;
   category_label: string | null;
-  commercial_collection_id?: string | null;
+  commercial_collection_id: string;
   commercial_category_id?: string | null;
-  commercial_collection?: CommercialCatalogRelationRow | CommercialCatalogRelationRow[] | null;
+  commercial_collection: CommercialCatalogRelationRow;
   commercial_category?: CommercialCatalogRelationRow | CommercialCatalogRelationRow[] | null;
   sort_order?: number | string | null;
   is_active: boolean | null;
@@ -324,7 +324,7 @@ function buildCommercialCatalogGroups(items: CommercialCatalogItemOptionRow[]) {
   for (const item of items.filter((catalogItem) => catalogItem.is_active !== false)) {
     const collection = getCommercialCatalogCollection(item);
     const category = getCommercialCatalogCategory(item);
-    const collectionKey = item.commercial_collection_id || collection?.id || "__sin_coleccion__";
+    const collectionKey = item.commercial_collection_id;
     const categoryKey = item.commercial_category_id || category?.id || item.category_label || "__sin_categoria__";
 
     if (!collectionMap.has(collectionKey)) {

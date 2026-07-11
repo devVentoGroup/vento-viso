@@ -512,38 +512,24 @@ async function deleteCollection(formData: FormData) {
     );
   }
 
-  const [
-    { count: canonicalItemsCount, error: canonicalItemsError },
-    { count: pricedItemsCount, error: pricedItemsError },
-  ] = await Promise.all([
-    supabase
-      .schema("pass")
-      .from("catalog_items")
-      .select("id", { count: "exact", head: true })
-      .eq("commercial_collection_id", id)
-      .eq("metadata->>source_app", "viso")
-      .eq("metadata->>source_module", "menu_comercial"),
-    supabase
-      .schema("pass")
-      .from("catalog_items")
-      .select("id", { count: "exact", head: true })
-      .eq("commercial_collection_id", id)
-      .gt("price_amount", 0),
-  ]);
+  const { count: relationCount, error: relationsError } = await supabase
+    .schema("pass")
+    .from("catalog_item_collections")
+    .select("catalog_item_id", { count: "exact", head: true })
+    .eq("commercial_collection_id", id);
 
-  if (canonicalItemsError || pricedItemsError) {
+  if (relationsError) {
     redirect(
       commercialCollectionsPath(
         redirectSiteId,
         "error",
-        canonicalItemsError?.message ||
-        pricedItemsError?.message ||
+        relationsError.message ||
         "No se pudo validar si la coleccion tiene items asignados.",
       ),
     );
   }
 
-  if ((canonicalItemsCount ?? 0) > 0 || (pricedItemsCount ?? 0) > 0) {
+  if ((relationCount ?? 0) > 0) {
     redirect(
       commercialCollectionsPath(
         redirectSiteId,

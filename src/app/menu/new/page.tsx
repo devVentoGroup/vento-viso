@@ -392,20 +392,42 @@ async function getNextCatalogItemSortOrder(
 ) {
   const { data, error } = await supabase
     .schema("pass")
-    .from("catalog_items")
-    .select("sort_order")
-    .eq("site_id", siteId)
+    .from("catalog_item_collections")
+    .select("sort_order,catalog_item:catalog_items!inner(site_id,product_id,commercial_category_id,price_amount,is_active,metadata)")
     .eq("commercial_collection_id", commercialCollectionId)
-    .eq("commercial_category_id", commercialCategoryId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .eq("is_active", true);
 
   if (error) {
     throw new Error(`No se pudo calcular el orden automático: ${error.message}`);
   }
 
-  return Number(data?.sort_order ?? 0) + 10;
+  const highestOrder = (data ?? []).reduce((highest, relation) => {
+    const item = Array.isArray(relation.catalog_item) ? relation.catalog_item[0] : relation.catalog_item;
+    if (
+      !item ||
+      item.site_id !== siteId ||
+      item.commercial_category_id !== commercialCategoryId ||
+      item.is_active === false ||
+      !item.product_id ||
+      Number(item.price_amount ?? 0) <= 0 ||
+      item.metadata?.source_app !== "viso" ||
+      item.metadata?.source_module !== "menu_comercial"
+    ) return highest;
+    return Math.max(highest, Number(relation.sort_order ?? 0));
+  }, 0);
+
+  return highestOrder + 10;
+}
+
+async function cleanupCreatedCatalogItem(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  catalogItemId: string,
+  deleteRelations = false,
+) {
+  if (deleteRelations) {
+    await supabase.schema("pass").from("catalog_item_collections").delete().eq("catalog_item_id", catalogItemId);
+  }
+  await supabase.schema("pass").from("catalog_items").delete().eq("id", catalogItemId);
 }
 
 async function createMenuItem(formData: FormData) {
@@ -445,20 +467,20 @@ async function createMenuItem(formData: FormData) {
   const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
   const opensDetailModal = asBool(formData.get("opens_detail_modal"));
 
-  const referencesValidation = await validateCommercialMenuReferences(
-    supabase,
-    productId,
-    siteId,
-    commercialCategoryId,
-    commercialCollectionId,
+  const referencesValidations = await Promise.all(
+    collectionIds.map((collectionId) =>
+      validateCommercialMenuReferences(supabase, productId, siteId, commercialCategoryId, collectionId),
+    ),
   );
+  const referencesValidation = referencesValidations[0];
 
-  if (referencesValidation.error) {
-    redirect("/menu/new?error=" + encodeURIComponent(referencesValidation.error));
+  if (!referencesValidation || referencesValidations.some((validation) => validation.error)) {
+    redirect("/menu/new?error=" + encodeURIComponent("Una o más colecciones no son válidas para la sede o sección seleccionada."));
   }
 
   let code = "";
   let sortOrder = 0;
+  const requestedSortOrder = asText(formData.get("sort_order"));
 
   try {
     const requestedCode = slugify(asText(formData.get("code")));
@@ -481,15 +503,9 @@ async function createMenuItem(formData: FormData) {
       );
     }
 
-    const requestedSortOrder = asText(formData.get("sort_order"));
     sortOrder = requestedSortOrder
       ? Math.round(asNonNegativeNumber(formData.get("sort_order")))
-      : await getNextCatalogItemSortOrder(
-        supabase,
-        siteId,
-        commercialCollectionId,
-        commercialCategoryId,
-      );
+      : await getNextCatalogItemSortOrder(supabase, siteId, commercialCollectionId, commercialCategoryId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo generar código u orden automático.";
     redirect("/menu/new?error=" + encodeURIComponent(message));
@@ -499,7 +515,6 @@ async function createMenuItem(formData: FormData) {
     source_app: "viso",
     source_module: "menu_comercial",
     operational_product_id: productId,
-    commercial_collection_id: commercialCollectionId,
     commercial_category_id: commercialCategoryId,
     base_price_amount: referencesValidation.basePriceAmount,
     recipe_cost_amount: referencesValidation.recipeCostAmount,
@@ -516,7 +531,6 @@ async function createMenuItem(formData: FormData) {
       site_id: siteId,
       product_id: productId,
       description: asText(formData.get("description")) || null,
-      commercial_collection_id: commercialCollectionId,
       commercial_category_id: commercialCategoryId,
       category_label: referencesValidation.categoryLabel,
       image_url: asText(formData.get("image_url")) || null,
@@ -540,10 +554,15 @@ async function createMenuItem(formData: FormData) {
     redirect("/menu/new?error=" + encodeURIComponent("Item creado sin identificador."));
   }
 
+  const relationSortOrders = requestedSortOrder
+    ? collectionIds.map(() => sortOrder)
+    : await Promise.all(collectionIds.map((collectionId) =>
+      getNextCatalogItemSortOrder(supabase, siteId, collectionId, commercialCategoryId),
+    ));
   const collectionRows = collectionIds.map((collectionId, index) => ({
     catalog_item_id: createdItem.id,
     commercial_collection_id: collectionId,
-    sort_order: sortOrder,
+    sort_order: relationSortOrders[index],
     is_active: true,
     is_primary: index === 0,
     metadata: { configured_from: "viso_product_form" },
@@ -555,6 +574,7 @@ async function createMenuItem(formData: FormData) {
     .upsert(collectionRows, { onConflict: "catalog_item_id,commercial_collection_id" });
 
   if (collectionsError) {
+    await cleanupCreatedCatalogItem(supabase, createdItem.id);
     redirect("/menu/new?error=" + encodeURIComponent(collectionsError.message));
   }
 
@@ -575,6 +595,7 @@ async function createMenuItem(formData: FormData) {
     );
 
   if (presentationError) {
+    await cleanupCreatedCatalogItem(supabase, createdItem.id, true);
     redirect("/menu/new?error=" + encodeURIComponent(presentationError.message));
   }
 
@@ -813,7 +834,6 @@ export default async function NewMenuItemPage({
           is_active: true,
           is_featured: false,
           site_id: commercialSites[0]?.id ?? "",
-          commercial_collection_id: "",
           commercial_category_id: "",
           category_label: "",
           image_url: "",

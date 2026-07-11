@@ -81,7 +81,6 @@ type MenuItemFormValues = {
   is_active: boolean;
   is_featured: boolean;
   site_id: string;
-  commercial_collection_id?: string;
   commercial_collection_ids?: string[];
   commercial_category_id: string;
   category_label: string;
@@ -211,11 +210,7 @@ export function MenuItemForm({
   const [showExistingProducts, setShowExistingProducts] = useState(false);
   const [priceAmount, setPriceAmount] = useState(initial.price_amount);
   const [siteId, setSiteId] = useState(initial.site_id || sites[0]?.id || "");
-  const initialCollectionIds = initial.commercial_collection_ids?.length
-    ? initial.commercial_collection_ids
-    : initial.commercial_collection_id
-      ? [initial.commercial_collection_id]
-      : [];
+  const initialCollectionIds = initial.commercial_collection_ids ?? [];
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>(initialCollectionIds);
   const commercialCollectionId = selectedCollectionIds[0] ?? "";
   const [commercialCategoryId, setCommercialCategoryId] = useState(initial.commercial_category_id);
@@ -724,7 +719,6 @@ export function MenuItemForm({
           <div className="ui-h3">3. Dónde debe aparecer</div>
           <p className="ui-caption">Puedes mostrar el mismo producto en varios menús o temporadas sin duplicarlo.</p>
         </div>
-        <input type="hidden" name="commercial_collection_id" value={commercialCollectionId} />
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {visibleCollections.map((collection) => {
             const checked = selectedCollectionIds.includes(collection.id);

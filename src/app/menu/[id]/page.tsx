@@ -58,7 +58,6 @@ type CatalogItemRow = {
   description: string | null;
   site_id: string;
   product_id: string | null;
-  commercial_collection_id: string | null;
   commercial_category_id: string | null;
   category_label: string | null;
   image_url: string | null;
@@ -74,6 +73,13 @@ type CatalogItemRow = {
 
 type CatalogItemCollectionRow = {
   catalog_item_id: string;
+  commercial_collection_id: string;
+  sort_order: number | null;
+  is_active: boolean | null;
+  is_primary: boolean | null;
+};
+
+type ExistingItemCollectionRelation = {
   commercial_collection_id: string;
   sort_order: number | null;
   is_active: boolean | null;
@@ -158,6 +164,35 @@ function getRequestedCollectionIds(formData: FormData) {
   return Array.from(new Set(selected.length > 0 ? selected : fallback ? [fallback] : []));
 }
 
+async function getNextCatalogItemRelationSortOrder(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  commercialCollectionId: string,
+  commercialCategoryId: string,
+) {
+  const { data, error } = await supabase
+    .schema("pass")
+    .from("catalog_item_collections")
+    .select("sort_order,catalog_item:catalog_items!inner(product_id,commercial_category_id,price_amount,is_active,metadata)")
+    .eq("commercial_collection_id", commercialCollectionId)
+    .eq("is_active", true);
+
+  if (error) throw new Error(error.message);
+
+  return (data ?? []).reduce((highest, relation) => {
+    const item = Array.isArray(relation.catalog_item) ? relation.catalog_item[0] : relation.catalog_item;
+    if (
+      !item ||
+      item.commercial_category_id !== commercialCategoryId ||
+      item.is_active === false ||
+      !item.product_id ||
+      Number(item.price_amount ?? 0) <= 0 ||
+      item.metadata?.source_app !== "viso" ||
+      item.metadata?.source_module !== "menu_comercial"
+    ) return highest;
+    return Math.max(highest, Number(relation.sort_order ?? 0));
+  }, 0) + 10;
+}
+
 async function updateMenuItem(formData: FormData) {
   "use server";
 
@@ -170,7 +205,6 @@ async function updateMenuItem(formData: FormData) {
   const productId = asText(formData.get("product_id"));
   const commercialCategoryId = asText(formData.get("commercial_category_id"));
   const collectionIds = getRequestedCollectionIds(formData);
-  const primaryCollectionId = collectionIds[0] ?? "";
 
   if (!id || !code || !name || !siteId || !productId || !commercialCategoryId || collectionIds.length === 0) {
     redirect(`/menu/${id}?error=${encodeURIComponent("Faltan campos obligatorios.")}`);
@@ -183,7 +217,9 @@ async function updateMenuItem(formData: FormData) {
 
   const compareAtRaw = asText(formData.get("compare_at_amount"));
   const compareAtAmount = compareAtRaw ? asNonNegativeNumber(formData.get("compare_at_amount")) : null;
-  const sortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
+  const requestedSortOrderText = asText(formData.get("sort_order"));
+  const hasExplicitSortOrder = requestedSortOrderText !== "";
+  const explicitSortOrder = Math.round(asNonNegativeNumber(requestedSortOrderText));
   const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
   const requestedOpensDetailModal = asBool(formData.get("opens_detail_modal"));
 
@@ -264,13 +300,52 @@ async function updateMenuItem(formData: FormData) {
     redirect(`/menu/${id}?error=${encodeURIComponent(categoryLinksError.message)}`);
   }
 
+  const { data: existingRelationsRaw, error: existingRelationsError } = await admin
+    .schema("pass")
+    .from("catalog_item_collections")
+    .select("commercial_collection_id,sort_order,is_active,is_primary")
+    .eq("catalog_item_id", id);
+
+  if (existingRelationsError) {
+    redirect(`/menu/${id}?error=${encodeURIComponent(existingRelationsError.message)}`);
+  }
+
+  const existingRelationByCollectionId = new Map<string, ExistingItemCollectionRelation>();
+  for (const relation of (existingRelationsRaw ?? []) as ExistingItemCollectionRelation[]) {
+    const current = existingRelationByCollectionId.get(relation.commercial_collection_id);
+    if (!current || (relation.sort_order ?? Number.MAX_SAFE_INTEGER) < (current.sort_order ?? Number.MAX_SAFE_INTEGER)) {
+      existingRelationByCollectionId.set(relation.commercial_collection_id, relation);
+    }
+  }
+
+  let resolvedCollectionRelations: Array<ExistingItemCollectionRelation & { catalog_item_id: string; metadata: Record<string, unknown> }>;
+  try {
+    resolvedCollectionRelations = await Promise.all(collectionIds.map(async (collectionId, index) => {
+      const existing = existingRelationByCollectionId.get(collectionId);
+      const sortOrder = hasExplicitSortOrder
+        ? explicitSortOrder
+        : existing?.sort_order ?? await getNextCatalogItemRelationSortOrder(supabase, collectionId, commercialCategoryId);
+      return {
+        catalog_item_id: id,
+        commercial_collection_id: collectionId,
+        sort_order: sortOrder,
+        is_active: true,
+        is_primary: index === 0,
+        metadata: { configured_from: "viso_product_form" },
+      };
+    }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo calcular el orden de las colecciones.";
+    redirect(`/menu/${id}?error=${encodeURIComponent(message)}`);
+  }
+
   const currentMetadata = parseMetadata(asText(formData.get("metadata_extra")));
+  delete currentMetadata.commercial_collection_id;
   const metadata = {
     ...currentMetadata,
     source_app: "viso",
     source_module: "menu_comercial",
     operational_product_id: productId,
-    commercial_collection_id: primaryCollectionId,
     commercial_category_id: commercialCategoryId,
     base_price_amount: toOptionalNumber(sellOption.base_price),
     recipe_cost_amount: toOptionalNumber(sellOption.recipe_cost_amount),
@@ -287,13 +362,12 @@ async function updateMenuItem(formData: FormData) {
       description: asText(formData.get("description")) || null,
       site_id: siteId,
       product_id: productId,
-      commercial_collection_id: primaryCollectionId,
       commercial_category_id: commercialCategoryId,
       category_label: category.name || category.code || "",
       image_url: asText(formData.get("image_url")) || null,
       price_amount: priceAmount,
       compare_at_amount: compareAtAmount,
-      sort_order: sortOrder,
+      ...(hasExplicitSortOrder ? { sort_order: explicitSortOrder } : {}),
       is_active: asBool(formData.get("is_active")),
       is_featured: asBool(formData.get("is_featured")),
       badges: parseBadgesCsv(asText(formData.get("badges_csv"))),
@@ -306,14 +380,7 @@ async function updateMenuItem(formData: FormData) {
     redirect(`/menu/${id}?error=${encodeURIComponent(updateError.message)}`);
   }
 
-  const relationRows = collectionIds.map((collectionId, index) => ({
-    catalog_item_id: id,
-    commercial_collection_id: collectionId,
-    sort_order: sortOrder,
-    is_active: true,
-    is_primary: index === 0,
-    metadata: { configured_from: "viso_product_form" },
-  }));
+  const relationRows = resolvedCollectionRelations;
 
   const { error: relationUpsertError } = await supabase
     .schema("pass")
@@ -324,21 +391,7 @@ async function updateMenuItem(formData: FormData) {
     redirect(`/menu/${id}?error=${encodeURIComponent(relationUpsertError.message)}`);
   }
 
-  const { data: currentRelations, error: currentRelationsError } = await admin
-    .schema("pass")
-    .from("catalog_item_collections")
-    .select("commercial_collection_id,is_active")
-    .eq("catalog_item_id", id);
-
-  if (currentRelationsError) {
-    redirect(`/menu/${id}?error=${encodeURIComponent(currentRelationsError.message)}`);
-  }
-
-  const removedCollectionIds = ((currentRelations ?? []) as Array<{
-    commercial_collection_id: string | null;
-    is_active: boolean | null;
-  }>)
-    .map((relation) => String(relation.commercial_collection_id ?? ""))
+  const removedCollectionIds = Array.from(existingRelationByCollectionId.keys())
     .filter((collectionId) => collectionId && !collectionIds.includes(collectionId));
 
   if (removedCollectionIds.length > 0) {
@@ -420,7 +473,7 @@ export default async function MenuItemEditPage({
     admin
       .schema("pass")
       .from("catalog_items")
-      .select("id,code,name,description,site_id,product_id,commercial_collection_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
+      .select("id,code,name,description,site_id,product_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
       .eq("id", id)
       .maybeSingle(),
     admin.from("sites").select("id,code,name,is_active").eq("is_active", true).order("name", { ascending: true }),
@@ -540,11 +593,7 @@ export default async function MenuItemEditPage({
   const itemCollections = ((itemCollectionsRaw ?? []) as CatalogItemCollectionRow[])
     .filter((relation) => relation.is_active !== false)
     .map((relation) => relation.commercial_collection_id);
-  const selectedCollectionIds = itemCollections.length > 0
-    ? Array.from(new Set(itemCollections))
-    : item.commercial_collection_id
-      ? [item.commercial_collection_id]
-      : [];
+  const selectedCollectionIds = Array.from(new Set(itemCollections));
 
   const metadata = item.metadata ?? {};
   const fulfillmentModes = item.fulfillment_modes ?? [];
@@ -585,7 +634,6 @@ export default async function MenuItemEditPage({
           is_active: item.is_active,
           is_featured: item.is_featured,
           site_id: item.site_id,
-          commercial_collection_id: selectedCollectionIds[0] ?? "",
           commercial_collection_ids: selectedCollectionIds,
           commercial_category_id: item.commercial_category_id ?? "",
           category_label: item.category_label ?? "",
