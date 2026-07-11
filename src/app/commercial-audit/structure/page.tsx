@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { serverNowMs } from "@/lib/time/server";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +105,21 @@ function isVisibleNow(collection: CollectionRow, now: number) {
     (!collection.ends_at || Date.parse(collection.ends_at) > now);
 }
 
+function isValidStructuralRelation(
+  relation: ItemCollectionRelation,
+  itemsById: Map<string, ItemRow>,
+) {
+  const item = itemsById.get(relation.catalog_item_id);
+  const collection = oneCollection(relation.commercial_collection);
+
+  return (
+    item !== undefined &&
+    collection !== null &&
+    collection.is_active !== false &&
+    collection.site_id === item.site_id
+  );
+}
+
 export default async function CommercialStructureAuditPage() {
   await requireAppAccess({ appId: "viso", returnTo: "/commercial-audit/structure" });
 
@@ -135,7 +151,12 @@ export default async function CommercialStructureAuditPage() {
       .select(
         "id,site_id,product_id,name,image_url,commercial_category_id,is_active,metadata",
       ),
-    supabase.schema("pass").from("catalog_item_collections").select("catalog_item_id,commercial_collection_id,is_active,is_primary,commercial_collection:commercial_collections(id,site_id,name,code,kind,starts_at,ends_at,is_active,sort_order)"),
+    supabase
+      .schema("pass")
+      .from("catalog_item_collections")
+      .select(
+        "catalog_item_id,commercial_collection_id,is_active,is_primary,commercial_collection:commercial_collections(id,site_id,name,code,kind,starts_at,ends_at,is_active,sort_order)",
+      ),
   ]);
 
   const loadErrors = [
@@ -173,11 +194,9 @@ export default async function CommercialStructureAuditPage() {
       relation,
     ]);
   }
-  const validRelations = activeRelations.filter((relation) => {
-    const item = itemsById.get(relation.catalog_item_id);
-    const collection = oneCollection(relation.commercial_collection);
-    return Boolean(item) && Boolean(collection) && collection!.is_active !== false && collection!.site_id === item!.site_id;
-  });
+  const validRelations = activeRelations.filter((relation) =>
+    isValidStructuralRelation(relation, itemsById),
+  );
   const validRelationsByItem = new Map<string, ItemCollectionRelation[]>();
   for (const relation of validRelations) {
     validRelationsByItem.set(relation.catalog_item_id, [
@@ -185,9 +204,7 @@ export default async function CommercialStructureAuditPage() {
       relation,
     ]);
   }
-  // La vigencia comercial se evalúa al renderizar esta auditoría del servidor.
-  // eslint-disable-next-line react-hooks/purity
-  const now = Date.now();
+  const now = serverNowMs();
   const visibleItemIds = new Set(
     validRelations
       .filter((relation) => isVisibleNow(oneCollection(relation.commercial_collection)!, now))
