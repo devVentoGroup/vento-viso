@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
@@ -13,6 +13,7 @@ type ProductOption = {
   id: string;
   name: string | null;
   sku: string | null;
+  description?: string | null;
   unit?: string | null;
   stock_unit_code?: string | null;
   is_active?: boolean | null;
@@ -81,6 +82,7 @@ type MenuItemFormValues = {
   is_featured: boolean;
   site_id: string;
   commercial_collection_id?: string;
+  commercial_collection_ids?: string[];
   commercial_category_id: string;
   category_label: string;
   image_url: string;
@@ -209,9 +211,13 @@ export function MenuItemForm({
   const [showExistingProducts, setShowExistingProducts] = useState(false);
   const [priceAmount, setPriceAmount] = useState(initial.price_amount);
   const [siteId, setSiteId] = useState(initial.site_id || sites[0]?.id || "");
-  const [commercialCollectionId, setCommercialCollectionId] = useState(
-    initial.commercial_collection_id ?? "",
-  );
+  const initialCollectionIds = initial.commercial_collection_ids?.length
+    ? initial.commercial_collection_ids
+    : initial.commercial_collection_id
+      ? [initial.commercial_collection_id]
+      : [];
+  const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>(initialCollectionIds);
+  const commercialCollectionId = selectedCollectionIds[0] ?? "";
   const [commercialCategoryId, setCommercialCategoryId] = useState(initial.commercial_category_id);
   const [categoryLabel] = useState(initial.category_label);
   const [badgesCsv, setBadgesCsv] = useState(initial.badges_csv);
@@ -302,6 +308,14 @@ export function MenuItemForm({
     return eligibleProducts.find((product) => product.id === productId) ?? null;
   }, [eligibleProducts, productId]);
 
+  useEffect(() => {
+    if (mode !== "create" || !selectedProduct) return;
+    if (!name.trim()) setName(getProductDisplayName(selectedProduct));
+    if (!description.trim() && selectedProduct.description?.trim()) {
+      setDescription(selectedProduct.description.trim());
+    }
+  }, [description, mode, name, selectedProduct]);
+
   const matchingProducts = useMemo(() => {
     const query = normalizeSearchValue(productQuery);
     if (!query) return visibleProducts;
@@ -322,7 +336,7 @@ export function MenuItemForm({
     });
   }, [collections, siteId]);
 
-  const shouldFilterCategoriesByCollection = collectionCategoryLinks != null;
+  const shouldFilterCategoriesByCollection = false;
 
   const categoryIdsByCollection = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -351,8 +365,6 @@ export function MenuItemForm({
     return categories.filter((category) => {
       if (category.is_active === false) return false;
       if (category.site_id !== siteId) return false;
-
-      if (!commercialCollectionId) return false;
 
       if (!shouldFilterCategoriesByCollection) {
         return true;
@@ -390,10 +402,9 @@ export function MenuItemForm({
   }, [fulfillmentDelivery, fulfillmentPickup, fulfillmentOnPremise]);
 
   useEffect(() => {
-    if (!commercialCollectionId) return;
-    const stillValid = visibleCollections.some((collection) => collection.id === commercialCollectionId);
-    if (!stillValid) setCommercialCollectionId("");
-  }, [commercialCollectionId, visibleCollections]);
+    const validIds = new Set(visibleCollections.map((collection) => collection.id));
+    setSelectedCollectionIds((current) => current.filter((id) => validIds.has(id)));
+  }, [visibleCollections]);
 
   useEffect(() => {
     if (!commercialCategoryId) return;
@@ -471,7 +482,12 @@ export function MenuItemForm({
   }, [priceAmount, suggestedPrice]);
 
 
-  const submitDisabled = mode === "create" && (!siteId || !productId || selectedProductAlreadyCreated);
+  const submitDisabled =
+    !siteId ||
+    !productId ||
+    !commercialCategoryId ||
+    selectedCollectionIds.length === 0 ||
+    (mode === "create" && selectedProductAlreadyCreated);
 
   const handleUpload = async (file: File | null) => {
     if (!file) return;
@@ -528,7 +544,7 @@ export function MenuItemForm({
       <div className="ui-panel space-y-6">
         <div>
           <div className="ui-h3">1. Sede de venta</div>
-          <p className="ui-caption">Primero elige la sede; las categorías y productos se filtran con esa seleccion.</p>
+          <p className="ui-caption">Elige dónde se venderá. Solo mostraremos las opciones disponibles para esa sede.</p>
         </div>
         <label className="space-y-2">
           <span className="ui-label">Negocio / sede</span>
@@ -553,15 +569,15 @@ export function MenuItemForm({
         <div className="ui-panel space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="ui-h3">Mapa de creación comercial</div>
+              <div className="ui-h3">Productos pendientes por publicar</div>
               <p className="ui-caption">
-                Cobertura por satélite: productos operativos vendibles contra items comerciales activos.
+                Consulta rápidamente qué productos de cada sede todavía no aparecen en Vento Pass.
               </p>
             </div>
             {selectedSiteCoverage ? (
               <span className={`ui-chip ${selectedSiteCoverage.missing_count === 0 ? "ui-chip--success" : "ui-chip--warn"}`}>
                 {selectedSiteCoverage.missing_count === 0
-                  ? "Sede completa"
+                  ? "Todo publicado"
                   : `${selectedSiteCoverage.missing_count} faltantes`}
               </span>
             ) : null}
@@ -609,7 +625,7 @@ export function MenuItemForm({
 
                   <div className="mt-3 text-xs font-semibold text-[var(--ui-muted)]">
                     {site.missing_count === 0
-                      ? "Todos los vendibles tienen item comercial."
+                      ? "Todos los productos de esta sede ya están publicados."
                       : `Faltan ${site.missing_count} productos por crear.`}
                   </div>
                 </button>
@@ -625,7 +641,7 @@ export function MenuItemForm({
                     Pendientes en {selectedSiteCoverage.site_label}
                   </div>
                   <p className="ui-caption">
-                    Estos son los productos que aparecen en el buscador de creación.
+                    Selecciona uno para completar su publicación.
                   </p>
                 </div>
                 <span className="ui-chip ui-chip--warn">
@@ -665,275 +681,66 @@ export function MenuItemForm({
 
       <div className="ui-panel space-y-6">
         <div>
-          <div className="ui-h3">2. Colección, categoría comercial y producto base</div>
-          <p className="ui-caption">
-            Selecciona la colección comercial, la sección visible del menú y el producto operacional base habilitado para esta sede.
-            Esto no usa categorías operacionales de NEXO ni productos de fidelización.
-          </p>
+          <div className="ui-h3">2. Qué producto estás vendiendo</div>
+          <p className="ui-caption">Elige el producto que ya existe en Vento y la sección donde el cliente lo encontrará.</p>
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-5 lg:grid-cols-2">
           <label className="space-y-2">
-            <span className="ui-label">Colección comercial</span>
-            <select
-              name="commercial_collection_id"
-              className="ui-input"
-              value={commercialCollectionId}
-              onChange={(event) => setCommercialCollectionId(event.target.value)}
-              required={visibleCollections.length > 0}
-            >
-              <option value="">Selecciona colección comercial</option>
-              {visibleCollections.map((collection) => (
-                <option key={collection.id} value={collection.id}>
-                  {[
-                    collection.name ?? collection.code ?? "Sin nombre",
-                    collection.subtitle,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ") + (collection.is_active === false ? " [inactiva]" : "")}
-                </option>
-              ))}
-            </select>
-            <p className="ui-caption">
-              La colección agrupa temporadas, campañas, menú principal o menús especiales.
-            </p>
-            {siteId && visibleCollections.length === 0 ? (
-              <p className="ui-caption">
-                Esta sede no tiene colecciones comerciales. Crea una en Viso &gt; Colecciones comerciales.
-              </p>
-            ) : null}
-          </label>
-          <label className="space-y-2">
-            <span className="ui-label">Categoría comercial</span>
-            <select
-              name="commercial_category_id"
-              className="ui-input"
-              value={commercialCategoryId}
-              onChange={(event) => setCommercialCategoryId(event.target.value)}
-              required
-            >
-              <option value="">Selecciona categoría comercial del menú</option>
+            <span className="ui-label">Sección del menú</span>
+            <select name="commercial_category_id" className="ui-input" value={commercialCategoryId} onChange={(event) => setCommercialCategoryId(event.target.value)} required>
+              <option value="">Selecciona una sección</option>
               {visibleCategories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {(category.name ?? category.code ?? "Sin nombre") +
-                    (category.is_active === false ? " [inactiva]" : "")}
-                </option>
+                <option key={category.id} value={category.id}>{category.name ?? category.code ?? "Sin nombre"}</option>
               ))}
             </select>
-            <input
-              name="category_label"
-              type="hidden"
-              className="ui-input"
-              value={selectedCategory?.name ?? categoryLabel}
-              readOnly
-            />
-            <p className="ui-caption">
-              Esta categoría es solo para el menú comercial de Pass. No modifica categorías operacionales de NEXO.
-            </p>
-            {siteId && !commercialCollectionId ? (
-              <p className="ui-caption">
-                Primero selecciona una colección comercial para cargar sus secciones.
-              </p>
-            ) : null}
-
-            {siteId && commercialCollectionId && visibleCategories.length === 0 ? (
-              <p className="ui-caption">
-                Esta colección no tiene secciones asignadas. Ve a Viso &gt; Colecciones comerciales y usa Guardar secciones.
-              </p>
-            ) : null}
+            <input name="category_label" type="hidden" value={selectedCategory?.name ?? categoryLabel} readOnly />
+            <p className="ui-caption">Ejemplos: Tortas, Entremets, Cafés o Bebidas.</p>
           </label>
           <div className="space-y-2" ref={productPickerRef}>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="ui-label">Producto operacional base</span>
-              {mode === "create" ? (
-                <span className="rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-[11px] font-bold text-[var(--ui-muted)]">
-                  {availableProductCount} disponibles · {alreadyCreatedProductCount} ya creados
-                </span>
-              ) : null}
+            <div className="flex items-center justify-between gap-2">
+              <span className="ui-label">Producto de Vento</span>
+              {mode === "create" ? <span className="ui-chip">{availableProductCount} disponibles</span> : null}
             </div>
             <input type="hidden" name="product_id" value={productId} />
-
-            {mode === "create" && alreadyCreatedProductCount > 0 ? (
-              <label className="flex items-center gap-2 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--ui-muted)]">
-                <input
-                  type="checkbox"
-                  checked={showExistingProducts}
-                  onChange={(event) => setShowExistingProducts(event.target.checked)}
-                />
-                Mostrar productos ya creados en esta sede
-              </label>
-            ) : null}
-
             <div className="relative">
-              <input
-                type="search"
-                className="ui-input pr-24"
-                value={productQuery}
-                onChange={(event) => {
-                  setProductQuery(event.target.value);
-                  setIsProductPickerOpen(true);
-                }}
-                onFocus={() => setIsProductPickerOpen(true)}
-                placeholder={
-                  selectedProduct
-                    ? `${getProductDisplayName(selectedProduct)}${selectedProduct.sku ? ` (${selectedProduct.sku})` : ""}`
-                    : "Buscar por nombre, SKU o código"
-                }
-                role="combobox"
-                aria-expanded={isProductPickerOpen}
-                aria-controls={productPickerListId}
-                aria-autocomplete="list"
-              />
-
-              {productQuery ? (
-                <button
-                  type="button"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-bold text-[var(--ui-brand)] transition hover:bg-[var(--ui-surface-2)]"
-                  onClick={() => {
-                    setProductQuery("");
-                    setIsProductPickerOpen(true);
-                  }}
-                >
-                  Limpiar
-                </button>
-              ) : null}
-
-              {isProductPickerOpen ? (
-                <div
-                  id={productPickerListId}
-                  role="listbox"
-                  className="absolute z-30 mt-2 max-h-80 w-full overflow-auto rounded-2xl border border-[var(--ui-border)] bg-white shadow-[var(--ui-shadow-2)]"
-                >
-                  {productResults.length > 0 ? (
-                    productResults.map((product) => {
-                      const isSelected = product.id === productId;
-                      const optionPrice = getProductPriceForSite(product, siteId);
-                      const alreadyCreated = isProductAlreadyCreatedForSite(product.id, siteId);
-
-                      return (
-                        <button
-                          key={product.id}
-                          type="button"
-                          role="option"
-                          aria-selected={isSelected}
-                          aria-disabled={alreadyCreated}
-                          disabled={alreadyCreated}
-                          className={`block w-full border-b border-[var(--ui-border)] px-3 py-3 text-left last:border-b-0 transition ${
-                            alreadyCreated
-                              ? "cursor-not-allowed bg-slate-50 opacity-70"
-                              : isSelected
-                                ? "bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-2)]"
-                                : "bg-white hover:bg-[var(--ui-surface-2)]"
-                          }`}
-                          onClick={() => {
-                            if (alreadyCreated) return;
-                            setProductId(product.id);
-                            setProductQuery("");
-                            setIsProductPickerOpen(false);
-                          }}
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className="block min-w-0 flex-1 truncate text-sm font-black text-[var(--ui-text)]">
-                              {getProductDisplayName(product)}
-                            </span>
-                            {alreadyCreated ? (
-                              <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.04em] text-amber-800">
-                                Ya creado
-                              </span>
-                            ) : null}
-                          </span>
-                          <span className="mt-0.5 block truncate text-xs font-semibold text-[var(--ui-muted)]">
-                            {[
-                              product.sku ? `SKU ${product.sku}` : null,
-                              optionPrice != null ? `Precio base ${asCop(String(optionPrice))}` : null,
-                              alreadyCreated ? "Edita el item existente para esta sede" : null,
-                            ]
-                              .filter(Boolean)
-                              .join(" · ") || "Producto habilitado para esta sede"}
-                          </span>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div className="px-3 py-4 text-sm font-semibold text-[var(--ui-muted)]">
-                      {availableProductCount === 0 && alreadyCreatedProductCount > 0 && !showExistingProducts
-                        ? "Todos los productos habilitados para esta sede ya tienen item comercial."
-                        : "No hay productos que coincidan con la búsqueda."}
-                    </div>
-                  )}
-
-                  {hasMoreProductResults ? (
-                    <div className="border-t border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--ui-muted)]">
-                      Mostrando {productResults.length} de {matchingProducts.length}. Escribe más para afinar.
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+              <input type="search" className="ui-input pr-24" value={productQuery} onChange={(event) => { setProductQuery(event.target.value); setIsProductPickerOpen(true); }} onFocus={() => setIsProductPickerOpen(true)} placeholder={selectedProduct ? getProductDisplayName(selectedProduct) : "Buscar producto por nombre o SKU"} />
+              {isProductPickerOpen ? <div className="absolute z-30 mt-2 max-h-80 w-full overflow-auto rounded-2xl border border-[var(--ui-border)] bg-white shadow-[var(--ui-shadow-2)]">
+                {productResults.length ? productResults.map((product) => { const alreadyCreated = isProductAlreadyCreatedForSite(product.id, siteId); return <button key={product.id} type="button" disabled={alreadyCreated} className={`block w-full border-b border-[var(--ui-border)] px-3 py-3 text-left last:border-b-0 ${alreadyCreated ? "opacity-50" : "hover:bg-[var(--ui-surface-2)]"}`} onClick={() => { setProductId(product.id); setProductQuery(""); setIsProductPickerOpen(false); }}>
+                  <span className="block text-sm font-black">{getProductDisplayName(product)}</span>
+                  <span className="ui-caption">{product.sku ? `SKU ${product.sku}` : "Disponible para esta sede"}</span>
+                </button>; }) : <div className="p-4 text-sm text-[var(--ui-muted)]">No hay resultados.</div>}
+              </div> : null}
             </div>
-
-            {selectedProduct ? (
-              <div className="flex items-start justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-black text-[var(--ui-text)]">
-                    {getProductDisplayName(selectedProduct)}
-                  </div>
-                  <div className="ui-caption mt-1">
-                    {[
-                      selectedProduct.sku ? `SKU ${selectedProduct.sku}` : null,
-                      suggestedPrice != null ? `Precio sugerido ${asCop(String(suggestedPrice))}` : null,
-                      suggestedRecipeCost != null ? `Costo receta ${asCop(String(suggestedRecipeCost))}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "Producto operacional seleccionado"}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="ui-btn ui-btn--ghost ui-btn--sm shrink-0"
-                  onClick={() => {
-                    setProductId("");
-                    setProductQuery("");
-                    setIsProductPickerOpen(true);
-                  }}
-                >
-                  Cambiar
-                </button>
-              </div>
-            ) : (
-              <p className="ui-caption">
-                Selecciona el producto operacional que soporta inventario, precio base y receta para este item comercial.
-              </p>
-            )}
-
-            {siteId && eligibleProducts.length === 0 ? (
-              <p className="ui-caption">
-                No hay productos operacionales habilitados para crear ítems comerciales en esta sede.
-              </p>
-            ) : null}
-
-            {siteId && eligibleProducts.length > 0 && availableProductCount === 0 ? (
-              <p className="ui-caption">
-                Todos los productos operacionales habilitados para esta sede ya tienen item comercial. Activa “Mostrar productos ya creados” para auditarlos.
-              </p>
-            ) : null}
-
-            {selectedProductAlreadyCreated ? (
-              <p className="ui-caption">
-                Este producto ya tiene item comercial en la sede seleccionada. Cambia el producto o edita el item existente.
-              </p>
-            ) : null}
-            {selectedProduct && suggestedPrice != null ? (
-              <p className="ui-caption">
-                El precio sugerido viene de la configuración base de esta sede, pero puedes definir un precio comercial propio.
-              </p>
-            ) : null}
+            {selectedProduct ? <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+              <div className="text-sm font-black">{getProductDisplayName(selectedProduct)}</div>
+              <div className="ui-caption mt-1">{selectedProduct.sku ? `SKU ${selectedProduct.sku}` : "Producto seleccionado"}</div>
+            </div> : null}
           </div>
         </div>
       </div>
 
+      <div className="ui-panel space-y-5">
+        <div>
+          <div className="ui-h3">3. Dónde debe aparecer</div>
+          <p className="ui-caption">Puedes mostrar el mismo producto en varios menús o temporadas sin duplicarlo.</p>
+        </div>
+        <input type="hidden" name="commercial_collection_id" value={commercialCollectionId} />
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {visibleCollections.map((collection) => {
+            const checked = selectedCollectionIds.includes(collection.id);
+            return <label key={collection.id} className={`cursor-pointer rounded-2xl border p-4 transition ${checked ? "border-[var(--ui-brand)] bg-[var(--ui-brand-soft)]" : "border-[var(--ui-border)] bg-white"}`}>
+              <input type="checkbox" name="commercial_collection_ids" value={collection.id} checked={checked} onChange={(event) => setSelectedCollectionIds((current) => event.target.checked ? Array.from(new Set([...current, collection.id])) : current.filter((id) => id !== collection.id))} className="mr-3" />
+              <span className="font-black text-[var(--ui-text)]">{collection.name ?? collection.code ?? "Sin nombre"}</span>
+              <span className="mt-1 block text-xs text-[var(--ui-muted)]">{collection.subtitle || (collection.kind === "main" ? "Menú permanente" : "Temporada o campaña")}</span>
+            </label>;
+          })}
+        </div>
+        {selectedCollectionIds.length === 0 ? <div className="ui-alert ui-alert--warning">Selecciona al menos un menú o temporada.</div> : null}
+      </div>
+
       <div className="ui-panel space-y-6">
         <div>
-          <div className="ui-h3">3. Datos del item</div>
+          <div className="ui-h3">4. Cómo lo verá el cliente</div>
           <p className="ui-caption">
             Define cómo verá el cliente este producto en Pass: nombre comercial, descripción, precio e imagen por sede.
           </p>
@@ -952,8 +759,8 @@ export function MenuItemForm({
           </label>
           <div className="space-y-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
             <div>
-              <div className="ui-label">Estado comercial</div>
-              <p className="ui-caption">Controla si el item aparece disponible en el menu de compras.</p>
+              <div className="ui-label">Publicación</div>
+              <p className="ui-caption">Actívalo cuando el producto esté listo para mostrarse en Vento Pass.</p>
             </div>
             <label className="flex items-center gap-3 text-sm font-semibold text-[var(--ui-text)]">
               <input
@@ -962,7 +769,7 @@ export function MenuItemForm({
                 checked={isActive}
                 onChange={(event) => setIsActive(event.target.checked)}
               />
-              Item activo
+              Visible para los clientes
             </label>
           </div>
           <label className="space-y-2 sm:col-span-2">
@@ -1010,45 +817,77 @@ export function MenuItemForm({
             ) : null}
           </label>
           <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Badges (separados por coma)</span>
+            <span className="ui-label">Etiquetas visibles</span>
             <input
               name="badges_csv"
               className="ui-input"
               value={badgesCsv}
               onChange={(event) => setBadgesCsv(event.target.value)}
-              placeholder="Popular, Nuevo, Club"
+              placeholder="Popular, Nuevo, Recomendado"
             />
           </label>
-          <div className="grid gap-4 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 sm:col-span-2 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <div className="ui-label">Agrupación visual opcional</div>
-              <p className="ui-caption">
-                Solo cambia cómo se ve la card en Pass. No descuenta inventario. Sabores, toppings, vaso o cono se configuran después desde la edición del producto.
-              </p>
+          <div className="space-y-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 sm:col-span-2">
+            <div>
+              <div className="ui-label">Variantes del producto</div>
+              <p className="ui-caption">Úsalo cuando varias referencias deben mostrarse juntas, por ejemplo Soda Hatsu: Sandía, Frutos rojos y Limón.</p>
             </div>
-            <label className="space-y-2">
-              <span className="ui-label">Nombre visual del grupo</span>
-              <input
-                name="display_group"
-                className="ui-input"
-                value={displayGroup}
-                onChange={(event) => setDisplayGroup(event.target.value)}
-                placeholder="Soda Hatsu"
-              />
-            </label>
-            <label className="space-y-2">
-              <span className="ui-label">Etiqueta visual de variante</span>
-              <input
-                name="variant_label"
-                className="ui-input"
-                value={variantLabel}
-                onChange={(event) => setVariantLabel(event.target.value)}
-                placeholder="Sandía"
-              />
-            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => { setDisplayGroup(""); setVariantLabel(""); }}
+                className={`rounded-2xl border p-4 text-left transition ${!displayGroup ? "border-[var(--ui-brand)] bg-white shadow-sm" : "border-[var(--ui-border)] bg-white/70"}`}
+              >
+                <div className="text-sm font-black text-[var(--ui-text)]">Producto individual</div>
+                <div className="mt-1 text-xs text-[var(--ui-muted)]">Se muestra como una tarjeta independiente.</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => { if (!displayGroup) setDisplayGroup(name.trim() || "Nueva familia"); }}
+                className={`rounded-2xl border p-4 text-left transition ${displayGroup ? "border-[var(--ui-brand)] bg-white shadow-sm" : "border-[var(--ui-border)] bg-white/70"}`}
+              >
+                <div className="text-sm font-black text-[var(--ui-text)]">Tiene otras versiones</div>
+                <div className="mt-1 text-xs text-[var(--ui-muted)]">Agrupa sabores, tamaños o presentaciones bajo una sola familia.</div>
+              </button>
+            </div>
+
+            {displayGroup ? (
+              <div className="grid gap-4 rounded-2xl border border-[var(--ui-border)] bg-white p-4 sm:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="ui-label">Familia del producto</span>
+                  <input
+                    name="display_group"
+                    className="ui-input"
+                    value={displayGroup}
+                    onChange={(event) => setDisplayGroup(event.target.value)}
+                    placeholder="Soda Hatsu"
+                  />
+                  <span className="ui-caption">Escribe el mismo nombre en todas las versiones de esta familia.</span>
+                </label>
+                <label className="space-y-2">
+                  <span className="ui-label">Nombre de esta versión</span>
+                  <input
+                    name="variant_label"
+                    className="ui-input"
+                    value={variantLabel}
+                    onChange={(event) => setVariantLabel(event.target.value)}
+                    placeholder="Sandía"
+                  />
+                  <span className="ui-caption">Ejemplo: Sandía, Limón, 6 porciones o Grande.</span>
+                </label>
+                <div className="rounded-xl bg-[var(--ui-brand-soft)] p-3 sm:col-span-2">
+                  <div className="text-xs font-bold uppercase tracking-wide text-[var(--ui-muted)]">Así se verá en Pass</div>
+                  <div className="mt-1 text-sm font-black text-[var(--ui-text)]">{displayGroup || "Familia"}</div>
+                  <div className="mt-0.5 text-sm text-[var(--ui-muted)]">{variantLabel || "Nombre de esta versión"}</div>
+                </div>
+              </div>
+            ) : null}
+
+            {!displayGroup ? <input type="hidden" name="display_group" value="" /> : null}
+            {!displayGroup ? <input type="hidden" name="variant_label" value="" /> : null}
           </div>
           <div className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Modalidades habilitadas</span>
+            <span className="ui-label">Dónde puede recibirlo el cliente</span>
             <div className="flex flex-wrap gap-3">
               <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
                 <input
@@ -1081,7 +920,7 @@ export function MenuItemForm({
           </div>
           <div className="space-y-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 sm:col-span-2">
             <div>
-              <div className="ui-label">Visualización en Pass</div>
+              <div className="ui-label">Diseño en Vento Pass</div>
               <p className="ui-caption">
                 Define cómo se presenta este producto en el menú comercial. La opción destacada ocupa más ancho y permite más detalle visual.
               </p>
@@ -1120,21 +959,22 @@ export function MenuItemForm({
               </button>
             </div>
 
-            <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-              <label className="flex items-start gap-3 text-sm text-[var(--ui-text)]">
-                <input
-                  type="checkbox"
-                  checked={opensDetailModal}
-                  onChange={(event) => setOpensDetailModal(event.target.checked)}
-                  className="mt-1"
-                />
-                <span>
-                  <span className="block font-bold">Requiere detalle antes de agregar</span>
-                  <span className="mt-1 block text-xs text-[var(--ui-muted)]">
-                    Actívalo para productos que deben abrir modal antes de sumarse al pedido, como combos, productos personalizables o items con extras.
-                  </span>
-                </span>
-              </label>
+            <div className="space-y-3 rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+              <div>
+                <div className="text-sm font-black text-[var(--ui-text)]">Forma de agregar al pedido</div>
+                <div className="ui-caption mt-1">Si después agregas tamaños, sabores, extras o personalizaciones, VISO abrirá el detalle automáticamente.</div>
+              </div>
+              <input type="hidden" name="opens_detail_modal" value={opensDetailModal ? "true" : "false"} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button type="button" onClick={() => setOpensDetailModal(false)} className={`rounded-2xl border p-4 text-left transition ${!opensDetailModal ? "border-[var(--ui-brand)] bg-[var(--ui-brand-soft)]" : "border-[var(--ui-border)] bg-white"}`}>
+                  <span className="block text-sm font-black text-[var(--ui-text)]">Agregar directamente</span>
+                  <span className="ui-caption mt-1 block">Úsalo para productos simples sin decisiones del cliente.</span>
+                </button>
+                <button type="button" onClick={() => setOpensDetailModal(true)} className={`rounded-2xl border p-4 text-left transition ${opensDetailModal ? "border-[var(--ui-brand)] bg-[var(--ui-brand-soft)]" : "border-[var(--ui-border)] bg-white"}`}>
+                  <span className="block text-sm font-black text-[var(--ui-text)]">Mostrar primero el detalle</span>
+                  <span className="ui-caption mt-1 block">Úsalo para combos o productos cuya información debe leerse antes de agregar.</span>
+                </button>
+              </div>
             </div>
 
             <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
@@ -1144,7 +984,7 @@ export function MenuItemForm({
                 checked={isFeatured}
                 onChange={(event) => setIsFeatured(event.target.checked)}
               />
-              Mostrar en destacados
+              Destacar este producto
             </label>
           </div>
         </div>
@@ -1153,7 +993,7 @@ export function MenuItemForm({
 
       <div className="ui-panel space-y-6">
         <div>
-          <div className="ui-h3">4. Imagen comercial</div>
+          <div className="ui-h3">5. Imagen del producto</div>
           <p className="ui-caption">
             Foto visible en Pass. Se guarda como imagen comercial separada del producto operacional.
           </p>
@@ -1205,9 +1045,9 @@ export function MenuItemForm({
       <div className="ui-panel space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="ui-h3">Vista en vivo en Pass</div>
+            <div className="ui-h3">Vista previa en Vento Pass</div>
             <p className="ui-caption">
-              Esta vista cambia mientras editas. Úsala para validar si cualquier persona entendería qué está comprando el cliente.
+              Se actualiza mientras completas la ficha. Así verá el cliente la información principal.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1221,7 +1061,7 @@ export function MenuItemForm({
           </div>
         </div>
 
-        <div className="max-w-md overflow-hidden rounded-[28px] border border-[var(--ui-border)] bg-[#FFFDF7] shadow-[var(--ui-shadow-2)]">
+        <div className="max-w-sm overflow-hidden rounded-[28px] border border-[var(--ui-border)] bg-[#FFFDF7] shadow-[var(--ui-shadow-2)]">
           <div className="relative h-56 w-full bg-[var(--ui-surface-2)]">
             {imageUrl && !imagePreviewFailed ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -1282,13 +1122,13 @@ export function MenuItemForm({
 
       </form>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+      <div className="sticky bottom-3 z-40 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-white/95 p-3 shadow-[var(--ui-shadow-2)] backdrop-blur">
         <div className="flex flex-wrap items-center gap-2">
           {secondaryActions}
         </div>
 
         <button type="submit" form={resolvedFormId} className="ui-btn ui-btn--brand" disabled={submitDisabled}>
-          {mode === "create" ? "Crear item" : "Guardar cambios"}
+          {mode === "create" ? "Publicar producto" : "Guardar cambios"}
         </button>
       </div>
     </div>

@@ -1,4 +1,4 @@
-﻿import { redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 
 import { PageHeader } from "@/components/vento/standard/page-header";
@@ -14,6 +14,7 @@ type SellOptionRow = {
   product_id: string | null;
   name: string | null;
   sku: string | null;
+  description: string | null;
   base_price: number | string | null;
   recipe_cost_amount: number | string | null;
 };
@@ -414,10 +415,19 @@ async function createMenuItem(formData: FormData) {
   const name = asText(formData.get("name"));
   const siteId = asText(formData.get("site_id"));
   const productId = asText(formData.get("product_id"));
-  const commercialCollectionId = asText(formData.get("commercial_collection_id"));
+  const requestedCollectionIds = Array.from(new Set(
+    formData.getAll("commercial_collection_ids").map((value) => asText(value)).filter(Boolean),
+  ));
+  const fallbackCollectionId = asText(formData.get("commercial_collection_id"));
+  const collectionIds = requestedCollectionIds.length > 0
+    ? requestedCollectionIds
+    : fallbackCollectionId
+      ? [fallbackCollectionId]
+      : [];
+  const commercialCollectionId = collectionIds[0] ?? "";
   const commercialCategoryId = asText(formData.get("commercial_category_id"));
 
-  if (!name || !siteId || !productId || !commercialCollectionId || !commercialCategoryId) {
+  if (!name || !siteId || !productId || collectionIds.length === 0 || !commercialCategoryId) {
     redirect("/menu/new?error=" + encodeURIComponent("Faltan campos obligatorios."));
   }
 
@@ -530,6 +540,24 @@ async function createMenuItem(formData: FormData) {
     redirect("/menu/new?error=" + encodeURIComponent("Item creado sin identificador."));
   }
 
+  const collectionRows = collectionIds.map((collectionId, index) => ({
+    catalog_item_id: createdItem.id,
+    commercial_collection_id: collectionId,
+    sort_order: sortOrder,
+    is_active: true,
+    is_primary: index === 0,
+    metadata: { configured_from: "viso_product_form" },
+  }));
+
+  const { error: collectionsError } = await supabase
+    .schema("pass")
+    .from("catalog_item_collections")
+    .upsert(collectionRows, { onConflict: "catalog_item_id,commercial_collection_id" });
+
+  if (collectionsError) {
+    redirect("/menu/new?error=" + encodeURIComponent(collectionsError.message));
+  }
+
   const { error: presentationError } = await supabase
     .schema("pass")
     .from("catalog_item_presentation")
@@ -550,7 +578,7 @@ async function createMenuItem(formData: FormData) {
     redirect("/menu/new?error=" + encodeURIComponent(presentationError.message));
   }
 
-  redirect(`/menu/${createdItem.id}?ok=${encodeURIComponent("Producto creado. Ahora configura sus personalizaciones.")}`);
+  redirect(`/menu/${createdItem.id}?ok=${encodeURIComponent("Producto creado. Ahora puedes configurar sus opciones.")}`);
 }
 
 function safeDecode(value: string | null | undefined) {
@@ -593,7 +621,7 @@ export default async function NewMenuItemPage({
     supabase
       .schema("pass")
       .from("sell_products_by_site")
-      .select("site_id,product_id,name,sku,base_price,recipe_cost_amount")
+      .select("site_id,product_id,name,sku,description,base_price,recipe_cost_amount")
       .order("name", { ascending: true }),
     supabase
       .schema("pass")
@@ -632,6 +660,7 @@ export default async function NewMenuItemPage({
       id: string;
       name: string | null;
       sku: string | null;
+      description: string | null;
       site_ids: Set<string>;
       site_prices: Record<string, number | null>;
       site_recipe_costs: Record<string, number | null>;
@@ -649,6 +678,7 @@ export default async function NewMenuItemPage({
         id: productId,
         name: row.name ?? null,
         sku: row.sku ?? null,
+        description: row.description ?? null,
         site_ids: new Set<string>(),
         site_prices: {},
         site_recipe_costs: {},
@@ -683,6 +713,7 @@ export default async function NewMenuItemPage({
       id: item.id,
       name: item.name,
       sku: item.sku,
+      description: item.description,
       site_ids: Array.from(item.site_ids),
       site_prices: item.site_prices,
       site_recipe_costs: item.site_recipe_costs,
@@ -751,8 +782,8 @@ export default async function NewMenuItemPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Crear item comercial"
-        subtitle="Crea la ficha comercial base por sede y producto operacional. Viso oculta los productos que ya tienen item comercial activo en esa sede."
+        title="Publicar producto en Vento Pass"
+        subtitle="Elige el producto, revisa su información y decide dónde aparecerá. VISO completa el resto automáticamente."
         actions={
           <Link href="/menu" className="ui-btn ui-btn--ghost">
             Volver
