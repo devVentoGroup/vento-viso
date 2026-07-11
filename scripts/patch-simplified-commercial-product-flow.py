@@ -22,6 +22,13 @@ p = p.replace(
     '.select("site_id,product_id,name,sku,base_price,recipe_cost_amount")',
     '.select("site_id,product_id,name,sku,description,base_price,recipe_cost_amount")',
 )
+if '      description: string | null;\n      site_ids: Set<string>;' not in p:
+    p = replace_once(
+        p,
+        '      sku: string | null;\n      site_ids: Set<string>;',
+        '      sku: string | null;\n      description: string | null;\n      site_ids: Set<string>;',
+        'product map description type',
+    )
 if 'description: row.description ?? null,' not in p:
     p = replace_once(
         p,
@@ -29,6 +36,7 @@ if 'description: row.description ?? null,' not in p:
         '        sku: row.sku ?? null,\n        description: row.description ?? null,\n        site_ids: new Set<string>(),',
         'product map description',
     )
+if 'description: item.description,' not in p:
     p = replace_once(
         p,
         '      sku: item.sku,\n      site_ids: Array.from(item.site_ids),',
