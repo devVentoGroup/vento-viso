@@ -23,7 +23,7 @@ const sections = [
   {
     title: "Menús y temporadas",
     description: "Decide dónde aparecen los productos: menú principal, Regalos, campañas, fechas especiales o colecciones temporales.",
-    href: "/commercial-collections",
+    href: "/commercial-collections/overview",
     action: "Administrar menús",
     badge: "Dónde aparecen",
   },
