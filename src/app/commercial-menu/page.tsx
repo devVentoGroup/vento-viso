@@ -53,6 +53,13 @@ const sections = [
     badge: "Dónde aparecen",
   },
   {
+    title: "Disponibilidad",
+    description: "Define qué productos están disponibles inmediatamente y cuáles requieren una anticipación mínima antes de poder pedirse.",
+    href: "/commercial-availability",
+    action: "Configurar anticipación",
+    badge: "Cuándo puede pedirse",
+  },
+  {
     title: "Revisión",
     description: "Consulta productos incompletos o configuraciones pendientes. Esta es una herramienta de control, no el flujo principal.",
     href: "/commercial-audit",
