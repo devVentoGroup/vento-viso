@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { CommercialCollectionCategoryOrderEditor } from "@/components/viso/commercial-collection-category-order-editor";
 import { PageHeader } from "@/components/vento/standard/page-header";
+import { CommercialCollectionHeroField } from "@/components/viso/commercial-collection-hero-field";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -814,10 +815,7 @@ export default async function CommercialCollectionsPage({
                 <input name="subtitle" className="ui-input" placeholder="Coleccion Madres 2026" />
               </label>
 
-              <label className="space-y-2 xl:col-span-2">
-                <span className="ui-label">Imagen hero</span>
-                <input name="hero_image_url" className="ui-input" placeholder="https://..." />
-              </label>
+              <CommercialCollectionHeroField ownerId={`new-${selectedSiteId}`} initialUrl="" className="xl:col-span-2" />
             </form>
           </div> : null}
 
@@ -916,15 +914,7 @@ export default async function CommercialCollectionsPage({
                                 />
                               </label>
 
-                              <label className="space-y-1 md:col-span-2">
-                                <span className="ui-label">Imagen hero</span>
-                                <input
-                                  name="hero_image_url"
-                                  className="ui-input h-10"
-                                  defaultValue={collection.hero_image_url ?? ""}
-                                  placeholder="Imagen hero opcional"
-                                />
-                              </label>
+                              <CommercialCollectionHeroField initialUrl={collection.hero_image_url} ownerId={collection.id} className="md:col-span-2" />
                             </form>
 
                             <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">

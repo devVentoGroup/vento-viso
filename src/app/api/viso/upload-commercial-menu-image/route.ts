@@ -56,9 +56,13 @@ export async function POST(req: Request) {
 
   const kind = sanitizePathToken(String(formData.get("kind") || ""), "catalog-item");
   const ownerId = sanitizePathToken(String(formData.get("ownerId") || ""), "pending");
-  const prefix = kind === "option-asset" ? `option-assets/${ownerId}` : `catalog-items/${ownerId}`;
-  const maxWidth = kind === "option-asset" ? 640 : 1280;
-  const path = `${prefix}/cover-${Date.now()}.webp`;
+  const isOptionAsset = kind === "option-asset";
+  const isCollectionHero = kind === "collection-hero";
+  const prefix = isCollectionHero ? `collections/${ownerId}` : isOptionAsset ? `option-assets/${ownerId}` : `catalog-items/${ownerId}`;
+  const maxWidth = isCollectionHero ? 1600 : isOptionAsset ? 640 : 1280;
+  const maxHeight = isCollectionHero ? 900 : maxWidth;
+  const filename = isCollectionHero ? `hero-${Date.now()}.webp` : `cover-${Date.now()}.webp`;
+  const path = `${prefix}/${filename}`;
   const buffer = Buffer.from(await file.arrayBuffer());
   let optimized: Buffer;
 
@@ -67,12 +71,12 @@ export async function POST(req: Request) {
       .rotate()
       .resize({
         width: maxWidth,
-        height: maxWidth,
+        height: maxHeight,
         fit: "inside",
         withoutEnlargement: true,
       })
       .webp({
-        quality: kind === "option-asset" ? 74 : 78,
+        quality: isCollectionHero ? 80 : isOptionAsset ? 74 : 78,
         effort: 4,
         smartSubsample: true,
       })
