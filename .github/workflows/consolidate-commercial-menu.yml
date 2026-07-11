@@ -1,0 +1,67 @@
+name: Consolidate commercial menu source
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/consolidate-commercial-menu.yml
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply existing patches to source
+        run: |
+          python3 scripts/patch-guided-product-form.py
+          python3 scripts/patch-guided-product-copy.py
+          python3 scripts/patch-create-commercial-product.py
+          python3 scripts/patch-product-family-variants.py
+          python3 scripts/patch-simplified-commercial-product-flow.py
+
+      - name: Remove runtime patch hooks and absorbed scripts
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          delete pkg.scripts.predev;
+          delete pkg.scripts.prebuild;
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+          rm scripts/patch-guided-product-form.py
+          rm scripts/patch-guided-product-copy.py
+          rm scripts/patch-create-commercial-product.py
+          rm scripts/patch-product-family-variants.py
+          rm scripts/patch-simplified-commercial-product-flow.py
+          rm .github/workflows/consolidate-commercial-menu.yml
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate consolidated source
+        run: npm run build
+
+      - name: Commit consolidated source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src/app/menu/new/page.tsx src/components/viso/menu-item-form.tsx scripts .github/workflows/consolidate-commercial-menu.yml
+          git commit -m "refactor(menu): consolidate commercial product flow"
+          git push origin HEAD:main
