@@ -119,8 +119,8 @@ function overviewPath(siteId: string) {
 
 function advancedPath(siteId: string, collectionId?: string) {
   const params = new URLSearchParams({ site: siteId });
-  const suffix = collectionId ? `#collection-${collectionId}` : "";
-  return `/commercial-collections?${params.toString()}${suffix}`;
+  if (collectionId) params.set("collection", collectionId);
+  return `/commercial-collections?${params.toString()}`;
 }
 
 export default async function CommercialCollectionsOverviewPage({
