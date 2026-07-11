@@ -53,11 +53,13 @@ PAGE.write_text(p, encoding='utf-8')
 
 s = FORM.read_text(encoding='utf-8-sig')
 
-if 'description?: string | null;' not in s:
-    s = s.replace(
-        '  sku?: string | null;\n  site_ids?: string[];',
-        '  sku?: string | null;\n  description?: string | null;\n  site_ids?: string[];',
-        1,
+product_option_type = s.split('type ProductOption = {', 1)[1].split('};', 1)[0]
+if 'description?: string | null;' not in product_option_type:
+    s = replace_once(
+        s,
+        '  sku: string | null;\n  unit?: string | null;',
+        '  sku: string | null;\n  description?: string | null;\n  unit?: string | null;',
+        'ProductOption description type',
     )
 
 old_effect = '''  useEffect(() => {
