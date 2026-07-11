@@ -51,11 +51,18 @@ type CatalogItemRow = {
   description: string | null;
   image_url: string | null;
   price_amount: number | string | null;
-  commercial_collection_id: string | null;
   commercial_category_id: string | null;
   is_active: boolean | null;
   fulfillment_modes: string[] | null;
   metadata: Record<string, unknown> | null;
+};
+
+type ItemCollectionRelation = {
+  catalog_item_id: string;
+  commercial_collection_id: string;
+  is_active: boolean | null;
+  is_primary: boolean | null;
+  commercial_collection?: CollectionRow | CollectionRow[] | null;
 };
 
 type OptionGroupRow = {
@@ -101,6 +108,16 @@ function isCanonicalItem(item: CatalogItemRow) {
   );
 }
 
+function oneCollection(value: CollectionRow | CollectionRow[] | null | undefined) {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+function isVisibleNow(collection: CollectionRow, now: number) {
+  const startsAt = collection.starts_at ? Date.parse(collection.starts_at) : Number.NEGATIVE_INFINITY;
+  const endsAt = collection.ends_at ? Date.parse(collection.ends_at) : Number.POSITIVE_INFINITY;
+  return startsAt <= now && endsAt > now;
+}
+
 function siteLabel(site: SiteRow | undefined) {
   return site?.name ?? site?.code ?? "Sede sin nombre";
 }
@@ -131,6 +148,7 @@ export default async function CommercialAuditPage() {
     { data: itemsRaw, error: itemsError },
     { data: optionGroupsRaw, error: optionGroupsError },
     { data: presentationsRaw, error: presentationsError },
+    { data: relationsRaw, error: relationsError },
   ] = await Promise.all([
     supabase.from("sites").select("id,name,code,is_active").eq("is_active", true),
     supabase.schema("pass").from("pass_satellites").select("site_id,is_active"),
@@ -150,7 +168,7 @@ export default async function CommercialAuditPage() {
       .schema("pass")
       .from("catalog_items")
       .select(
-        "id,site_id,product_id,name,description,image_url,price_amount,commercial_collection_id,commercial_category_id,is_active,fulfillment_modes,metadata",
+        "id,site_id,product_id,name,description,image_url,price_amount,commercial_category_id,is_active,fulfillment_modes,metadata",
       ),
     supabase
       .schema("pass")
@@ -160,6 +178,7 @@ export default async function CommercialAuditPage() {
       .schema("pass")
       .from("catalog_item_presentation")
       .select("catalog_item_id,surface,opens_detail_modal,allow_customer_note"),
+    supabase.schema("pass").from("catalog_item_collections").select("catalog_item_id,commercial_collection_id,is_active,is_primary,commercial_collection:commercial_collections(id,site_id,name,code,kind,starts_at,ends_at,is_active)"),
   ]);
 
   const loadErrors = [
@@ -171,6 +190,7 @@ export default async function CommercialAuditPage() {
     itemsError,
     optionGroupsError,
     presentationsError,
+    relationsError,
   ].filter(Boolean);
 
   const sites = (sitesRaw ?? []) as SiteRow[];
@@ -181,6 +201,7 @@ export default async function CommercialAuditPage() {
   const items = (itemsRaw ?? []) as CatalogItemRow[];
   const optionGroups = (optionGroupsRaw ?? []) as OptionGroupRow[];
   const presentations = (presentationsRaw ?? []) as PresentationRow[];
+  const relations = (relationsRaw ?? []) as ItemCollectionRelation[];
 
   const passSiteIds = new Set(
     satellites.filter((row) => row.is_active !== false).map((row) => row.site_id),
@@ -191,6 +212,18 @@ export default async function CommercialAuditPage() {
   const activeCategories = categories.filter((row) => row.is_active !== false);
   const activeLinks = links.filter((row) => row.is_active !== false);
   const activeItems = items.filter((row) => row.is_active !== false && isCanonicalItem(row));
+  const itemsById = new Map(activeItems.map((item) => [item.id, item]));
+  // La vigencia comercial se evalúa al renderizar esta auditoría del servidor.
+  // eslint-disable-next-line react-hooks/purity
+  const now = Date.now();
+  const structuralRelations = relations.filter((relation) => {
+    const item = itemsById.get(relation.catalog_item_id);
+    const collection = oneCollection(relation.commercial_collection);
+    return relation.is_active !== false && Boolean(item) && Boolean(collection) && collection!.is_active !== false && collection!.site_id === item!.site_id;
+  });
+  const structuralItemIds = new Set(structuralRelations.map((relation) => relation.catalog_item_id));
+  const visibleItemIds = new Set(structuralRelations.filter((relation) => isVisibleNow(oneCollection(relation.commercial_collection)!, now)).map((relation) => relation.catalog_item_id));
+  const visibleItems = activeItems.filter((item) => visibleItemIds.has(item.id));
   const activeOptionGroups = optionGroups.filter((row) => row.is_active !== false);
 
   const linkedCollectionIds = new Set(activeLinks.map((row) => row.collection_id));
@@ -203,7 +236,7 @@ export default async function CommercialAuditPage() {
   );
   const presentedItemIds = new Set(
     presentations
-      .filter((row) => row.surface === "vento_pass")
+      .filter((row) => row.surface === "vento_pass_menu")
       .map((row) => row.catalog_item_id),
   );
 
@@ -243,8 +276,8 @@ export default async function CommercialAuditPage() {
     {
       key: "missing-image",
       label: "Productos activos sin imagen",
-      count: relationCount(activeItems, (row) => !hasText(row.image_url)),
-      severity: relationCount(activeItems, (row) => !hasText(row.image_url)) > 0 ? "warning" : "ok",
+      count: relationCount(visibleItems, (row) => !hasText(row.image_url)),
+      severity: relationCount(visibleItems, (row) => !hasText(row.image_url)) > 0 ? "warning" : "ok",
       explanation:
         "Sin imagen, el menú se ve incompleto y el cliente entiende peor qué está comprando.",
       actionLabel: "Abrir menú",
@@ -253,8 +286,8 @@ export default async function CommercialAuditPage() {
     {
       key: "missing-description",
       label: "Productos activos sin descripción",
-      count: relationCount(activeItems, (row) => !hasText(row.description)),
-      severity: relationCount(activeItems, (row) => !hasText(row.description)) > 0 ? "warning" : "ok",
+      count: relationCount(visibleItems, (row) => !hasText(row.description)),
+      severity: relationCount(visibleItems, (row) => !hasText(row.description)) > 0 ? "warning" : "ok",
       explanation:
         "Una descripción corta reduce dudas y evita que el equipo dependa de conocimiento informal.",
       actionLabel: "Abrir menú",
@@ -267,7 +300,6 @@ export default async function CommercialAuditPage() {
         activeItems,
         (row) =>
           !row.product_id ||
-          !row.commercial_collection_id ||
           !row.commercial_category_id ||
           numberValue(row.price_amount) <= 0,
       ),
@@ -276,22 +308,29 @@ export default async function CommercialAuditPage() {
           activeItems,
           (row) =>
             !row.product_id ||
-            !row.commercial_collection_id ||
             !row.commercial_category_id ||
             numberValue(row.price_amount) <= 0,
         ) > 0
           ? "critical"
           : "ok",
-      explanation:
-        "Todo producto comercial debe tener producto base, colección, categoría y precio válido.",
+      explanation: "Todo producto comercial debe tener producto base, categoría y precio válido.",
       actionLabel: "Corregir productos",
+      actionHref: "/menu",
+    },
+    {
+      key: "missing-collection-relation",
+      label: "Productos activos sin menú configurado",
+      count: relationCount(activeItems, (row) => !structuralItemIds.has(row.id)),
+      severity: relationCount(activeItems, (row) => !structuralItemIds.has(row.id)) > 0 ? "critical" : "ok",
+      explanation: "Están activos en VISO, pero no pertenecen a ninguna colección activa válida y no pueden publicarse correctamente.",
+      actionLabel: "Abrir menú",
       actionHref: "/menu",
     },
     {
       key: "missing-presentation",
       label: "Productos sin presentación de Pass",
-      count: relationCount(activeItems, (row) => !presentedItemIds.has(row.id)),
-      severity: relationCount(activeItems, (row) => !presentedItemIds.has(row.id)) > 0 ? "warning" : "ok",
+      count: relationCount(visibleItems, (row) => !presentedItemIds.has(row.id)),
+      severity: relationCount(visibleItems, (row) => !presentedItemIds.has(row.id)) > 0 ? "warning" : "ok",
       explanation:
         "La presentación define si el producto abre detalle, usa card compacta y admite notas.",
       actionLabel: "Revisar presentación",
@@ -305,7 +344,8 @@ export default async function CommercialAuditPage() {
   const siteAudits = passSites.map((site) => {
     const siteCollections = activeCollections.filter((row) => row.site_id === site.id);
     const siteCategories = activeCategories.filter((row) => row.site_id === site.id);
-    const siteItems = activeItems.filter((row) => row.site_id === site.id);
+    const siteItems = visibleItems.filter((row) => row.site_id === site.id);
+    const siteActiveItems = activeItems.filter((row) => row.site_id === site.id);
     const personalizedCount = relationCount(siteItems, (row) => optionGroupItemIds.has(row.id));
     const missingImages = relationCount(siteItems, (row) => !hasText(row.image_url));
     const missingDescriptions = relationCount(siteItems, (row) => !hasText(row.description));
@@ -327,6 +367,7 @@ export default async function CommercialAuditPage() {
       missingImages,
       missingDescriptions,
       scheduledHints,
+      withoutCollection: relationCount(siteActiveItems, (row) => !structuralItemIds.has(row.id)),
     };
   });
 
@@ -365,14 +406,14 @@ export default async function CommercialAuditPage() {
         </div>
         <div className="ui-card">
           <div className="ui-caption">Productos publicados</div>
-          <div className="mt-2 text-3xl font-black text-[var(--ui-text)]">{activeItems.length}</div>
+          <div className="mt-2 text-3xl font-black text-[var(--ui-text)]">{visibleItems.length}</div>
           <p className="mt-2 text-sm text-[var(--ui-muted)]">
             Ítems comerciales activos y creados desde VISO.
           </p>
         </div>
         <div className="ui-card">
           <div className="ui-caption">Productos personalizables</div>
-          <div className="mt-2 text-3xl font-black text-[var(--ui-text)]">{optionGroupItemIds.size}</div>
+          <div className="mt-2 text-3xl font-black text-[var(--ui-text)]">{Array.from(optionGroupItemIds).filter((id) => visibleItemIds.has(id)).length}</div>
           <p className="mt-2 text-sm text-[var(--ui-muted)]">
             Productos con grupos de opciones configurados.
           </p>
@@ -462,10 +503,16 @@ export default async function CommercialAuditPage() {
                     {audit.missingDescriptions}
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[var(--ui-muted)]">Con reglas de programación detectadas</span>
-                  <span className="font-black text-[var(--ui-text)]">{audit.scheduledHints}</span>
-                </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[var(--ui-muted)]">Con reglas de programación detectadas</span>
+              <span className="font-black text-[var(--ui-text)]">{audit.scheduledHints}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[var(--ui-muted)]">Sin menú configurado</span>
+              <span className={audit.withoutCollection > 0 ? "font-black text-red-700" : "font-black text-emerald-700"}>
+                {audit.withoutCollection}
+              </span>
+            </div>
               </div>
             </div>
           ))}

@@ -18,6 +18,8 @@ type CollectionRow = {
   name: string;
   code: string;
   kind: string;
+  starts_at: string | null;
+  ends_at: string | null;
   is_active: boolean | null;
   sort_order: number | null;
 };
@@ -43,10 +45,17 @@ type ItemRow = {
   product_id: string | null;
   name: string;
   image_url: string | null;
-  commercial_collection_id: string | null;
   commercial_category_id: string | null;
   is_active: boolean | null;
   metadata: Record<string, unknown> | null;
+};
+
+type ItemCollectionRelation = {
+  catalog_item_id: string;
+  commercial_collection_id: string;
+  is_active: boolean | null;
+  is_primary: boolean | null;
+  commercial_collection?: CollectionRow | CollectionRow[] | null;
 };
 
 type StructuralIssue = {
@@ -86,6 +95,15 @@ function itemHref(item: ItemRow) {
   return `/menu/${encodeURIComponent(item.id)}`;
 }
 
+function oneCollection(value: CollectionRow | CollectionRow[] | null | undefined) {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+function isVisibleNow(collection: CollectionRow, now: number) {
+  return (!collection.starts_at || Date.parse(collection.starts_at) <= now) &&
+    (!collection.ends_at || Date.parse(collection.ends_at) > now);
+}
+
 export default async function CommercialStructureAuditPage() {
   await requireAppAccess({ appId: "viso", returnTo: "/commercial-audit/structure" });
 
@@ -96,12 +114,13 @@ export default async function CommercialStructureAuditPage() {
     { data: categoriesRaw, error: categoriesError },
     { data: linksRaw, error: linksError },
     { data: itemsRaw, error: itemsError },
+    { data: relationsRaw, error: relationsError },
   ] = await Promise.all([
     supabase.from("sites").select("id,name,code"),
     supabase
       .schema("pass")
       .from("commercial_collections")
-      .select("id,site_id,name,code,kind,is_active,sort_order"),
+      .select("id,site_id,name,code,kind,starts_at,ends_at,is_active,sort_order"),
     supabase
       .schema("pass")
       .from("commercial_categories")
@@ -114,8 +133,9 @@ export default async function CommercialStructureAuditPage() {
       .schema("pass")
       .from("catalog_items")
       .select(
-        "id,site_id,product_id,name,image_url,commercial_collection_id,commercial_category_id,is_active,metadata",
+        "id,site_id,product_id,name,image_url,commercial_category_id,is_active,metadata",
       ),
+    supabase.schema("pass").from("catalog_item_collections").select("catalog_item_id,commercial_collection_id,is_active,is_primary,commercial_collection:commercial_collections(id,site_id,name,code,kind,starts_at,ends_at,is_active,sort_order)"),
   ]);
 
   const loadErrors = [
@@ -124,6 +144,7 @@ export default async function CommercialStructureAuditPage() {
     categoriesError,
     linksError,
     itemsError,
+    relationsError,
   ].filter(Boolean);
 
   const sites = (sitesRaw ?? []) as SiteRow[];
@@ -131,9 +152,9 @@ export default async function CommercialStructureAuditPage() {
   const categories = (categoriesRaw ?? []) as CategoryRow[];
   const links = (linksRaw ?? []) as LinkRow[];
   const items = ((itemsRaw ?? []) as ItemRow[]).filter(isCommercialItem);
+  const relations = (relationsRaw ?? []) as ItemCollectionRelation[];
 
   const siteById = new Map(sites.map((site) => [site.id, site]));
-  const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
   const categoryById = new Map(categories.map((category) => [category.id, category]));
   const activeLinks = links.filter((link) => link.is_active !== false);
   const activeLinkKeys = new Set(
@@ -143,47 +164,78 @@ export default async function CommercialStructureAuditPage() {
   );
 
   const activeItems = items.filter((item) => item.is_active !== false);
+  const itemsById = new Map(activeItems.map((item) => [item.id, item]));
+  const activeRelations = relations.filter((relation) => relation.is_active !== false);
+  const activeRelationsByItem = new Map<string, ItemCollectionRelation[]>();
+  for (const relation of activeRelations) {
+    activeRelationsByItem.set(relation.catalog_item_id, [
+      ...(activeRelationsByItem.get(relation.catalog_item_id) ?? []),
+      relation,
+    ]);
+  }
+  const validRelations = activeRelations.filter((relation) => {
+    const item = itemsById.get(relation.catalog_item_id);
+    const collection = oneCollection(relation.commercial_collection);
+    return Boolean(item) && Boolean(collection) && collection!.is_active !== false && collection!.site_id === item!.site_id;
+  });
+  const validRelationsByItem = new Map<string, ItemCollectionRelation[]>();
+  for (const relation of validRelations) {
+    validRelationsByItem.set(relation.catalog_item_id, [
+      ...(validRelationsByItem.get(relation.catalog_item_id) ?? []),
+      relation,
+    ]);
+  }
+  // La vigencia comercial se evalúa al renderizar esta auditoría del servidor.
+  // eslint-disable-next-line react-hooks/purity
+  const now = Date.now();
+  const visibleItemIds = new Set(
+    validRelations
+      .filter((relation) => isVisibleNow(oneCollection(relation.commercial_collection)!, now))
+      .map((relation) => relation.catalog_item_id),
+  );
   const structuralIssues: StructuralIssue[] = [];
 
   for (const item of activeItems) {
     const site = siteById.get(item.site_id) ?? null;
-    const collection = item.commercial_collection_id
-      ? collectionById.get(item.commercial_collection_id) ?? null
-      : null;
     const category = item.commercial_category_id
       ? categoryById.get(item.commercial_category_id) ?? null
       : null;
 
-    let reason = "";
-    let explanation = "";
-
-    if (!collection) {
-      reason = "Sin colección";
-      explanation = "El producto no tiene una colección comercial válida.";
-    } else if (collection.is_active === false) {
-      reason = "Colección inactiva";
-      explanation = `Está publicado, pero pertenece a “${collection.name}”, que está desactivada.`;
-    } else if (collection.site_id !== item.site_id) {
-      reason = "Colección de otra sede";
-      explanation = "La colección pertenece a una sede diferente al producto.";
-    } else if (!category) {
-      reason = "Sin categoría";
-      explanation = "El producto no tiene una categoría comercial válida.";
-    } else if (category.is_active === false) {
-      reason = "Categoría inactiva";
-      explanation = `Está publicado, pero pertenece a “${category.name}”, que está desactivada.`;
-    } else if (category.site_id !== item.site_id) {
-      reason = "Categoría de otra sede";
-      explanation = "La categoría pertenece a una sede diferente al producto.";
-    } else if (
-      !activeLinkKeys.has(`${collection.id}:${category.id}`)
-    ) {
-      reason = "Categoría fuera de la colección";
-      explanation = `“${category.name}” no está habilitada dentro de “${collection.name}”.`;
+    if (!item.product_id) {
+      structuralIssues.push({
+        item,
+        site,
+        collection: null,
+        category,
+        reason: "Sin producto base",
+        explanation: "El ítem comercial no está conectado a un producto operacional válido.",
+      });
     }
 
-    if (reason) {
-      structuralIssues.push({ item, site, collection, category, reason, explanation });
+    const categoryIsValid = category !== null && category.is_active !== false && category.site_id === item.site_id;
+    if (!category) {
+      structuralIssues.push({ item, site, collection: null, category, reason: "Sin categoría", explanation: "El producto no tiene una categoría comercial válida." });
+    } else if (category.is_active === false) {
+      structuralIssues.push({ item, site, collection: null, category, reason: "Categoría inactiva", explanation: `Está publicado, pero pertenece a “${category.name}”, que está desactivada.` });
+    } else if (category.site_id !== item.site_id) {
+      structuralIssues.push({ item, site, collection: null, category, reason: "Categoría de otra sede", explanation: "La categoría pertenece a una sede diferente al producto." });
+    }
+
+    const itemRelations = activeRelationsByItem.get(item.id) ?? [];
+    if (itemRelations.length === 0) {
+      structuralIssues.push({ item, site, collection: null, category, reason: "Sin relación activa", explanation: "El producto no pertenece a ningún menú o temporada activos." });
+    }
+    for (const relation of itemRelations) {
+      const collection = oneCollection(relation.commercial_collection);
+      if (!collection) {
+        structuralIssues.push({ item, site, collection: null, category, reason: "Colección inexistente", explanation: "La relación activa apunta a una colección que ya no existe." });
+      } else if (collection.is_active === false) {
+        structuralIssues.push({ item, site, collection, category, reason: "Colección inactiva", explanation: `La relación activa apunta a “${collection.name}”, que está desactivada.` });
+      } else if (collection.site_id !== item.site_id) {
+        structuralIssues.push({ item, site, collection, category, reason: "Colección de otra sede", explanation: `“${collection.name}” pertenece a una sede distinta al producto.` });
+      } else if (category && categoryIsValid && !activeLinkKeys.has(`${relation.commercial_collection_id}:${category.id}`)) {
+        structuralIssues.push({ item, site, collection, category, reason: "Categoría fuera de la colección", explanation: `“${category.name}” no está habilitada dentro de “${collection.name}”.` });
+      }
     }
   }
 
@@ -193,9 +245,11 @@ export default async function CommercialStructureAuditPage() {
       const linkedCategories = activeLinks.filter(
         (link) => link.collection_id === collection.id,
       ).length;
-      const activeItemCount = activeItems.filter(
-        (item) => item.commercial_collection_id === collection.id,
-      ).length;
+      const activeItemCount = new Set(
+        activeRelations
+          .filter((relation) => relation.commercial_collection_id === collection.id && itemsById.has(relation.catalog_item_id))
+          .map((relation) => relation.catalog_item_id),
+      ).size;
       return {
         collection,
         site: siteById.get(collection.site_id) ?? null,
@@ -217,9 +271,7 @@ export default async function CommercialStructureAuditPage() {
       const linkedCollections = activeLinks.filter(
         (link) => link.commercial_category_id === category.id,
       ).length;
-      const activeItemCount = activeItems.filter(
-        (item) => item.commercial_category_id === category.id,
-      ).length;
+      const activeItemCount = new Set(validRelations.filter((relation) => itemsById.get(relation.catalog_item_id)?.commercial_category_id === category.id && activeLinkKeys.has(`${relation.commercial_collection_id}:${category.id}`)).map((relation) => relation.catalog_item_id)).size;
       return {
         category,
         site: siteById.get(category.site_id) ?? null,
@@ -269,13 +321,21 @@ export default async function CommercialStructureAuditPage() {
   );
 
   const missingImages = activeItems
+    .filter((item) => visibleItemIds.has(item.id))
     .filter((item) => !text(item.image_url))
     .map((item) => ({
       item,
       site: siteById.get(item.site_id) ?? null,
-      collection: item.commercial_collection_id
-        ? collectionById.get(item.commercial_collection_id) ?? null
-        : null,
+      collections: Array.from(
+        new Map(
+          (validRelationsByItem.get(item.id) ?? [])
+            .filter((relation) => isVisibleNow(oneCollection(relation.commercial_collection)!, now))
+            .map((relation) => {
+              const collection = oneCollection(relation.commercial_collection)!;
+              return [collection.id, collection] as const;
+            }),
+        ).values(),
+      ),
       category: item.commercial_category_id
         ? categoryById.get(item.commercial_category_id) ?? null
         : null,
@@ -365,7 +425,7 @@ export default async function CommercialStructureAuditPage() {
           <div className="space-y-3">
             {structuralIssues.map((issue) => (
               <div
-                key={issue.item.id}
+                key={`${issue.item.id}:${issue.collection?.id ?? "base"}:${issue.reason}`}
                 className="rounded-2xl border border-red-200 bg-red-50 p-4"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -478,7 +538,7 @@ export default async function CommercialStructureAuditPage() {
           <div className="ui-alert ui-alert--success">Todos los productos activos tienen imagen.</div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {missingImages.map(({ item, site, collection, category }) => (
+            {missingImages.map(({ item, site, collections, category }) => (
               <Link
                 key={item.id}
                 href={itemHref(item)}
@@ -487,7 +547,7 @@ export default async function CommercialStructureAuditPage() {
                 <div className="text-sm font-black text-[var(--ui-text)]">{item.name}</div>
                 <div className="mt-1 text-xs text-[var(--ui-muted)]">{siteName(site)}</div>
                 <div className="mt-3 text-xs text-[var(--ui-muted)]">
-                  {collection?.name ?? "Sin colección"} · {category?.name ?? "Sin categoría"}
+                  {collections.map((collection) => collection.name).join(" · ") || "Sin colección"} · {category?.name ?? "Sin categoría"}
                 </div>
                 <div className="mt-3 text-sm font-black text-[var(--ui-brand)]">Agregar imagen →</div>
               </Link>
