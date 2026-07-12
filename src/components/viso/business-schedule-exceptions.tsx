@@ -284,12 +284,16 @@ export async function BusinessScheduleExceptions({
         </p>
       </div>
 
-      <form action={saveScheduleException} className="space-y-4 rounded-2xl border border-[var(--ui-border)] bg-white p-4">
+      <form
+        id="new-schedule-exception"
+        action={saveScheduleException}
+        className="space-y-4 rounded-2xl border border-[var(--ui-border)] bg-white p-4"
+      >
         <input type="hidden" name="business_id" value={businessId} />
         <div className="font-semibold text-[var(--ui-text)]">Agregar excepción</div>
         <ExceptionFields row={blankRow} formId="new-schedule-exception" />
         <div className="flex justify-end">
-          <button id="new-schedule-exception" type="submit" className="ui-btn ui-btn--primary">
+          <button type="submit" className="ui-btn ui-btn--primary">
             Guardar excepción
           </button>
         </div>
