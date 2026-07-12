@@ -1,7 +1,8 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
+import { BusinessDeliverySlots } from "@/components/viso/business-delivery-slots";
 import { BusinessForm } from "@/components/viso/business-form";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
@@ -302,6 +303,8 @@ export default async function BusinessDetailPage({
           site_is_active: Boolean(site?.is_active),
         }}
       />
+
+      <BusinessDeliverySlots businessId={business.id} siteId={business.site_id} />
 
       <div className="ui-panel-soft flex flex-wrap items-center justify-between gap-3">
         <div className="ui-caption">Acción irreversible: elimina la configuración de este negocio en Vento Pass.</div>
