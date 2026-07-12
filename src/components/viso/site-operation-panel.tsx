@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
+import { SiteOperationFormClient, type SiteCapabilityState } from "@/components/viso/site-operation-form-client";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type OperationModel = "single_loc" | "multi_area" | "multi_loc";
+type Visibility = "operational" | "test" | "app_review" | "hidden";
 
 type CapabilityRow = {
   site_id: string;
@@ -45,15 +47,15 @@ function diagnostics(capability: CapabilityRow | null, locations: LocationRow[])
     ? activeLocations.find((location) => location.id === capability.primary_operational_location_id)
     : null;
 
-  if (!primary && activeLocations.length > 0) messages.push("La sede no tiene un LOC principal definido.");
+  if (!primary && activeLocations.length > 0) messages.push("Selecciona cuál LOC representa la operación principal de esta sede.");
   if (capability?.operation_model === "single_loc" && activeLocations.length > 1) {
-    messages.push("El modelo es LOC único, pero existen varios LOCs activos.");
+    messages.push("Elegiste una sola ubicación principal, pero hay varios LOCs activos. Revisa cuál debería quedar como principal.");
   }
   if (capability?.can_produce && !activeLocations.some((location) => location.location_type === "production")) {
-    messages.push("La sede produce, pero no tiene un LOC activo de producción.");
+    messages.push("Marcaste que esta sede produce, pero todavía no existe un LOC activo de producción.");
   }
   if ((capability?.can_hold_inventory || capability?.can_receive_remissions || capability?.can_sell) && activeLocations.length === 0) {
-    messages.push("La sede opera inventario, pero no tiene LOCs activos.");
+    messages.push("Esta sede usa inventario, pero todavía no tiene LOCs activos.");
   }
 
   return messages;
@@ -64,8 +66,8 @@ async function updateSiteOperation(formData: FormData) {
 
   const siteId = text(formData.get("site_id"));
   const visibilityRaw = text(formData.get("operational_visibility"));
-  const visibility = ["operational", "app_review", "test", "hidden"].includes(visibilityRaw)
-    ? visibilityRaw
+  const visibility = (["operational", "app_review", "test", "hidden"] as string[]).includes(visibilityRaw)
+    ? (visibilityRaw as Visibility)
     : "operational";
   const operationModel = normalizeModel(text(formData.get("operation_model")));
   const primaryLocationId = text(formData.get("primary_operational_location_id")) || null;
@@ -88,7 +90,7 @@ async function updateSiteOperation(formData: FormData) {
       .maybeSingle();
 
     if (!location || location.site_id !== siteId || location.is_active === false) {
-      redirect(`${siteHref(siteId)}?error=${encodeURIComponent("El LOC principal debe estar activo y pertenecer a la sede.")}`);
+      redirect(`${siteHref(siteId)}?error=${encodeURIComponent("La ubicación principal debe estar activa y pertenecer a esta sede.")}`);
     }
   }
 
@@ -154,84 +156,45 @@ export async function SiteOperationPanel({ siteId }: { siteId: string }) {
   const locations = (locationsRes.data ?? []) as LocationRow[];
   const activeLocations = locations.filter((location) => location.is_active !== false);
   const alerts = diagnostics(capability, locations);
+  const initialCapabilities: SiteCapabilityState = {
+    can_request_remissions: Boolean(capability?.can_request_remissions),
+    can_fulfill_remissions: Boolean(capability?.can_fulfill_remissions),
+    can_receive_remissions: Boolean(capability?.can_receive_remissions),
+    can_schedule_staff: Boolean(capability?.can_schedule_staff),
+    can_sell: Boolean(capability?.can_sell),
+    can_produce: Boolean(capability?.can_produce),
+    can_hold_inventory: Boolean(capability?.can_hold_inventory),
+    is_commercial_business: Boolean(capability?.is_commercial_business),
+    show_in_product_setup: Boolean(capability?.show_in_product_setup),
+  };
 
   return (
     <section className="ui-panel space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="ui-h2">Operación de la sede</h2>
-          <p className="ui-body-muted mt-1">Define qué puede hacer esta sede y cuál ubicación representa su operación principal.</p>
+          <div className="ui-caption">Configuración guiada</div>
+          <h2 className="ui-h2 mt-1">¿Cómo funciona esta sede?</h2>
+          <p className="ui-body-muted mt-1">Responde cuatro preguntas sencillas. El sistema usará las respuestas para organizar remisiones, inventario, producción, ventas y personal.</p>
         </div>
-        {alerts.length ? <span className="ui-chip ui-chip--warning">{alerts.length} alerta(s)</span> : <span className="ui-chip ui-chip--success">Configuración coherente</span>}
+        {alerts.length ? <span className="ui-chip ui-chip--warning">Requiere atención</span> : <span className="ui-chip ui-chip--success">Todo en orden</span>}
       </div>
 
       {alerts.length ? (
-        <div className="ui-alert ui-alert--warning">
-          <ul className="list-disc space-y-1 pl-5">
-            {alerts.map((alert) => <li key={alert}>{alert}</li>)}
-          </ul>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          <div className="font-semibold">Antes de continuar, revisa esto:</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5">{alerts.map((alert) => <li key={alert}>{alert}</li>)}</ul>
         </div>
       ) : null}
 
-      <form action={updateSiteOperation} className="space-y-5">
-        <input type="hidden" name="site_id" value={siteId} />
-
-        <div className="grid gap-4 md:grid-cols-3">
-          <label className="grid gap-1">
-            <span className="ui-label">Visibilidad operativa</span>
-            <select name="operational_visibility" defaultValue={siteRes.data?.operational_visibility ?? "operational"} className="ui-input">
-              <option value="operational">Operativa</option>
-              <option value="app_review">Revisión de aplicación</option>
-              <option value="test">Pruebas</option>
-              <option value="hidden">Oculta</option>
-            </select>
-          </label>
-
-          <label className="grid gap-1">
-            <span className="ui-label">Modelo operativo</span>
-            <select name="operation_model" defaultValue={capability?.operation_model ?? "multi_area"} className="ui-input">
-              <option value="single_loc">Un solo LOC</option>
-              <option value="multi_area">Varias áreas</option>
-              <option value="multi_loc">Varios LOCs</option>
-            </select>
-          </label>
-
-          <label className="grid gap-1">
-            <span className="ui-label">LOC principal</span>
-            <select name="primary_operational_location_id" defaultValue={capability?.primary_operational_location_id ?? ""} className="ui-input">
-              <option value="">Sin LOC principal</option>
-              {activeLocations.map((location) => (
-                <option key={location.id} value={location.id}>
-                  {location.code ?? location.description ?? location.id}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {[
-            ["can_request_remissions", "Solicita remisiones", capability?.can_request_remissions],
-            ["can_fulfill_remissions", "Despacha remisiones", capability?.can_fulfill_remissions],
-            ["can_receive_remissions", "Recibe remisiones", capability?.can_receive_remissions],
-            ["can_sell", "Realiza ventas", capability?.can_sell],
-            ["can_produce", "Realiza producción", capability?.can_produce],
-            ["can_hold_inventory", "Mantiene inventario", capability?.can_hold_inventory],
-            ["can_schedule_staff", "Programa personal", capability?.can_schedule_staff],
-            ["is_commercial_business", "Es negocio comercial", capability?.is_commercial_business],
-            ["show_in_product_setup", "Aparece en configuración de productos", capability?.show_in_product_setup],
-          ].map(([name, label, value]) => (
-            <label key={String(name)} className="flex items-center gap-3 rounded-xl border border-[var(--ui-border)] px-4 py-3 text-sm">
-              <input type="checkbox" name={String(name)} defaultChecked={Boolean(value)} />
-              <span>{String(label)}</span>
-            </label>
-          ))}
-        </div>
-
-        <div className="flex justify-end">
-          <button type="submit" className="ui-btn ui-btn--brand">Guardar operación</button>
-        </div>
-      </form>
+      <SiteOperationFormClient
+        siteId={siteId}
+        action={updateSiteOperation}
+        initialVisibility={(siteRes.data?.operational_visibility ?? "operational") as Visibility}
+        initialModel={capability?.operation_model ?? "multi_area"}
+        initialPrimaryLocationId={capability?.primary_operational_location_id ?? ""}
+        initialCapabilities={initialCapabilities}
+        locations={activeLocations}
+      />
     </section>
   );
 }
