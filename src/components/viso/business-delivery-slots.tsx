@@ -1,6 +1,7 @@
 import { BusinessHours } from "./business-hours";
 import { BusinessScheduleExceptions } from "./business-schedule-exceptions";
 import { ScheduledOrderConflicts } from "./scheduled-order-conflicts";
+import { ScheduledOrderRescheduler } from "./scheduled-order-rescheduler";
 
 export async function BusinessDeliverySlots({
   businessId,
@@ -14,6 +15,7 @@ export async function BusinessDeliverySlots({
       <BusinessHours businessId={businessId} siteId={siteId} />
       <BusinessScheduleExceptions businessId={businessId} siteId={siteId} />
       <ScheduledOrderConflicts businessId={businessId} siteId={siteId} />
+      <ScheduledOrderRescheduler businessId={businessId} siteId={siteId} />
     </div>
   );
 }
