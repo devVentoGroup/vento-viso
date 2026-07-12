@@ -24,6 +24,10 @@ type DeliverySlotRow = {
   is_active: boolean;
 };
 
+type BusinessSiteRow = {
+  site_id: string | null;
+};
+
 const FULFILLMENT_OPTIONS = [
   { value: "delivery", label: "Domicilio" },
   { value: "pickup", label: "Recoger en sede" },
@@ -53,18 +57,48 @@ function businessPath(businessId: string) {
 }
 
 function redirectWithError(businessId: string, message: string): never {
-  redirect(`${businessPath(businessId)}?error=${encodeURIComponent(message)}`);
+  const target = businessId ? businessPath(businessId) : "/businesses";
+  redirect(`${target}?error=${encodeURIComponent(message)}`);
 }
 
 function normalizeTime(value: string | null | undefined) {
   return String(value ?? "").slice(0, 5);
 }
 
+function isValidTime(value: string) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+async function resolveBusinessSite(businessId: string) {
+  if (!businessId) {
+    redirectWithError("", "Negocio inválido.");
+  }
+
+  const returnTo = businessPath(businessId);
+  const { supabase } = await requireAppAccess({ appId: "viso", returnTo });
+  const { data, error } = await supabase
+    .schema("pass")
+    .from("pass_satellites")
+    .select("site_id")
+    .eq("id", businessId)
+    .maybeSingle();
+
+  if (error) {
+    redirectWithError(businessId, error.message);
+  }
+
+  const siteId = (data as BusinessSiteRow | null)?.site_id;
+  if (!siteId) {
+    redirectWithError(businessId, "El negocio no existe o no tiene una sede vinculada.");
+  }
+
+  return siteId;
+}
+
 async function saveDeliverySlot(formData: FormData) {
   "use server";
 
   const businessId = asText(formData.get("business_id"));
-  const siteId = asText(formData.get("site_id"));
   const slotId = asText(formData.get("slot_id"));
   const fulfillmentType = asText(formData.get("fulfillment_type"));
   const isoWeekday = Number(asText(formData.get("iso_weekday")));
@@ -76,11 +110,7 @@ async function saveDeliverySlot(formData: FormData) {
   const validUntil = asText(formData.get("valid_until")) || null;
   const returnTo = businessPath(businessId);
 
-  await requireAppAccess({ appId: "viso", returnTo });
-
-  if (!businessId || !siteId) {
-    redirectWithError(businessId, "No se encontró la sede del negocio.");
-  }
+  const siteId = await resolveBusinessSite(businessId);
 
   if (!FULFILLMENT_OPTIONS.some((option) => option.value === fulfillmentType)) {
     redirectWithError(businessId, "Selecciona una modalidad válida.");
@@ -90,7 +120,7 @@ async function saveDeliverySlot(formData: FormData) {
     redirectWithError(businessId, "Selecciona un día válido.");
   }
 
-  if (!/^\d{2}:\d{2}$/.test(slotStart) || !/^\d{2}:\d{2}$/.test(slotEnd)) {
+  if (!isValidTime(slotStart) || !isValidTime(slotEnd)) {
     redirectWithError(businessId, "Define una hora inicial y final válidas.");
   }
 
@@ -118,14 +148,31 @@ async function saveDeliverySlot(formData: FormData) {
     is_active: asBool(formData.get("is_active")),
   };
 
-  const supabase = createAdminClient();
-  const query = slotId
-    ? supabase.schema("pass").from("site_delivery_slots").update(payload).eq("id", slotId).eq("site_id", siteId)
-    : supabase.schema("pass").from("site_delivery_slots").insert(payload);
-  const { error } = await query;
+  const admin = createAdminClient();
 
-  if (error) {
-    redirectWithError(businessId, error.message);
+  if (slotId) {
+    const { data, error } = await admin
+      .schema("pass")
+      .from("site_delivery_slots")
+      .update(payload)
+      .eq("id", slotId)
+      .eq("site_id", siteId)
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      redirectWithError(businessId, error.message);
+    }
+
+    if (!data) {
+      redirectWithError(businessId, "La franja ya no existe o no pertenece a este negocio.");
+    }
+  } else {
+    const { error } = await admin.schema("pass").from("site_delivery_slots").insert(payload);
+
+    if (error) {
+      redirectWithError(businessId, error.message);
+    }
   }
 
   revalidatePath(returnTo);
@@ -136,26 +183,30 @@ async function deleteDeliverySlot(formData: FormData) {
   "use server";
 
   const businessId = asText(formData.get("business_id"));
-  const siteId = asText(formData.get("site_id"));
   const slotId = asText(formData.get("slot_id"));
   const returnTo = businessPath(businessId);
 
-  await requireAppAccess({ appId: "viso", returnTo });
-
-  if (!businessId || !siteId || !slotId) {
+  if (!slotId) {
     redirectWithError(businessId, "La franja seleccionada no es válida.");
   }
 
-  const supabase = createAdminClient();
-  const { error } = await supabase
+  const siteId = await resolveBusinessSite(businessId);
+  const admin = createAdminClient();
+  const { data, error } = await admin
     .schema("pass")
     .from("site_delivery_slots")
     .delete()
     .eq("id", slotId)
-    .eq("site_id", siteId);
+    .eq("site_id", siteId)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     redirectWithError(businessId, error.message);
+  }
+
+  if (!data) {
+    redirectWithError(businessId, "La franja ya no existe o no pertenece a este negocio.");
   }
 
   revalidatePath(returnTo);
@@ -199,6 +250,7 @@ function SlotFields({ slot, formId }: { slot: DeliverySlotRow; formId: string })
           name="slot_start"
           type="time"
           required
+          aria-label="Hora inicial"
           className="ui-input h-10 min-w-28"
           defaultValue={normalizeTime(slot.slot_start)}
         />
@@ -209,6 +261,7 @@ function SlotFields({ slot, formId }: { slot: DeliverySlotRow; formId: string })
           name="slot_end"
           type="time"
           required
+          aria-label="Hora final"
           className="ui-input h-10 min-w-28"
           defaultValue={normalizeTime(slot.slot_end)}
         />
@@ -221,28 +274,33 @@ function SlotFields({ slot, formId }: { slot: DeliverySlotRow; formId: string })
           min={1}
           step={1}
           placeholder="Sin límite"
+          aria-label="Capacidad de pedidos"
           className="ui-input h-10 w-28"
           defaultValue={slot.capacity ?? ""}
         />
       </TableCell>
       <TableCell>
-        <div className="flex min-w-64 gap-2">
-          <input
-            form={formId}
-            name="valid_from"
-            type="date"
-            aria-label="Vigente desde"
-            className="ui-input h-10"
-            defaultValue={slot.valid_from ?? ""}
-          />
-          <input
-            form={formId}
-            name="valid_until"
-            type="date"
-            aria-label="Vigente hasta"
-            className="ui-input h-10"
-            defaultValue={slot.valid_until ?? ""}
-          />
+        <div className="grid min-w-64 grid-cols-2 gap-2">
+          <label className="space-y-1">
+            <span className="block text-xs text-[var(--ui-text-muted)]">Desde</span>
+            <input
+              form={formId}
+              name="valid_from"
+              type="date"
+              className="ui-input h-10"
+              defaultValue={slot.valid_from ?? ""}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-xs text-[var(--ui-text-muted)]">Hasta</span>
+            <input
+              form={formId}
+              name="valid_until"
+              type="date"
+              className="ui-input h-10"
+              defaultValue={slot.valid_until ?? ""}
+            />
+          </label>
         </div>
       </TableCell>
       <TableCell>
@@ -271,8 +329,8 @@ export async function BusinessDeliverySlots({
     );
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
+  const admin = createAdminClient();
+  const { data, error } = await admin
     .schema("pass")
     .from("site_delivery_slots")
     .select("id,fulfillment_type,iso_weekday,slot_start,slot_end,capacity,valid_from,valid_until,is_active")
@@ -286,8 +344,8 @@ export async function BusinessDeliverySlots({
     id: "new",
     fulfillment_type: "delivery",
     iso_weekday: 1,
-    slot_start: "08:00",
-    slot_end: "09:00",
+    slot_start: "",
+    slot_end: "",
     capacity: null,
     valid_from: null,
     valid_until: null,
@@ -303,75 +361,76 @@ export async function BusinessDeliverySlots({
         </p>
       </div>
 
-      {error ? <div className="ui-alert ui-alert--error">{error.message}</div> : null}
+      {error ? (
+        <div className="ui-alert ui-alert--error">No fue posible cargar las franjas: {error.message}</div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Modalidad</TableHeaderCell>
+                  <TableHeaderCell>Día</TableHeaderCell>
+                  <TableHeaderCell>Desde</TableHeaderCell>
+                  <TableHeaderCell>Hasta</TableHeaderCell>
+                  <TableHeaderCell>Capacidad</TableHeaderCell>
+                  <TableHeaderCell>Vigencia</TableHeaderCell>
+                  <TableHeaderCell>Estado</TableHeaderCell>
+                  <TableHeaderCell></TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {slots.map((slot) => {
+                  const formId = `delivery-slot-${slot.id}`;
+                  return (
+                    <TableRow key={slot.id}>
+                      <TableCell className="hidden">
+                        <form id={formId} action={saveDeliverySlot}>
+                          <input type="hidden" name="business_id" value={businessId} />
+                          <input type="hidden" name="slot_id" value={slot.id} />
+                        </form>
+                      </TableCell>
+                      <SlotFields slot={slot} formId={formId} />
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <button form={formId} type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+                            Guardar
+                          </button>
+                          <form action={deleteDeliverySlot}>
+                            <input type="hidden" name="business_id" value={businessId} />
+                            <input type="hidden" name="slot_id" value={slot.id} />
+                            <button type="submit" className="ui-btn ui-btn--danger ui-btn--sm">
+                              Eliminar
+                            </button>
+                          </form>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
 
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableHeaderCell>Modalidad</TableHeaderCell>
-              <TableHeaderCell>Día</TableHeaderCell>
-              <TableHeaderCell>Desde</TableHeaderCell>
-              <TableHeaderCell>Hasta</TableHeaderCell>
-              <TableHeaderCell>Capacidad</TableHeaderCell>
-              <TableHeaderCell>Vigencia</TableHeaderCell>
-              <TableHeaderCell>Estado</TableHeaderCell>
-              <TableHeaderCell></TableHeaderCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {slots.map((slot) => {
-              const formId = `delivery-slot-${slot.id}`;
-              return (
-                <TableRow key={slot.id}>
+                <TableRow>
                   <TableCell className="hidden">
-                    <form id={formId} action={saveDeliverySlot}>
+                    <form id="new-delivery-slot" action={saveDeliverySlot}>
                       <input type="hidden" name="business_id" value={businessId} />
-                      <input type="hidden" name="site_id" value={siteId} />
-                      <input type="hidden" name="slot_id" value={slot.id} />
                     </form>
                   </TableCell>
-                  <SlotFields slot={slot} formId={formId} />
+                  <SlotFields slot={newSlot} formId="new-delivery-slot" />
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <button form={formId} type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
-                        Guardar
-                      </button>
-                      <form action={deleteDeliverySlot}>
-                        <input type="hidden" name="business_id" value={businessId} />
-                        <input type="hidden" name="site_id" value={siteId} />
-                        <input type="hidden" name="slot_id" value={slot.id} />
-                        <button type="submit" className="ui-btn ui-btn--danger ui-btn--sm">
-                          Eliminar
-                        </button>
-                      </form>
-                    </div>
+                    <button form="new-delivery-slot" type="submit" className="ui-btn ui-btn--brand ui-btn--sm">
+                      Agregar franja
+                    </button>
                   </TableCell>
                 </TableRow>
-              );
-            })}
+              </TableBody>
+            </Table>
+          </div>
 
-            <TableRow>
-              <TableCell className="hidden">
-                <form id="new-delivery-slot" action={saveDeliverySlot}>
-                  <input type="hidden" name="business_id" value={businessId} />
-                  <input type="hidden" name="site_id" value={siteId} />
-                </form>
-              </TableCell>
-              <SlotFields slot={newSlot} formId="new-delivery-slot" />
-              <TableCell className="text-right">
-                <button form="new-delivery-slot" type="submit" className="ui-btn ui-btn--brand ui-btn--sm">
-                  Agregar franja
-                </button>
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      </div>
-
-      {slots.length === 0 ? (
-        <div className="ui-caption">Todavía no hay franjas guardadas. Configura la primera en la última fila.</div>
-      ) : null}
+          {slots.length === 0 ? (
+            <div className="ui-caption">Todavía no hay franjas guardadas. Configura la primera en la última fila.</div>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }
