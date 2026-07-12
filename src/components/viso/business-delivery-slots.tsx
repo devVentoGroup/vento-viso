@@ -1,6 +1,8 @@
 import { BusinessHours } from "./business-hours";
 import { BusinessScheduleExceptions } from "./business-schedule-exceptions";
 import { ScheduledOrderConflicts } from "./scheduled-order-conflicts";
+import { ScheduledOrderContactHistory } from "./scheduled-order-contact-history";
+import { ScheduledOrderContactResolution } from "./scheduled-order-contact-resolution";
 import { ScheduledOrderRescheduleHistory } from "./scheduled-order-reschedule-history";
 import { ScheduledOrderRescheduler } from "./scheduled-order-rescheduler";
 
@@ -17,7 +19,9 @@ export async function BusinessDeliverySlots({
       <BusinessScheduleExceptions businessId={businessId} siteId={siteId} />
       <ScheduledOrderConflicts businessId={businessId} siteId={siteId} />
       <ScheduledOrderRescheduler businessId={businessId} siteId={siteId} />
+      <ScheduledOrderContactResolution businessId={businessId} siteId={siteId} />
       <ScheduledOrderRescheduleHistory siteId={siteId} />
+      <ScheduledOrderContactHistory siteId={siteId} />
     </div>
   );
 }
