@@ -11,4 +11,9 @@ export async function BusinessDeliverySlots({
 }) {
   return (
     <div className="space-y-6">
-      <BusinessHours businessId={business
+      <BusinessHours businessId={businessId} siteId={siteId} />
+      <BusinessScheduleExceptions businessId={businessId} siteId={siteId} />
+      <ScheduledOrderConflicts siteId={siteId} />
+    </div>
+  );
+}
