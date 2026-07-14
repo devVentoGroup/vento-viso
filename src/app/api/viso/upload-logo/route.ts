@@ -1,18 +1,17 @@
 ﻿import { NextResponse } from "next/server";
+import sharp from "sharp";
+
 import { createClient } from "@/lib/supabase/server";
 
 const BUCKET = process.env.NEXT_PUBLIC_VISO_LOGO_BUCKET || "pass-satellite-logos";
 const MAX_SIZE = 5 * 1024 * 1024;
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"];
-
-function getExt(mime: string): string {
-  if (mime === "image/jpeg" || mime === "image/jpg") return "jpg";
-  if (mime === "image/png") return "png";
-  if (mime === "image/webp") return "webp";
-  if (mime === "image/gif") return "gif";
-  if (mime === "image/svg+xml") return "svg";
-  return "png";
-}
+const CACHE_SECONDS = 60 * 60 * 24 * 365;
+const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/svg+xml"]);
+const MAX_EDGE_BY_KIND = {
+  card: 512,
+  header: 1024,
+  legacy: 1024,
+} as const;
 
 function sanitizePathToken(value: string, fallback: string): string {
   const sanitized = value
@@ -54,22 +53,52 @@ export async function POST(req: Request) {
   }
 
   const mime = file.type?.toLowerCase() ?? "";
-  if (!ALLOWED_TYPES.includes(mime)) {
-    return NextResponse.json({ error: "Solo se permiten imagenes" }, { status: 400 });
+  if (!ALLOWED_TYPES.has(mime)) {
+    return NextResponse.json({ error: "Solo se permiten imagenes JPG, PNG, WebP o SVG" }, { status: 400 });
   }
 
   const rawCode = (formData.get("code") as string)?.trim() || "satellite";
   const code = sanitizePathToken(rawCode, "satellite");
   const rawKind = String(formData.get("kind") ?? "legacy").toLowerCase();
   const kind = rawKind === "card" || rawKind === "header" ? rawKind : "legacy";
-  const ext = getExt(mime);
-  const path = `${code}/${kind}-logo-${Date.now()}.${ext}`;
-
+  const maxEdge = MAX_EDGE_BY_KIND[kind];
+  const path = `${code}/${kind}-logo-${Date.now()}.webp`;
   const buffer = Buffer.from(await file.arrayBuffer());
+  let optimized: Buffer;
+
+  try {
+    optimized = await sharp(buffer, {
+      failOn: "none",
+      density: 192,
+      limitInputPixels: 40_000_000,
+    })
+      .rotate()
+      .resize({
+        width: maxEdge,
+        height: maxEdge,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({
+        lossless: true,
+        effort: 5,
+      })
+      .toBuffer();
+
+    await sharp(optimized).metadata();
+  } catch {
+    return NextResponse.json({ error: "No se pudo optimizar el logo" }, { status: 400 });
+  }
+
+  const uploadBody = new Blob([new Uint8Array(optimized)], { type: "image/webp" });
 
   const { error: uploadErr } = await supabase.storage
     .from(BUCKET)
-    .upload(path, buffer, { contentType: mime, upsert: true });
+    .upload(path, uploadBody, {
+      contentType: "image/webp",
+      cacheControl: String(CACHE_SECONDS),
+      upsert: false,
+    });
 
   if (uploadErr) {
     const message = String(uploadErr.message ?? "");
@@ -77,5 +106,10 @@ export async function POST(req: Request) {
   }
 
   const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
-  return NextResponse.json({ url: urlData.publicUrl });
+  return NextResponse.json({
+    url: urlData.publicUrl,
+    path,
+    bytes: optimized.byteLength,
+    format: "webp",
+  });
 }
