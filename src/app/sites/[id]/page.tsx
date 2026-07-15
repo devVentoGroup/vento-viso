@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
+import { SiteOperationPanel } from "@/components/viso/site-operation-panel";
 import { SiteStructureCreateForms } from "@/components/viso/site-structure-create-forms";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
@@ -116,7 +117,7 @@ export default async function SitePage({ params, searchParams }: { params: Promi
     <div className="space-y-6">
       <PageHeader
         title={site.name ?? "Sede"}
-        subtitle={`${site.code ?? "SIN-CÓDIGO"} · Administración maestra de áreas funcionales y LOCs.`}
+        subtitle={`${site.code ?? "SIN-CÓDIGO"} · Administración maestra de operación, áreas funcionales y LOCs.`}
         actions={<><Link href="/sites" className="ui-btn ui-btn--ghost">Volver a sedes</Link><Link href={`/sites/${id}/documentos`} className="ui-btn ui-btn--ghost">Documentos</Link><Link href={`/operations-map?site=${id}`} className="ui-btn ui-btn--ghost">Mapa operativo</Link></>}
       />
 
@@ -128,6 +129,8 @@ export default async function SitePage({ params, searchParams }: { params: Promi
         <div className="ui-panel"><div className="ui-caption">Áreas funcionales</div><div className="mt-2 ui-h3">{areas.length}</div></div>
         <div className="ui-panel"><div className="ui-caption">LOCs físicos</div><div className="mt-2 ui-h3">{locations.length}</div></div>
       </section>
+
+      <SiteOperationPanel siteId={id} />
 
       <SiteStructureCreateForms siteId={id} siteCode={site.code ?? "SITE"} areas={areas.filter((area) => area.is_active)} createAreaAction={createArea} createLocationAction={createLocation} />
 
