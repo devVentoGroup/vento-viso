@@ -6,7 +6,7 @@ type Model = "single_loc" | "multi_area" | "multi_loc";
 type Visibility = "operational" | "test" | "app_review" | "hidden";
 type CapabilityKey = "can_request_remissions" | "can_fulfill_remissions" | "can_receive_remissions" | "can_schedule_staff" | "can_sell" | "can_produce" | "can_hold_inventory" | "is_commercial_business" | "show_in_product_setup";
 
-type CapabilityState = Record<CapabilityKey, boolean>;
+export type SiteCapabilityState = Record<CapabilityKey, boolean>;
 type Location = { id: string; code: string | null; description: string | null; location_type: string | null };
 
 type Props = {
@@ -15,7 +15,7 @@ type Props = {
   initialVisibility: Visibility;
   initialModel: Model;
   initialPrimaryLocationId: string;
-  initialCapabilities: CapabilityState;
+  initialCapabilities: SiteCapabilityState;
   locations: Location[];
 };
 
@@ -41,7 +41,7 @@ export function SiteOperationFormClient(props: Props) {
   const [model, setModel] = useState<Model>(props.initialModel);
   const [visibility, setVisibility] = useState<Visibility>(props.initialVisibility);
   const [primary, setPrimary] = useState(props.initialPrimaryLocationId);
-  const [enabled, setEnabled] = useState<CapabilityState>(props.initialCapabilities);
+  const [enabled, setEnabled] = useState<SiteCapabilityState>(props.initialCapabilities);
 
   const summary = useMemo(() => capabilities.filter(([key]) => enabled[key]).map(([, label]) => label), [enabled]);
 
