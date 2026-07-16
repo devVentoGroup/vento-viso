@@ -1,0 +1,40 @@
+diff --git a/src/app/commercial-collections/page.tsx b/src/app/commercial-collections/page.tsx
+--- a/src/app/commercial-collections/page.tsx
++++ b/src/app/commercial-collections/page.tsx
+@@ -461,25 +461,5 @@
+     };
+   }
+ 
+-  const categoryUpdates = await Promise.all(
+-    orderedLinks.map((link, index) =>
+-      supabase
+-        .schema("pass")
+-        .from("commercial_categories")
+-        .update({ sort_order: index * 10 })
+-        .eq("id", link.commercial_category_id),
+-    ),
+-  );
+-
+-  const failedCategoryUpdate = categoryUpdates.find((result) => result.error);
+-
+-  if (failedCategoryUpdate?.error) {
+-    return {
+-      ok: false,
+-      error: failedCategoryUpdate.error.message,
+-    };
+-  }
+-
+   revalidatePath("/commercial-collections");
+-  revalidatePath("/commercial-categories");
+   revalidatePath("/menu");
+@@ -920,4 +900,4 @@
+                             <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                               <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
+-                                Secciones asignadas
++                                Categorías de esta colección
+                               </summary>
+@@ -954,3 +934,3 @@
+                                   <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+-                                    Guardar secciones
++                                    Guardar categorías
+                                   </button>

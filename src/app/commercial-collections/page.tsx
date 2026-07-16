@@ -461,27 +461,7 @@ async function saveCollectionCategoryOrder(collectionId: string, orderedLinkIds:
     };
   }
 
-  const categoryUpdates = await Promise.all(
-    orderedLinks.map((link, index) =>
-      supabase
-        .schema("pass")
-        .from("commercial_categories")
-        .update({ sort_order: index * 10 })
-        .eq("id", link.commercial_category_id),
-    ),
-  );
-
-  const failedCategoryUpdate = categoryUpdates.find((result) => result.error);
-
-  if (failedCategoryUpdate?.error) {
-    return {
-      ok: false,
-      error: failedCategoryUpdate.error.message,
-    };
-  }
-
   revalidatePath("/commercial-collections");
-  revalidatePath("/commercial-categories");
   revalidatePath("/menu");
 
   return {
@@ -919,7 +899,7 @@ export default async function CommercialCollectionsPage({
 
                             <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
                               <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ui-muted)]">
-                                Secciones asignadas
+                                Categorías de esta colección
                               </summary>
 
                               <form action={saveCollectionCategories} className="mt-3 space-y-3">
@@ -952,7 +932,7 @@ export default async function CommercialCollectionsPage({
                                   </div>
 
                                   <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
-                                    Guardar secciones
+                                    Guardar categorías
                                   </button>
                                 </div>
                               </form>
