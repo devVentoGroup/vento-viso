@@ -1,6 +1,14 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type SiteOption = {
   id: string;
@@ -114,42 +122,6 @@ type MenuItemFormProps = {
 const PRODUCT_UPLOAD_ENDPOINT = "/api/viso/upload-commercial-menu-image";
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
-function getPreviewTitle(name: string) {
-  const trimmed = name.trim();
-  return trimmed || "Producto del menu";
-}
-
-function getPreviewCategory(category: string) {
-  const trimmed = category.trim();
-  return trimmed || "Categoría general";
-}
-
-function asCop(value: string) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "$0";
-  return new Intl.NumberFormat("es-CO", {
-    style: "currency",
-    currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(parsed);
-}
-
-function onlyDigits(value: string) {
-  return value.replace(/\D/g, "");
-}
-
-function formatCopInput(value: string) {
-  const digits = onlyDigits(value);
-  if (!digits || Number(digits) <= 0) return "";
-
-  const parsed = Number(digits);
-  if (!Number.isFinite(parsed)) return "";
-
-  return `$ ${new Intl.NumberFormat("es-CO", {
-    maximumFractionDigits: 0,
-  }).format(parsed)}`;
-}
-
 function normalizeSearchValue(value: string) {
   return value
     .toLowerCase()
@@ -163,29 +135,35 @@ function getProductDisplayName(product: ProductOption) {
 }
 
 function getProductSearchText(product: ProductOption) {
-  return normalizeSearchValue(
-    [
-      product.name,
-      product.sku,
-      product.id,
-    ]
-      .filter(Boolean)
-      .join(" "),
-  );
+  return normalizeSearchValue([product.name, product.sku, product.id].filter(Boolean).join(" "));
 }
 
-function getProductPriceForSite(product: ProductOption, siteId: string) {
-  const sitePrice = siteId ? product.site_prices?.[siteId] : null;
-  if (typeof sitePrice === "number" && Number.isFinite(sitePrice) && sitePrice > 0) {
-    return sitePrice;
-  }
+function onlyDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
 
-  const fallbackPrice = product.default_price;
-  if (typeof fallbackPrice === "number" && Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
-    return fallbackPrice;
-  }
+function formatCopInput(value: string) {
+  const digits = onlyDigits(value);
+  if (!digits || Number(digits) <= 0) return "";
+  return `$ ${new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }).format(Number(digits))}`;
+}
 
-  return null;
+function asCop(value: number | string | null | undefined) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "$0";
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(parsed);
+}
+
+function collectionLabel(collection: CommercialCollectionOption) {
+  return collection.name?.trim() || collection.code?.trim() || "Colección sin nombre";
+}
+
+function categoryLabel(category: CommercialCategoryOption) {
+  return category.name?.trim() || category.code?.trim() || "Categoría sin nombre";
 }
 
 export function MenuItemForm({
@@ -194,7 +172,7 @@ export function MenuItemForm({
   products,
   categories,
   collections = [],
-  collectionCategoryLinks,
+  collectionCategoryLinks = [],
   existingCommercialItems = [],
   commercialCoverage = [],
   initial,
@@ -202,23 +180,28 @@ export function MenuItemForm({
   formId,
   secondaryActions,
 }: MenuItemFormProps) {
-  const [name, setName] = useState(initial.name);
-  const [description, setDescription] = useState(initial.description);
+  const initialCollectionIds = Array.from(
+    new Set((initial.commercial_collection_ids ?? []).map((id) => String(id).trim()).filter(Boolean)),
+  );
+
+  const [siteId, setSiteId] = useState(initial.site_id || sites[0]?.id || "");
+  const [primaryCollectionId, setPrimaryCollectionId] = useState(initialCollectionIds[0] ?? "");
+  const [additionalCollectionIds, setAdditionalCollectionIds] = useState<string[]>(
+    initialCollectionIds.slice(1),
+  );
+  const [commercialCategoryId, setCommercialCategoryId] = useState(initial.commercial_category_id);
   const [productId, setProductId] = useState(initial.product_id);
   const [productQuery, setProductQuery] = useState("");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [showExistingProducts, setShowExistingProducts] = useState(false);
+  const [name, setName] = useState(initial.name);
+  const [description, setDescription] = useState(initial.description);
   const [priceAmount, setPriceAmount] = useState(initial.price_amount);
-  const [siteId, setSiteId] = useState(initial.site_id || sites[0]?.id || "");
-  const initialCollectionIds = initial.commercial_collection_ids ?? [];
-  const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>(initialCollectionIds);
-  const commercialCollectionId = selectedCollectionIds[0] ?? "";
-  const [commercialCategoryId, setCommercialCategoryId] = useState(initial.commercial_category_id);
-  const [categoryLabel] = useState(initial.category_label);
+  const [compareAtAmount, setCompareAtAmount] = useState(initial.compare_at_amount);
+  const [imageUrl, setImageUrl] = useState(initial.image_url);
   const [badgesCsv, setBadgesCsv] = useState(initial.badges_csv);
   const [displayGroup, setDisplayGroup] = useState(initial.display_group ?? "");
   const [variantLabel, setVariantLabel] = useState(initial.variant_label ?? "");
-  const [imageUrl, setImageUrl] = useState(initial.image_url);
   const [isActive, setIsActive] = useState(initial.is_active);
   const [isFeatured, setIsFeatured] = useState(initial.is_featured);
   const [fulfillmentDelivery, setFulfillmentDelivery] = useState(initial.fulfillment_delivery);
@@ -230,78 +213,183 @@ export function MenuItemForm({
   const [opensDetailModal, setOpensDetailModal] = useState(Boolean(initial.opens_detail_modal));
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
-  const [imagePreviewFailed, setImagePreviewFailed] = useState(false);
+
   const generatedFormId = useId().replace(/:/g, "");
   const resolvedFormId = formId || `menu-item-form-${generatedFormId}`;
   const productPickerRef = useRef<HTMLDivElement | null>(null);
-  const productPickerListId = `${resolvedFormId}-product-results`;
 
-  const siteLabel = useMemo(() => {
-    const selected = sites.find((site) => site.id === siteId);
-    if (!selected) return "Sin sede";
-    return selected.name ?? selected.code ?? "Sin sede";
-  }, [sites, siteId]);
+  const visibleCollections = useMemo(
+    () =>
+      collections.filter(
+        (collection) => collection.is_active !== false && collection.site_id === siteId,
+      ),
+    [collections, siteId],
+  );
+
+  const orderedCategoryIdsByCollection = useMemo(() => {
+    const map = new Map<string, Array<{ categoryId: string; sortOrder: number }>>();
+
+    for (const link of collectionCategoryLinks) {
+      if (link.is_active === false) continue;
+      const collectionId = String(link.collection_id ?? "").trim();
+      const categoryId = String(link.commercial_category_id ?? "").trim();
+      if (!collectionId || !categoryId) continue;
+      const current = map.get(collectionId) ?? [];
+      current.push({
+        categoryId,
+        sortOrder: Number.isFinite(Number(link.sort_order))
+          ? Number(link.sort_order)
+          : Number.MAX_SAFE_INTEGER,
+      });
+      map.set(collectionId, current);
+    }
+
+    for (const entries of map.values()) {
+      entries.sort((a, b) => a.sortOrder - b.sortOrder || a.categoryId.localeCompare(b.categoryId));
+    }
+
+    return map;
+  }, [collectionCategoryLinks]);
+
+  const categoryIdSetByCollection = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const [collectionId, entries] of orderedCategoryIdsByCollection.entries()) {
+      map.set(collectionId, new Set(entries.map((entry) => entry.categoryId)));
+    }
+    return map;
+  }, [orderedCategoryIdsByCollection]);
+
+  const categoriesById = useMemo(
+    () => new Map(categories.map((category) => [category.id, category])),
+    [categories],
+  );
+
+  const visibleCategories = useMemo(() => {
+    if (!primaryCollectionId) return [];
+    return (orderedCategoryIdsByCollection.get(primaryCollectionId) ?? [])
+      .map((entry) => categoriesById.get(entry.categoryId))
+      .filter(
+        (category): category is CommercialCategoryOption =>
+          Boolean(category) && category?.is_active !== false && category?.site_id === siteId,
+      );
+  }, [categoriesById, orderedCategoryIdsByCollection, primaryCollectionId, siteId]);
+
+  const selectedCategory = useMemo(
+    () => visibleCategories.find((category) => category.id === commercialCategoryId) ?? null,
+    [commercialCategoryId, visibleCategories],
+  );
+
+  const compatibleAdditionalCollections = useMemo(() => {
+    if (!commercialCategoryId) return [];
+    return visibleCollections.filter(
+      (collection) =>
+        collection.id !== primaryCollectionId &&
+        (categoryIdSetByCollection.get(collection.id)?.has(commercialCategoryId) ?? false),
+    );
+  }, [categoryIdSetByCollection, commercialCategoryId, primaryCollectionId, visibleCollections]);
+
+  const selectedCollectionIds = useMemo(
+    () =>
+      primaryCollectionId
+        ? [
+            primaryCollectionId,
+            ...additionalCollectionIds.filter(
+              (id) => id !== primaryCollectionId && compatibleAdditionalCollections.some((item) => item.id === id),
+            ),
+          ]
+        : [],
+    [additionalCollectionIds, compatibleAdditionalCollections, primaryCollectionId],
+  );
 
   const existingCommercialProductIdsBySite = useMemo(() => {
     const map = new Map<string, Set<string>>();
-
     for (const item of existingCommercialItems) {
       if (item.is_active === false) continue;
-
       const itemSiteId = String(item.site_id ?? "").trim();
       const itemProductId = String(item.product_id ?? "").trim();
-
       if (!itemSiteId || !itemProductId) continue;
-
       const current = map.get(itemSiteId) ?? new Set<string>();
       current.add(itemProductId);
       map.set(itemSiteId, current);
     }
-
     if (mode === "edit" && initial.site_id && initial.product_id) {
       map.get(initial.site_id)?.delete(initial.product_id);
     }
-
     return map;
   }, [existingCommercialItems, initial.product_id, initial.site_id, mode]);
 
-  const isProductAlreadyCreatedForSite = useCallback((targetProductId: string, targetSiteId: string) => {
-    if (!targetProductId || !targetSiteId) return false;
-    return existingCommercialProductIdsBySite.get(targetSiteId)?.has(targetProductId) ?? false;
-  }, [existingCommercialProductIdsBySite]);
+  const isProductAlreadyCreatedForSite = useCallback(
+    (targetProductId: string, targetSiteId: string) =>
+      Boolean(
+        targetProductId &&
+          targetSiteId &&
+          existingCommercialProductIdsBySite.get(targetSiteId)?.has(targetProductId),
+      ),
+    [existingCommercialProductIdsBySite],
+  );
 
-  const eligibleProducts = useMemo(() => {
-    return products.filter((product) => {
-      if (product.is_active === false) return false;
-      const siteIds = product.site_ids || [];
-      if (!siteId) return true;
-      return siteIds.includes(siteId);
-    });
-  }, [products, siteId]);
+  const eligibleProducts = useMemo(
+    () =>
+      products.filter(
+        (product) =>
+          product.is_active !== false &&
+          (!siteId || (product.site_ids ?? []).includes(siteId)),
+      ),
+    [products, siteId],
+  );
 
-  const availableProducts = useMemo(() => {
-    return eligibleProducts.filter((product) => !isProductAlreadyCreatedForSite(product.id, siteId));
-  }, [eligibleProducts, isProductAlreadyCreatedForSite, siteId]);
+  const availableProducts = useMemo(
+    () =>
+      eligibleProducts.filter(
+        (product) => !isProductAlreadyCreatedForSite(product.id, siteId),
+      ),
+    [eligibleProducts, isProductAlreadyCreatedForSite, siteId],
+  );
 
-  const alreadyCreatedProducts = useMemo(() => {
-    return eligibleProducts.filter((product) => isProductAlreadyCreatedForSite(product.id, siteId));
-  }, [eligibleProducts, isProductAlreadyCreatedForSite, siteId]);
+  const visibleProducts = showExistingProducts ? eligibleProducts : availableProducts;
+  const normalizedProductQuery = normalizeSearchValue(productQuery);
+  const productResults = useMemo(
+    () =>
+      visibleProducts
+        .filter((product) =>
+          normalizedProductQuery
+            ? getProductSearchText(product).includes(normalizedProductQuery)
+            : true,
+        )
+        .slice(0, normalizedProductQuery ? 30 : 12),
+    [normalizedProductQuery, visibleProducts],
+  );
 
-  const visibleProducts = useMemo(() => {
-    return showExistingProducts ? eligibleProducts : availableProducts;
-  }, [availableProducts, eligibleProducts, showExistingProducts]);
+  const selectedProduct = useMemo(
+    () => eligibleProducts.find((product) => product.id === productId) ?? null,
+    [eligibleProducts, productId],
+  );
 
-  const selectedSiteCoverage = useMemo(() => {
-    return commercialCoverage.find((site) => site.site_id === siteId) ?? null;
-  }, [commercialCoverage, siteId]);
+  const selectedProductAlreadyCreated = isProductAlreadyCreatedForSite(productId, siteId);
 
-  const selectedProductAlreadyCreated = useMemo(() => {
-    return isProductAlreadyCreatedForSite(productId, siteId);
-  }, [isProductAlreadyCreatedForSite, productId, siteId]);
+  const selectedSiteCoverage = useMemo(
+    () => commercialCoverage.find((site) => site.site_id === siteId) ?? null,
+    [commercialCoverage, siteId],
+  );
 
-  const selectedProduct = useMemo(() => {
-    return eligibleProducts.find((product) => product.id === productId) ?? null;
-  }, [eligibleProducts, productId]);
+  const suggestedPrice = useMemo(() => {
+    if (!selectedProduct) return null;
+    const sitePrice = selectedProduct.site_prices?.[siteId];
+    if (typeof sitePrice === "number" && Number.isFinite(sitePrice) && sitePrice > 0) return sitePrice;
+    const fallback = selectedProduct.default_price;
+    return typeof fallback === "number" && Number.isFinite(fallback) && fallback > 0 ? fallback : null;
+  }, [selectedProduct, siteId]);
+
+  const suggestedRecipeCost = useMemo(() => {
+    const value = selectedProduct?.site_recipe_costs?.[siteId];
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+  }, [selectedProduct, siteId]);
+
+  const currentMarginPct = useMemo(() => {
+    const currentPrice = Number(priceAmount);
+    if (suggestedRecipeCost == null || !Number.isFinite(currentPrice) || currentPrice <= 0) return null;
+    return ((currentPrice - suggestedRecipeCost) / currentPrice) * 100;
+  }, [priceAmount, suggestedRecipeCost]);
 
   useEffect(() => {
     if (mode !== "create" || !selectedProduct) return;
@@ -311,101 +399,35 @@ export function MenuItemForm({
     }
   }, [description, mode, name, selectedProduct]);
 
-  const matchingProducts = useMemo(() => {
-    const query = normalizeSearchValue(productQuery);
-    if (!query) return visibleProducts;
-
-    return visibleProducts.filter((product) => getProductSearchText(product).includes(query));
-  }, [productQuery, visibleProducts]);
-
-  const productResultsLimit = productQuery.trim() ? 30 : 12;
-  const productResults = matchingProducts.slice(0, productResultsLimit);
-  const hasMoreProductResults = matchingProducts.length > productResults.length;
-  const availableProductCount = availableProducts.length;
-  const alreadyCreatedProductCount = alreadyCreatedProducts.length;
-
-  const visibleCollections = useMemo(() => {
-    return collections.filter((collection) => {
-      if (collection.is_active === false) return false;
-      return collection.site_id === siteId;
-    });
-  }, [collections, siteId]);
-
-  const shouldFilterCategoriesByCollection = false;
-
-  const categoryIdsByCollection = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-
-    for (const link of collectionCategoryLinks ?? []) {
-      if (link.is_active === false) continue;
-
-      const collectionId = String(link.collection_id ?? "").trim();
-      const categoryId = String(link.commercial_category_id ?? "").trim();
-
-      if (!collectionId || !categoryId) continue;
-
-      const current = map.get(collectionId) ?? new Set<string>();
-      current.add(categoryId);
-      map.set(collectionId, current);
-    }
-
-    return map;
-  }, [collectionCategoryLinks]);
-
-  const selectedCollection = useMemo(() => {
-    return visibleCollections.find((collection) => collection.id === commercialCollectionId) ?? null;
-  }, [commercialCollectionId, visibleCollections]);
-
-  const visibleCategories = useMemo(() => {
-    return categories.filter((category) => {
-      if (category.is_active === false) return false;
-      if (category.site_id !== siteId) return false;
-
-      if (!shouldFilterCategoriesByCollection) {
-        return true;
-      }
-
-      const allowedCategoryIds = categoryIdsByCollection.get(commercialCollectionId);
-      return allowedCategoryIds?.has(category.id) ?? false;
-    });
-  }, [
-    categories,
-    siteId,
-    commercialCollectionId,
-    shouldFilterCategoriesByCollection,
-    categoryIdsByCollection,
-  ]);
-
-  const selectedCategory = useMemo(() => {
-    return visibleCategories.find((category) => category.id === commercialCategoryId) ?? null;
-  }, [commercialCategoryId, visibleCategories]);
-
-  const liveBadges = useMemo(() => {
-    return badgesCsv
-      .split(",")
-      .map((badge) => badge.trim())
-      .filter(Boolean)
-      .slice(0, 3);
-  }, [badgesCsv]);
-
-  const liveFulfillmentLabels = useMemo(() => {
-    return [
-      fulfillmentDelivery ? "Domicilio" : null,
-      fulfillmentPickup ? "Recoger" : null,
-      fulfillmentOnPremise ? "En sitio" : null,
-    ].filter(Boolean);
-  }, [fulfillmentDelivery, fulfillmentPickup, fulfillmentOnPremise]);
+  useEffect(() => {
+    if (suggestedPrice == null || priceAmount.trim()) return;
+    setPriceAmount(String(Math.round(suggestedPrice)));
+  }, [priceAmount, suggestedPrice]);
 
   useEffect(() => {
-    const validIds = new Set(visibleCollections.map((collection) => collection.id));
-    setSelectedCollectionIds((current) => current.filter((id) => validIds.has(id)));
-  }, [visibleCollections]);
+    const validCollectionIds = new Set(visibleCollections.map((collection) => collection.id));
+    if (primaryCollectionId && !validCollectionIds.has(primaryCollectionId)) {
+      setPrimaryCollectionId("");
+      setCommercialCategoryId("");
+      setAdditionalCollectionIds([]);
+    }
+    setAdditionalCollectionIds((current) => current.filter((id) => validCollectionIds.has(id)));
+  }, [primaryCollectionId, visibleCollections]);
 
   useEffect(() => {
     if (!commercialCategoryId) return;
-    const stillValid = visibleCategories.some((category) => category.id === commercialCategoryId);
-    if (!stillValid) setCommercialCategoryId("");
+    const isValid = visibleCategories.some((category) => category.id === commercialCategoryId);
+    if (!isValid) {
+      setCommercialCategoryId("");
+      setAdditionalCollectionIds([]);
+    }
   }, [commercialCategoryId, visibleCategories]);
+
+  useEffect(() => {
+    setAdditionalCollectionIds((current) =>
+      current.filter((id) => compatibleAdditionalCollections.some((collection) => collection.id === id)),
+    );
+  }, [compatibleAdditionalCollections]);
 
   useEffect(() => {
     if (!productId) return;
@@ -418,472 +440,549 @@ export function MenuItemForm({
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (!productPickerRef.current) return;
       const target = event.target as Node | null;
-      if (target && !productPickerRef.current.contains(target)) {
+      if (target && productPickerRef.current && !productPickerRef.current.contains(target)) {
         setIsProductPickerOpen(false);
       }
     }
-
-    if (isProductPickerOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
+    if (isProductPickerOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isProductPickerOpen]);
 
-  const suggestedPrice = useMemo(() => {
-    if (!selectedProduct) return null;
-    if (siteId) {
-      const sitePrice = selectedProduct.site_prices?.[siteId];
-      if (typeof sitePrice === "number" && Number.isFinite(sitePrice) && sitePrice > 0) {
-        return sitePrice;
-      }
-    }
-    const fallbackPrice = selectedProduct.default_price;
-    if (typeof fallbackPrice === "number" && Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
-      return fallbackPrice;
-    }
-    return null;
-  }, [selectedProduct, siteId]);
+  const handleSiteChange = (nextSiteId: string) => {
+    setSiteId(nextSiteId);
+    setPrimaryCollectionId("");
+    setCommercialCategoryId("");
+    setAdditionalCollectionIds([]);
+    setProductId("");
+    setProductQuery("");
+  };
 
-  const suggestedRecipeCost = useMemo(() => {
-    if (!selectedProduct || !siteId) return null;
-    const recipeCost = selectedProduct.site_recipe_costs?.[siteId];
-    if (typeof recipeCost === "number" && Number.isFinite(recipeCost) && recipeCost >= 0) {
-      return recipeCost;
-    }
-    return null;
-  }, [selectedProduct, siteId]);
+  const handlePrimaryCollectionChange = (nextCollectionId: string) => {
+    setPrimaryCollectionId(nextCollectionId);
+    setCommercialCategoryId("");
+    setAdditionalCollectionIds([]);
+  };
 
-  const currentMarginPct = useMemo(() => {
-    if (suggestedRecipeCost == null) return null;
-    const currentPrice = Number(priceAmount);
-    if (!Number.isFinite(currentPrice) || currentPrice <= 0) return null;
-    return ((currentPrice - suggestedRecipeCost) / currentPrice) * 100;
-  }, [priceAmount, suggestedRecipeCost]);
-
-  useEffect(() => {
-    if (suggestedPrice == null) return;
-    const current = Number(priceAmount);
-    const currentHasValue = priceAmount.trim().length > 0 && Number.isFinite(current) && current > 0;
-    if (currentHasValue) return;
-    const suggestedRounded = String(Math.round(suggestedPrice));
-    if (priceAmount !== suggestedRounded) {
-      setPriceAmount(suggestedRounded);
-    }
-  }, [priceAmount, suggestedPrice]);
-
-
-  const submitDisabled =
-    !siteId ||
-    !productId ||
-    !commercialCategoryId ||
-    selectedCollectionIds.length === 0 ||
-    (mode === "create" && selectedProductAlreadyCreated);
+  const handleCategoryChange = (nextCategoryId: string) => {
+    setCommercialCategoryId(nextCategoryId);
+    setAdditionalCollectionIds((current) =>
+      current.filter(
+        (collectionId) => categoryIdSetByCollection.get(collectionId)?.has(nextCategoryId) ?? false,
+      ),
+    );
+  };
 
   const handleUpload = async (file: File | null) => {
     if (!file) return;
     if (file.size > MAX_UPLOAD_BYTES) {
       setUploadStatus("error");
-      setUploadMessage("La imagen supera 5 MB. Comprimela o usa una mas liviana.");
+      setUploadMessage("La imagen supera 5 MB.");
       return;
     }
+
     setUploadStatus("uploading");
     setUploadMessage("");
+
     try {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("kind", "catalog-item");
       formData.append("ownerId", initial.id || initial.code || name || "pending");
-      const response = await fetch(PRODUCT_UPLOAD_ENDPOINT, {
-        method: "POST",
-        body: formData,
-      });
+
+      const response = await fetch(PRODUCT_UPLOAD_ENDPOINT, { method: "POST", body: formData });
       const raw = await response.text();
       let payload: Record<string, unknown> | null = null;
-      if (raw) {
-        try {
-          payload = JSON.parse(raw) as Record<string, unknown>;
-        } catch {
-          payload = null;
-        }
+      try {
+        payload = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+      } catch {
+        payload = null;
       }
+
       if (!response.ok) {
-        const backendError =
-          payload && typeof payload === "object" && "error" in payload ? (payload.error as string) : null;
-        throw new Error(backendError || raw || "Error subiendo imagen.");
+        throw new Error(
+          (typeof payload?.error === "string" && payload.error) || raw || "No se pudo subir la imagen.",
+        );
       }
-      const nextUrl = payload && typeof payload === "object" && "url" in payload ? (payload.url as string) : "";
-      setImageUrl(nextUrl || "");
-      setImagePreviewFailed(false);
+
+      const nextUrl = typeof payload?.url === "string" ? payload.url : "";
+      setImageUrl(nextUrl);
       setUploadStatus("done");
       setUploadMessage("Imagen cargada.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Error subiendo imagen.";
       setUploadStatus("error");
-      setUploadMessage(message);
+      setUploadMessage(error instanceof Error ? error.message : "No se pudo subir la imagen.");
     }
   };
+
+  const submitDisabled =
+    !siteId ||
+    !primaryCollectionId ||
+    !commercialCategoryId ||
+    !productId ||
+    !name.trim() ||
+    Number(priceAmount) <= 0 ||
+    (mode === "create" && selectedProductAlreadyCreated);
 
   return (
     <div className="space-y-8">
       <form id={resolvedFormId} action={action} className="space-y-8">
-      <input type="hidden" name="id" value={initial.id ?? ""} />
-      <input type="hidden" name="code" value={initial.code} />
-      <input type="hidden" name="sort_order" value={initial.sort_order} />
-      <input type="hidden" name="metadata_extra" value={initial.metadata_extra} />
+        <input type="hidden" name="id" value={initial.id ?? ""} />
+        <input type="hidden" name="code" value={initial.code} />
+        <input type="hidden" name="sort_order" value={initial.sort_order} />
+        <input type="hidden" name="metadata_extra" value={initial.metadata_extra} />
+        <input type="hidden" name="commercial_collection_id" value={primaryCollectionId} />
+        {selectedCollectionIds.map((collectionId) => (
+          <input
+            key={collectionId}
+            type="hidden"
+            name="commercial_collection_ids"
+            value={collectionId}
+          />
+        ))}
 
-      <div className="ui-panel space-y-6">
-        <div>
-          <div className="ui-h3">1. Sede de venta</div>
-          <p className="ui-caption">Elige dónde se venderá. Solo mostraremos las opciones disponibles para esa sede.</p>
-        </div>
-        <label className="space-y-2">
-          <span className="ui-label">Negocio / sede</span>
-          <select
-            name="site_id"
-            className="ui-input"
-            value={siteId}
-            onChange={(event) => setSiteId(event.target.value)}
-            required
-          >
-            <option value="">Selecciona una sede</option>
-            {sites.map((site) => (
-              <option key={site.id} value={site.id}>
-                {(site.name ?? site.code ?? "Sin nombre") + (site.is_active === false ? " (inactiva)" : "")}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+        <section className="ui-panel space-y-5">
+          <div>
+            <div className="ui-h3">1. Sede de venta</div>
+            <p className="ui-caption">Elige el negocio donde se publicará el producto.</p>
+          </div>
+          <label className="space-y-2">
+            <span className="ui-label">Negocio / sede</span>
+            <select
+              name="site_id"
+              className="ui-input"
+              value={siteId}
+              onChange={(event) => handleSiteChange(event.target.value)}
+              required
+            >
+              <option value="">Selecciona una sede</option>
+              {sites.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name ?? site.code ?? "Sin nombre"}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
 
-      {mode === "create" && commercialCoverage.length > 0 ? (
-        <div className="ui-panel space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="ui-h3">Productos pendientes por publicar</div>
-              <p className="ui-caption">
-                Consulta rápidamente qué productos de cada sede todavía no aparecen en Vento Pass.
-              </p>
+        <section className="ui-panel space-y-5">
+          <div>
+            <div className="ui-h3">2. Colección principal</div>
+            <p className="ui-caption">
+              Primero elige el menú o colección. La siguiente sección mostrará únicamente sus categorías asignadas.
+            </p>
+          </div>
+
+          {visibleCollections.length === 0 ? (
+            <div className="ui-alert ui-alert--warning">
+              Esta sede no tiene colecciones activas. Configúralas antes de publicar productos.
             </div>
-            {selectedSiteCoverage ? (
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {visibleCollections.map((collection) => {
+                const selected = collection.id === primaryCollectionId;
+                const categoryCount = orderedCategoryIdsByCollection.get(collection.id)?.length ?? 0;
+                return (
+                  <button
+                    key={collection.id}
+                    type="button"
+                    onClick={() => handlePrimaryCollectionChange(collection.id)}
+                    className={`rounded-2xl border p-4 text-left transition ${
+                      selected
+                        ? "border-[var(--ui-brand)] bg-[var(--ui-brand-soft)]"
+                        : "border-[var(--ui-border)] bg-white hover:bg-[var(--ui-surface-2)]"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-black text-[var(--ui-text)]">{collectionLabel(collection)}</div>
+                        <div className="mt-1 text-xs text-[var(--ui-muted)]">
+                          {collection.subtitle || (collection.kind === "main" ? "Menú permanente" : "Colección comercial")}
+                        </div>
+                      </div>
+                      <span className="ui-chip">{categoryCount} categorías</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section className="ui-panel space-y-6">
+          <div>
+            <div className="ui-h3">3. Categoría y producto</div>
+            <p className="ui-caption">
+              La categoría depende de la colección principal seleccionada.
+            </p>
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-2">
+            <label className="space-y-2">
+              <span className="ui-label">Categoría de la colección</span>
+              <select
+                name="commercial_category_id"
+                className="ui-input"
+                value={commercialCategoryId}
+                onChange={(event) => handleCategoryChange(event.target.value)}
+                disabled={!primaryCollectionId || visibleCategories.length === 0}
+                required
+              >
+                <option value="">
+                  {!primaryCollectionId
+                    ? "Primero selecciona una colección"
+                    : visibleCategories.length === 0
+                      ? "La colección no tiene categorías"
+                      : "Selecciona una categoría"}
+                </option>
+                {visibleCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {categoryLabel(category)}
+                  </option>
+                ))}
+              </select>
+              <input
+                name="category_label"
+                type="hidden"
+                value={selectedCategory ? categoryLabel(selectedCategory) : initial.category_label}
+                readOnly
+              />
+              {primaryCollectionId && visibleCategories.length === 0 ? (
+                <p className="text-xs font-semibold text-amber-700">
+                  Agrega categorías a esta colección desde Colecciones comerciales.
+                </p>
+              ) : null}
+            </label>
+
+            <div className="space-y-2" ref={productPickerRef}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="ui-label">Producto de Vento</span>
+                {mode === "create" ? <span className="ui-chip">{availableProducts.length} disponibles</span> : null}
+              </div>
+              <input type="hidden" name="product_id" value={productId} />
+              <div className="relative">
+                <input
+                  type="search"
+                  className="ui-input"
+                  value={productQuery}
+                  onChange={(event) => {
+                    setProductQuery(event.target.value);
+                    setIsProductPickerOpen(true);
+                  }}
+                  onFocus={() => setIsProductPickerOpen(true)}
+                  placeholder={selectedProduct ? getProductDisplayName(selectedProduct) : "Buscar por nombre o SKU"}
+                />
+                {isProductPickerOpen ? (
+                  <div className="absolute z-30 mt-2 max-h-80 w-full overflow-auto rounded-2xl border border-[var(--ui-border)] bg-white shadow-[var(--ui-shadow-2)]">
+                    {productResults.length > 0 ? (
+                      productResults.map((product) => {
+                        const alreadyCreated = isProductAlreadyCreatedForSite(product.id, siteId);
+                        return (
+                          <button
+                            key={product.id}
+                            type="button"
+                            disabled={alreadyCreated}
+                            className={`block w-full border-b border-[var(--ui-border)] px-3 py-3 text-left last:border-b-0 ${
+                              alreadyCreated ? "cursor-not-allowed opacity-50" : "hover:bg-[var(--ui-surface-2)]"
+                            }`}
+                            onClick={() => {
+                              setProductId(product.id);
+                              setProductQuery("");
+                              setIsProductPickerOpen(false);
+                            }}
+                          >
+                            <span className="block text-sm font-black">{getProductDisplayName(product)}</span>
+                            <span className="ui-caption">
+                              {alreadyCreated
+                                ? "Ya publicado en esta sede"
+                                : product.sku
+                                  ? `SKU ${product.sku}`
+                                  : "Disponible para esta sede"}
+                            </span>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="p-4 text-sm text-[var(--ui-muted)]">No hay resultados.</div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
+              {selectedProduct ? (
+                <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                  <div className="text-sm font-black">{getProductDisplayName(selectedProduct)}</div>
+                  <div className="ui-caption mt-1">
+                    {selectedProduct.sku ? `SKU ${selectedProduct.sku}` : "Producto seleccionado"}
+                  </div>
+                </div>
+              ) : null}
+
+              {mode === "create" && eligibleProducts.length !== availableProducts.length ? (
+                <label className="flex items-center gap-2 text-xs text-[var(--ui-muted)]">
+                  <input
+                    type="checkbox"
+                    checked={showExistingProducts}
+                    onChange={(event) => setShowExistingProducts(event.target.checked)}
+                  />
+                  Mostrar también productos ya publicados
+                </label>
+              ) : null}
+            </div>
+          </div>
+        </section>
+
+        <section className="ui-panel space-y-5">
+          <div>
+            <div className="ui-h3">4. Colecciones adicionales</div>
+            <p className="ui-caption">
+              Opcional. Solo se muestran colecciones que también contienen la categoría elegida.
+            </p>
+          </div>
+
+          {!commercialCategoryId ? (
+            <div className="ui-empty">Selecciona una categoría para ver colecciones compatibles.</div>
+          ) : compatibleAdditionalCollections.length === 0 ? (
+            <div className="ui-empty">No hay otras colecciones compatibles con esta categoría.</div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {compatibleAdditionalCollections.map((collection) => {
+                const checked = additionalCollectionIds.includes(collection.id);
+                return (
+                  <label
+                    key={collection.id}
+                    className={`cursor-pointer rounded-2xl border p-4 transition ${
+                      checked
+                        ? "border-[var(--ui-brand)] bg-[var(--ui-brand-soft)]"
+                        : "border-[var(--ui-border)] bg-white"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) =>
+                        setAdditionalCollectionIds((current) =>
+                          event.target.checked
+                            ? Array.from(new Set([...current, collection.id]))
+                            : current.filter((id) => id !== collection.id),
+                        )
+                      }
+                      className="mr-3"
+                    />
+                    <span className="font-black text-[var(--ui-text)]">{collectionLabel(collection)}</span>
+                    <span className="mt-1 block text-xs text-[var(--ui-muted)]">
+                      {collection.subtitle || "Colección compatible"}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {mode === "create" && selectedSiteCoverage ? (
+          <section className="ui-panel space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="ui-h3">Estado de publicación</div>
+                <p className="ui-caption">Cobertura de productos operacionales para esta sede.</p>
+              </div>
               <span className={`ui-chip ${selectedSiteCoverage.missing_count === 0 ? "ui-chip--success" : "ui-chip--warn"}`}>
                 {selectedSiteCoverage.missing_count === 0
                   ? "Todo publicado"
-                  : `${selectedSiteCoverage.missing_count} faltantes`}
+                  : `${selectedSiteCoverage.missing_count} pendientes`}
               </span>
-            ) : null}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="ui-panel space-y-6">
+          <div>
+            <div className="ui-h3">5. Información comercial</div>
+            <p className="ui-caption">Define cómo verá el cliente el producto en Vento Pass.</p>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {commercialCoverage.map((site) => {
-              const isCurrentSite = site.site_id === siteId;
-              const completion =
-                site.total_sellable > 0
-                  ? Math.round((site.created_count / site.total_sellable) * 100)
-                  : 0;
-
-              return (
-                <button
-                  key={site.site_id}
-                  type="button"
-                  className={`rounded-2xl border p-4 text-left transition ${
-                    isCurrentSite
-                      ? "border-[var(--ui-brand)] bg-[var(--ui-brand-soft)]"
-                      : "border-[var(--ui-border)] bg-white hover:bg-[var(--ui-surface-2)]"
-                  }`}
-                  onClick={() => setSiteId(site.site_id)}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-black text-[var(--ui-text)]">
-                        {site.site_label}
-                      </div>
-                      <div className="ui-caption mt-1">
-                        {site.created_count} de {site.total_sellable} creados
-                      </div>
-                    </div>
-                    <span className={`ui-chip ${site.missing_count === 0 ? "ui-chip--success" : "ui-chip--warn"}`}>
-                      {completion}%
-                    </span>
-                  </div>
-
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--ui-surface-2)]">
-                    <div
-                      className="h-full rounded-full bg-[var(--ui-brand)]"
-                      style={{ width: `${Math.min(100, Math.max(0, completion))}%` }}
-                    />
-                  </div>
-
-                  <div className="mt-3 text-xs font-semibold text-[var(--ui-muted)]">
-                    {site.missing_count === 0
-                      ? "Todos los productos de esta sede ya están publicados."
-                      : `Faltan ${site.missing_count} productos por crear.`}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {selectedSiteCoverage && selectedSiteCoverage.missing_products.length > 0 ? (
-            <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-black text-[var(--ui-text)]">
-                    Pendientes en {selectedSiteCoverage.site_label}
-                  </div>
-                  <p className="ui-caption">
-                    Selecciona uno para completar su publicación.
-                  </p>
-                </div>
-                <span className="ui-chip ui-chip--warn">
-                  {selectedSiteCoverage.missing_products.length} pendientes
-                </span>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {selectedSiteCoverage.missing_products.slice(0, 12).map((product) => (
-                  <button
-                    key={product.id}
-                    type="button"
-                    className="rounded-xl border border-[var(--ui-border)] bg-white px-3 py-2 text-left transition hover:bg-[var(--ui-surface-2)]"
-                    onClick={() => {
-                      setProductId(product.id);
-                      setProductQuery("");
-                      setIsProductPickerOpen(false);
-                    }}
-                  >
-                    <div className="truncate text-xs font-black text-[var(--ui-text)]">
-                      {product.name?.trim() || product.sku?.trim() || "Producto sin nombre"}
-                    </div>
-                    {product.sku ? (
-                      <div className="ui-caption mt-0.5 truncate">SKU {product.sku}</div>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-              {selectedSiteCoverage.missing_products.length > 12 ? (
-                <p className="ui-caption mt-3">
-                  Mostrando 12 de {selectedSiteCoverage.missing_products.length}. Usa el buscador para afinar.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="ui-panel space-y-6">
-        <div>
-          <div className="ui-h3">2. Qué producto estás vendiendo</div>
-          <p className="ui-caption">Elige el producto que ya existe en Vento y la sección donde el cliente lo encontrará.</p>
-        </div>
-        <div className="grid gap-5 lg:grid-cols-2">
-          <label className="space-y-2">
-            <span className="ui-label">Sección del menú</span>
-            <select name="commercial_category_id" className="ui-input" value={commercialCategoryId} onChange={(event) => setCommercialCategoryId(event.target.value)} required>
-              <option value="">Selecciona una sección</option>
-              {visibleCategories.map((category) => (
-                <option key={category.id} value={category.id}>{category.name ?? category.code ?? "Sin nombre"}</option>
-              ))}
-            </select>
-            <input name="category_label" type="hidden" value={selectedCategory?.name ?? categoryLabel} readOnly />
-            <p className="ui-caption">Ejemplos: Tortas, Entremets, Cafés o Bebidas.</p>
-          </label>
-          <div className="space-y-2" ref={productPickerRef}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="ui-label">Producto de Vento</span>
-              {mode === "create" ? <span className="ui-chip">{availableProductCount} disponibles</span> : null}
-            </div>
-            <input type="hidden" name="product_id" value={productId} />
-            <div className="relative">
-              <input type="search" className="ui-input pr-24" value={productQuery} onChange={(event) => { setProductQuery(event.target.value); setIsProductPickerOpen(true); }} onFocus={() => setIsProductPickerOpen(true)} placeholder={selectedProduct ? getProductDisplayName(selectedProduct) : "Buscar producto por nombre o SKU"} />
-              {isProductPickerOpen ? <div className="absolute z-30 mt-2 max-h-80 w-full overflow-auto rounded-2xl border border-[var(--ui-border)] bg-white shadow-[var(--ui-shadow-2)]">
-                {productResults.length ? productResults.map((product) => { const alreadyCreated = isProductAlreadyCreatedForSite(product.id, siteId); return <button key={product.id} type="button" disabled={alreadyCreated} className={`block w-full border-b border-[var(--ui-border)] px-3 py-3 text-left last:border-b-0 ${alreadyCreated ? "opacity-50" : "hover:bg-[var(--ui-surface-2)]"}`} onClick={() => { setProductId(product.id); setProductQuery(""); setIsProductPickerOpen(false); }}>
-                  <span className="block text-sm font-black">{getProductDisplayName(product)}</span>
-                  <span className="ui-caption">{product.sku ? `SKU ${product.sku}` : "Disponible para esta sede"}</span>
-                </button>; }) : <div className="p-4 text-sm text-[var(--ui-muted)]">No hay resultados.</div>}
-              </div> : null}
-            </div>
-            {selectedProduct ? <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
-              <div className="text-sm font-black">{getProductDisplayName(selectedProduct)}</div>
-              <div className="ui-caption mt-1">{selectedProduct.sku ? `SKU ${selectedProduct.sku}` : "Producto seleccionado"}</div>
-            </div> : null}
-          </div>
-        </div>
-      </div>
-
-      <div className="ui-panel space-y-5">
-        <div>
-          <div className="ui-h3">3. Dónde debe aparecer</div>
-          <p className="ui-caption">Puedes mostrar el mismo producto en varios menús o temporadas sin duplicarlo.</p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {visibleCollections.map((collection) => {
-            const checked = selectedCollectionIds.includes(collection.id);
-            return <label key={collection.id} className={`cursor-pointer rounded-2xl border p-4 transition ${checked ? "border-[var(--ui-brand)] bg-[var(--ui-brand-soft)]" : "border-[var(--ui-border)] bg-white"}`}>
-              <input type="checkbox" name="commercial_collection_ids" value={collection.id} checked={checked} onChange={(event) => setSelectedCollectionIds((current) => event.target.checked ? Array.from(new Set([...current, collection.id])) : current.filter((id) => id !== collection.id))} className="mr-3" />
-              <span className="font-black text-[var(--ui-text)]">{collection.name ?? collection.code ?? "Sin nombre"}</span>
-              <span className="mt-1 block text-xs text-[var(--ui-muted)]">{collection.subtitle || (collection.kind === "main" ? "Menú permanente" : "Temporada o campaña")}</span>
-            </label>;
-          })}
-        </div>
-        {selectedCollectionIds.length === 0 ? <div className="ui-alert ui-alert--warning">Selecciona al menos un menú o temporada.</div> : null}
-      </div>
-
-      <div className="ui-panel space-y-6">
-        <div>
-          <div className="ui-h3">4. Cómo lo verá el cliente</div>
-          <p className="ui-caption">
-            Define cómo verá el cliente este producto en Pass: nombre comercial, descripción, precio e imagen por sede.
-          </p>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="space-y-2">
-            <span className="ui-label">Nombre</span>
-            <input
-              name="name"
-              className="ui-input"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Sandwich de pollo"
-              required
-            />
-          </label>
-          <div className="space-y-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-            <div>
-              <div className="ui-label">Publicación</div>
-              <p className="ui-caption">Actívalo cuando el producto esté listo para mostrarse en Vento Pass.</p>
-            </div>
-            <label className="flex items-center gap-3 text-sm font-semibold text-[var(--ui-text)]">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-2">
+              <span className="ui-label">Nombre</span>
               <input
-                type="checkbox"
-                name="is_active"
-                checked={isActive}
-                onChange={(event) => setIsActive(event.target.checked)}
+                name="name"
+                className="ui-input"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                required
               />
-              Visible para los clientes
             </label>
-          </div>
-          <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Descripción</span>
-            <textarea
-              name="description"
-              className="ui-input min-h-28 py-3"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Pan brioche, pollo apanado, queso y salsa especial."
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="ui-label">Precio comercial</span>
 
-            <input type="hidden" name="price_amount" value={priceAmount} />
+            <div className="space-y-2 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+              <div className="ui-label">Publicación</div>
+              <label className="flex items-center gap-3 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  name="is_active"
+                  checked={isActive}
+                  onChange={(event) => setIsActive(event.target.checked)}
+                />
+                Visible para los clientes
+              </label>
+              <label className="flex items-center gap-3 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  name="is_featured"
+                  checked={isFeatured}
+                  onChange={(event) => setIsFeatured(event.target.checked)}
+                />
+                Producto destacado
+              </label>
+            </div>
 
-            <div className="flex overflow-hidden rounded-xl border border-[var(--ui-border)] bg-white focus-within:ring-2 focus-within:ring-[var(--ui-brand)]/20">
-              <div className="flex items-center border-r border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm font-semibold text-[var(--ui-muted)]">
-                COP
-              </div>
+            <label className="space-y-2 sm:col-span-2">
+              <span className="ui-label">Descripción</span>
+              <textarea
+                name="description"
+                className="ui-input min-h-28 py-3"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Precio comercial</span>
+              <input type="hidden" name="price_amount" value={priceAmount} />
               <input
                 type="text"
                 inputMode="numeric"
-                className="min-h-12 flex-1 bg-white px-4 text-base font-semibold text-[var(--ui-text)] outline-none"
+                className="ui-input"
                 value={formatCopInput(priceAmount)}
                 onChange={(event) => setPriceAmount(onlyDigits(event.target.value))}
                 placeholder="$ 22.000"
                 required
               />
-            </div>
+              {suggestedPrice != null ? (
+                <p className="ui-caption">Precio sugerido: {asCop(suggestedPrice)}</p>
+              ) : null}
+              {suggestedRecipeCost != null ? (
+                <p className="ui-caption">Costo estimado: {asCop(suggestedRecipeCost)}</p>
+              ) : null}
+              {currentMarginPct != null ? (
+                <p className="ui-caption">Margen estimado: {currentMarginPct.toFixed(2)}%</p>
+              ) : null}
+            </label>
 
-            <p className="ui-caption">
-              Escribe el precio en pesos colombianos. Ejemplo: 22000 se mostrará como {asCop("22000")}.
-            </p>
+            <label className="space-y-2">
+              <span className="ui-label">Precio anterior opcional</span>
+              <input type="hidden" name="compare_at_amount" value={compareAtAmount} />
+              <input
+                type="text"
+                inputMode="numeric"
+                className="ui-input"
+                value={formatCopInput(compareAtAmount)}
+                onChange={(event) => setCompareAtAmount(onlyDigits(event.target.value))}
+                placeholder="$ 25.000"
+              />
+            </label>
 
-            {suggestedPrice != null ? (
-              <p className="ui-caption">Precio sugerido para esta sede: {asCop(String(suggestedPrice))}</p>
-            ) : null}
-            {suggestedRecipeCost != null ? (
-              <p className="ui-caption">Costo receta estimado: {asCop(String(suggestedRecipeCost))}</p>
-            ) : null}
-            {currentMarginPct != null ? (
-              <p className="ui-caption">Margen estimado: {currentMarginPct.toFixed(2)}%</p>
-            ) : null}
-          </label>
-          <label className="space-y-2 sm:col-span-2">
-            <span className="ui-label">Etiquetas visibles</span>
-            <input
-              name="badges_csv"
-              className="ui-input"
-              value={badgesCsv}
-              onChange={(event) => setBadgesCsv(event.target.value)}
-              placeholder="Popular, Nuevo, Recomendado"
-            />
-          </label>
-          <div className="space-y-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 sm:col-span-2">
-            <div>
-              <div className="ui-label">Variantes del producto</div>
-              <p className="ui-caption">Úsalo cuando varias referencias deben mostrarse juntas, por ejemplo Soda Hatsu: Sandía, Frutos rojos y Limón.</p>
-            </div>
+            <label className="space-y-2 sm:col-span-2">
+              <span className="ui-label">Etiquetas visibles</span>
+              <input
+                name="badges_csv"
+                className="ui-input"
+                value={badgesCsv}
+                onChange={(event) => setBadgesCsv(event.target.value)}
+                placeholder="Popular, Nuevo, Recomendado"
+              />
+            </label>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => { setDisplayGroup(""); setVariantLabel(""); }}
-                className={`rounded-2xl border p-4 text-left transition ${!displayGroup ? "border-[var(--ui-brand)] bg-white shadow-sm" : "border-[var(--ui-border)] bg-white/70"}`}
-              >
-                <div className="text-sm font-black text-[var(--ui-text)]">Producto individual</div>
-                <div className="mt-1 text-xs text-[var(--ui-muted)]">Se muestra como una tarjeta independiente.</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => { if (!displayGroup) setDisplayGroup(name.trim() || "Nueva familia"); }}
-                className={`rounded-2xl border p-4 text-left transition ${displayGroup ? "border-[var(--ui-brand)] bg-white shadow-sm" : "border-[var(--ui-border)] bg-white/70"}`}
-              >
-                <div className="text-sm font-black text-[var(--ui-text)]">Tiene otras versiones</div>
-                <div className="mt-1 text-xs text-[var(--ui-muted)]">Agrupa sabores, tamaños o presentaciones bajo una sola familia.</div>
-              </button>
-            </div>
-
-            {displayGroup ? (
-              <div className="grid gap-4 rounded-2xl border border-[var(--ui-border)] bg-white p-4 sm:grid-cols-2">
-                <label className="space-y-2">
-                  <span className="ui-label">Familia del producto</span>
+            <div className="space-y-3 sm:col-span-2">
+              <span className="ui-label">Imagen</span>
+              <input type="hidden" name="image_url" value={imageUrl} />
+              <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                <input
+                  className="ui-input"
+                  value={imageUrl}
+                  onChange={(event) => setImageUrl(event.target.value)}
+                  placeholder="URL de la imagen"
+                />
+                <label className="ui-btn ui-btn--ghost cursor-pointer">
+                  {uploadStatus === "uploading" ? "Subiendo..." : "Subir imagen"}
                   <input
-                    name="display_group"
-                    className="ui-input"
-                    value={displayGroup}
-                    onChange={(event) => setDisplayGroup(event.target.value)}
-                    placeholder="Soda Hatsu"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={uploadStatus === "uploading"}
+                    onChange={(event) => void handleUpload(event.target.files?.[0] ?? null)}
                   />
-                  <span className="ui-caption">Escribe el mismo nombre en todas las versiones de esta familia.</span>
                 </label>
-                <label className="space-y-2">
-                  <span className="ui-label">Nombre de esta versión</span>
-                  <input
-                    name="variant_label"
-                    className="ui-input"
-                    value={variantLabel}
-                    onChange={(event) => setVariantLabel(event.target.value)}
-                    placeholder="Sandía"
-                  />
-                  <span className="ui-caption">Ejemplo: Sandía, Limón, 6 porciones o Grande.</span>
-                </label>
-                <div className="rounded-xl bg-[var(--ui-brand-soft)] p-3 sm:col-span-2">
-                  <div className="text-xs font-bold uppercase tracking-wide text-[var(--ui-muted)]">Así se verá en Pass</div>
-                  <div className="mt-1 text-sm font-black text-[var(--ui-text)]">{displayGroup || "Familia"}</div>
-                  <div className="mt-0.5 text-sm text-[var(--ui-muted)]">{variantLabel || "Nombre de esta versión"}</div>
-                </div>
               </div>
-            ) : null}
-
-            {!displayGroup ? <input type="hidden" name="display_group" value="" /> : null}
-            {!displayGroup ? <input type="hidden" name="variant_label" value="" /> : null}
+              {uploadMessage ? (
+                <p className={`text-xs ${uploadStatus === "error" ? "text-rose-700" : "text-emerald-700"}`}>
+                  {uploadMessage}
+                </p>
+              ) : null}
+              {imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={imageUrl} alt="Vista previa" className="h-40 w-full rounded-2xl object-cover" />
+              ) : null}
+            </div>
           </div>
-          <div className="space-y-2 sm:col-span-2">
+        </section>
+
+        <section className="ui-panel space-y-5">
+          <div>
+            <div className="ui-h3">6. Presentación y opciones</div>
+            <p className="ui-caption">Configura variantes, diseño de tarjeta y canales de entrega.</p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-2">
+              <span className="ui-label">Familia del producto</span>
+              <input
+                name="display_group"
+                className="ui-input"
+                value={displayGroup}
+                onChange={(event) => setDisplayGroup(event.target.value)}
+                placeholder="Ejemplo: Soda Hatsu"
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="ui-label">Nombre de esta versión</span>
+              <input
+                name="variant_label"
+                className="ui-input"
+                value={variantLabel}
+                onChange={(event) => setVariantLabel(event.target.value)}
+                placeholder="Ejemplo: Sandía"
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="ui-label">Diseño de tarjeta</span>
+              <select
+                name="pass_card_layout"
+                className="ui-input"
+                value={passCardLayout}
+                onChange={(event) => setPassCardLayout(event.target.value === "featured" ? "featured" : "compact")}
+              >
+                <option value="compact">Compacta</option>
+                <option value="featured">Destacada</option>
+              </select>
+            </label>
+
+            <label className="flex items-center gap-3 rounded-xl border border-[var(--ui-border)] p-4 text-sm font-semibold">
+              <input
+                type="checkbox"
+                name="opens_detail_modal"
+                checked={opensDetailModal}
+                onChange={(event) => setOpensDetailModal(event.target.checked)}
+              />
+              Abrir detalle antes de agregar
+            </label>
+          </div>
+
+          <div className="space-y-2">
             <span className="ui-label">Dónde puede recibirlo el cliente</span>
-            <div className="flex flex-wrap gap-3">
-              <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
                   name="fulfillment_delivery"
@@ -892,7 +991,7 @@ export function MenuItemForm({
                 />
                 Domicilio
               </label>
-              <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
+              <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
                   name="fulfillment_pickup"
@@ -901,7 +1000,7 @@ export function MenuItemForm({
                 />
                 Recoger
               </label>
-              <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
+              <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
                   name="fulfillment_on_premise"
@@ -912,216 +1011,17 @@ export function MenuItemForm({
               </label>
             </div>
           </div>
-          <div className="space-y-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 sm:col-span-2">
-            <div>
-              <div className="ui-label">Diseño en Vento Pass</div>
-              <p className="ui-caption">
-                Define cómo se presenta este producto en el menú comercial. La opción destacada ocupa más ancho y permite más detalle visual.
-              </p>
-            </div>
-
-            <input type="hidden" name="pass_card_layout" value={passCardLayout} />
-            <input type="hidden" name="opens_detail_modal" value={opensDetailModal ? "true" : "false"} />
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => setPassCardLayout("compact")}
-                className={`rounded-2xl border p-4 text-left transition ${passCardLayout === "compact"
-                    ? "border-[var(--ui-brand)] bg-white shadow-sm"
-                    : "border-[var(--ui-border)] bg-white/70"
-                  }`}
-              >
-                <div className="text-sm font-bold text-[var(--ui-text)]">Compacta</div>
-                <div className="mt-1 text-xs text-[var(--ui-muted)]">
-                  Card vertical en grilla de 2 columnas. Ideal para productos genéricos o de alta rotación.
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPassCardLayout("featured")}
-                className={`rounded-2xl border p-4 text-left transition ${passCardLayout === "featured"
-                    ? "border-[var(--ui-brand)] bg-white shadow-sm"
-                    : "border-[var(--ui-border)] bg-white/70"
-                  }`}
-              >
-                <div className="text-sm font-bold text-[var(--ui-text)]">Destacada</div>
-                <div className="mt-1 text-xs text-[var(--ui-muted)]">
-                  Card horizontal con más protagonismo. Ideal para combos, lanzamientos o productos estratégicos.
-                </div>
-              </button>
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-[var(--ui-border)] bg-white p-4">
-              <div>
-                <div className="text-sm font-black text-[var(--ui-text)]">Forma de agregar al pedido</div>
-                <div className="ui-caption mt-1">Si después agregas tamaños, sabores, extras o personalizaciones, VISO abrirá el detalle automáticamente.</div>
-              </div>
-              <input type="hidden" name="opens_detail_modal" value={opensDetailModal ? "true" : "false"} />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <button type="button" onClick={() => setOpensDetailModal(false)} className={`rounded-2xl border p-4 text-left transition ${!opensDetailModal ? "border-[var(--ui-brand)] bg-[var(--ui-brand-soft)]" : "border-[var(--ui-border)] bg-white"}`}>
-                  <span className="block text-sm font-black text-[var(--ui-text)]">Agregar directamente</span>
-                  <span className="ui-caption mt-1 block">Úsalo para productos simples sin decisiones del cliente.</span>
-                </button>
-                <button type="button" onClick={() => setOpensDetailModal(true)} className={`rounded-2xl border p-4 text-left transition ${opensDetailModal ? "border-[var(--ui-brand)] bg-[var(--ui-brand-soft)]" : "border-[var(--ui-border)] bg-white"}`}>
-                  <span className="block text-sm font-black text-[var(--ui-text)]">Mostrar primero el detalle</span>
-                  <span className="ui-caption mt-1 block">Úsalo para combos o productos cuya información debe leerse antes de agregar.</span>
-                </button>
-              </div>
-            </div>
-
-            <label className="flex items-center gap-2 text-sm text-[var(--ui-text)]">
-              <input
-                type="checkbox"
-                name="is_featured"
-                checked={isFeatured}
-                onChange={(event) => setIsFeatured(event.target.checked)}
-              />
-              Destacar este producto
-            </label>
-          </div>
-        </div>
-      </div>
-
-
-      <div className="ui-panel space-y-6">
-        <div>
-          <div className="ui-h3">5. Imagen del producto</div>
-          <p className="ui-caption">
-            Foto visible en Pass. Se guarda como imagen comercial separada del producto operacional.
-          </p>
-        </div>
-        <input type="hidden" name="image_url" value={imageUrl} />
-        <div className="grid gap-4 sm:grid-cols-[220px_minmax(0,1fr)]">
-          <div className="overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-white">
-            {imageUrl && !imagePreviewFailed ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={imageUrl}
-                alt={getPreviewTitle(name)}
-                className="aspect-square w-full object-cover"
-                onError={() => setImagePreviewFailed(true)}
-              />
-            ) : (
-              <div className="flex aspect-square w-full items-center justify-center bg-[var(--ui-surface-2)] px-4 text-center text-sm font-black text-[var(--ui-muted)]">
-                {imageUrl ? "No se pudo cargar la imagen" : "Sin imagen"}
-              </div>
-            )}
-          </div>
-          <div className="space-y-3">
-            <label className="block space-y-2">
-              <span className="ui-label">{imageUrl ? "Reemplazar imagen" : "Subir imagen comercial"}</span>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="ui-input"
-                onChange={(event) => handleUpload(event.target.files?.[0] ?? null)}
-              />
-            </label>
-            <div className="text-sm font-semibold text-[var(--ui-muted)]">
-              {uploadStatus === "uploading" ? "Subiendo imagen..." : uploadMessage || "JPG, PNG o WebP. Máximo 5 MB."}
-            </div>
-            {imageUrl ? (
-              <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setImageUrl("")}>
-                Quitar imagen
-              </button>
-            ) : null}
-            {imagePreviewFailed ? (
-              <div className="text-sm font-semibold text-[var(--ui-danger)]">
-                La URL se guardó, pero Storage no la está sirviendo para vista previa.
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
-      <div className="ui-panel space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="ui-h3">Vista previa en Vento Pass</div>
-            <p className="ui-caption">
-              Se actualiza mientras completas la ficha. Así verá el cliente la información principal.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <span className={`ui-chip ${isActive ? "ui-chip--success" : ""}`}>
-              {isActive ? "Publicado" : "Oculto"}
-            </span>
-            <span className="ui-chip">{passCardLayout === "featured" ? "Destacada" : "Compacta"}</span>
-            <span className={`ui-chip ${opensDetailModal ? "ui-chip--success" : ""}`}>
-              {opensDetailModal ? "Abre modal" : "Agregado directo"}
-            </span>
-          </div>
-        </div>
-
-        <div className="max-w-sm overflow-hidden rounded-[28px] border border-[var(--ui-border)] bg-[#FFFDF7] shadow-[var(--ui-shadow-2)]">
-          <div className="relative h-56 w-full bg-[var(--ui-surface-2)]">
-            {imageUrl && !imagePreviewFailed ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={imageUrl}
-                alt={getPreviewTitle(name)}
-                className="h-full w-full object-cover"
-                onError={() => setImagePreviewFailed(true)}
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-sm font-black text-[var(--ui-muted)]">
-                {imageUrl ? "No se pudo cargar la imagen" : "Sin imagen comercial"}
-              </div>
-            )}
-            <div className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-black text-[var(--ui-text)] shadow">
-              {asCop(priceAmount)}
-            </div>
-          </div>
-
-          <div className="space-y-4 p-5">
-            <div>
-              <div className="text-2xl font-black leading-tight text-[var(--ui-text)]">{getPreviewTitle(name)}</div>
-              {displayGroup || variantLabel ? (
-                <div className="mt-1 text-sm font-bold text-[var(--ui-muted)]">
-                  {[displayGroup, variantLabel].filter(Boolean).join(" · ")}
-                </div>
-              ) : null}
-              <div className="ui-caption mt-1">{siteLabel}</div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {selectedCollection ? (
-                <span className="ui-chip ui-chip--brand">
-                  {selectedCollection.name ?? selectedCollection.code ?? "Colección"}
-                </span>
-              ) : null}
-              <span className="ui-chip">
-                {getPreviewCategory(selectedCategory?.name ?? selectedCategory?.code ?? categoryLabel)}
-              </span>
-              {liveFulfillmentLabels.map((label) => (
-                <span key={label} className="ui-chip">{label}</span>
-              ))}
-              {liveBadges.map((badge) => (
-                <span key={badge} className="ui-chip ui-chip--brand">{badge}</span>
-              ))}
-            </div>
-
-            <p className="ui-body-muted text-sm leading-5">
-              {description.trim() || "Descripción del producto comercial que vera el usuario al comprar."}
-            </p>
-
-            <div className="rounded-full bg-[var(--ui-brand)] px-4 py-3 text-center text-sm font-black text-white">
-              {opensDetailModal ? `Ver detalle · desde ${asCop(priceAmount)}` : "Agregar al pedido"}
-            </div>
-          </div>
-        </div>
-      </div>
-
+        </section>
       </form>
 
-      <div className="sticky bottom-3 z-40 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-white/95 p-3 shadow-[var(--ui-shadow-2)] backdrop-blur">
-        <div className="flex flex-wrap items-center gap-2">
-          {secondaryActions}
-        </div>
-
-        <button type="submit" form={resolvedFormId} className="ui-btn ui-btn--brand" disabled={submitDisabled}>
+      <div className="sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ui-border)] bg-white/95 p-3 shadow-lg backdrop-blur">
+        <div className="flex flex-wrap gap-2">{secondaryActions}</div>
+        <button
+          type="submit"
+          form={resolvedFormId}
+          className="ui-btn ui-btn--brand"
+          disabled={submitDisabled}
+        >
           {mode === "create" ? "Publicar producto" : "Guardar cambios"}
         </button>
       </div>

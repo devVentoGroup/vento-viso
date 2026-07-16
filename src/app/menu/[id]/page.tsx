@@ -2,8 +2,8 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { PageHeader } from "@/components/vento/standard/page-header";
 import { MenuItemForm } from "@/components/viso/menu-item-form";
+import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -49,6 +49,7 @@ type CollectionCategoryLinkRow = {
   collection_id: string;
   commercial_category_id: string;
   sort_order: number | null;
+  is_active: boolean | null;
 };
 
 type CatalogItemRow = {
@@ -79,13 +80,6 @@ type CatalogItemCollectionRow = {
   is_primary: boolean | null;
 };
 
-type ExistingItemCollectionRelation = {
-  commercial_collection_id: string;
-  sort_order: number | null;
-  is_active: boolean | null;
-  is_primary: boolean | null;
-};
-
 type CatalogItemPresentationRow = {
   card_layout: string | null;
   opens_detail_modal: boolean | null;
@@ -109,14 +103,19 @@ function asBool(value: FormDataEntryValue | null) {
 
 function asNonNegativeNumber(value: FormDataEntryValue | null) {
   const parsed = Number(asText(value));
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.max(0, parsed);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function toOptionalNumber(value: number | string | null | undefined) {
+  if (value == null || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parseBadgesCsv(value: string) {
   return value
     .split(",")
-    .map((item) => item.trim())
+    .map((entry) => entry.trim())
     .filter(Boolean);
 }
 
@@ -125,8 +124,7 @@ function parseFulfillmentModes(formData: FormData) {
   if (asBool(formData.get("fulfillment_delivery"))) modes.push("delivery");
   if (asBool(formData.get("fulfillment_pickup"))) modes.push("pickup");
   if (asBool(formData.get("fulfillment_on_premise"))) modes.push("on_premise");
-  if (modes.length === 0) modes.push("delivery");
-  return modes;
+  return modes.length > 0 ? modes : ["delivery"];
 }
 
 function parsePassCardLayout(value: FormDataEntryValue | string | null | undefined) {
@@ -136,23 +134,14 @@ function parsePassCardLayout(value: FormDataEntryValue | string | null | undefin
 
 function parseMetadata(value: string) {
   if (!value) return {} as Record<string, unknown>;
-
   try {
     const parsed = JSON.parse(value);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
   } catch {
     return {} as Record<string, unknown>;
   }
-
-  return {} as Record<string, unknown>;
-}
-
-function toOptionalNumber(value: number | string | null | undefined) {
-  if (value == null || value === "") return null;
-  const parsed = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function getRequestedCollectionIds(formData: FormData) {
@@ -166,31 +155,39 @@ function getRequestedCollectionIds(formData: FormData) {
 
 async function getNextCatalogItemRelationSortOrder(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  commercialCollectionId: string,
-  commercialCategoryId: string,
+  collectionId: string,
+  categoryId: string,
 ) {
   const { data, error } = await supabase
     .schema("pass")
     .from("catalog_item_collections")
-    .select("sort_order,catalog_item:catalog_items!inner(product_id,commercial_category_id,price_amount,is_active,metadata)")
-    .eq("commercial_collection_id", commercialCollectionId)
+    .select(
+      "sort_order,catalog_item:catalog_items!inner(product_id,commercial_category_id,price_amount,is_active,metadata)",
+    )
+    .eq("commercial_collection_id", collectionId)
     .eq("is_active", true);
 
   if (error) throw new Error(error.message);
 
-  return (data ?? []).reduce((highest, relation) => {
-    const item = Array.isArray(relation.catalog_item) ? relation.catalog_item[0] : relation.catalog_item;
-    if (
-      !item ||
-      item.commercial_category_id !== commercialCategoryId ||
-      item.is_active === false ||
-      !item.product_id ||
-      Number(item.price_amount ?? 0) <= 0 ||
-      item.metadata?.source_app !== "viso" ||
-      item.metadata?.source_module !== "menu_comercial"
-    ) return highest;
-    return Math.max(highest, Number(relation.sort_order ?? 0));
-  }, 0) + 10;
+  return (
+    (data ?? []).reduce((highest, relation) => {
+      const item = Array.isArray(relation.catalog_item)
+        ? relation.catalog_item[0]
+        : relation.catalog_item;
+      if (
+        !item ||
+        item.commercial_category_id !== categoryId ||
+        item.is_active === false ||
+        !item.product_id ||
+        Number(item.price_amount ?? 0) <= 0 ||
+        item.metadata?.source_app !== "viso" ||
+        item.metadata?.source_module !== "menu_comercial"
+      ) {
+        return highest;
+      }
+      return Math.max(highest, Number(relation.sort_order ?? 0));
+    }, 0) + 10
+  );
 }
 
 async function updateMenuItem(formData: FormData) {
@@ -203,10 +200,10 @@ async function updateMenuItem(formData: FormData) {
   const name = asText(formData.get("name"));
   const siteId = asText(formData.get("site_id"));
   const productId = asText(formData.get("product_id"));
-  const commercialCategoryId = asText(formData.get("commercial_category_id"));
+  const categoryId = asText(formData.get("commercial_category_id"));
   const collectionIds = getRequestedCollectionIds(formData);
 
-  if (!id || !code || !name || !siteId || !productId || !commercialCategoryId || collectionIds.length === 0) {
+  if (!id || !code || !name || !siteId || !productId || !categoryId || collectionIds.length === 0) {
     redirect(`/menu/${id}?error=${encodeURIComponent("Faltan campos obligatorios.")}`);
   }
 
@@ -215,20 +212,13 @@ async function updateMenuItem(formData: FormData) {
     redirect(`/menu/${id}?error=${encodeURIComponent("El precio comercial debe ser mayor a 0.")}`);
   }
 
-  const compareAtRaw = asText(formData.get("compare_at_amount"));
-  const compareAtAmount = compareAtRaw ? asNonNegativeNumber(formData.get("compare_at_amount")) : null;
-  const requestedSortOrderText = asText(formData.get("sort_order"));
-  const hasExplicitSortOrder = requestedSortOrderText !== "";
-  const explicitSortOrder = Math.round(asNonNegativeNumber(requestedSortOrderText));
-  const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
-  const requestedOpensDetailModal = asBool(formData.get("opens_detail_modal"));
-
   const [
     { data: sellOption, error: sellOptionError },
     { data: category, error: categoryError },
-    { data: validCollections, error: collectionsError },
+    { data: selectedCollections, error: collectionsError },
+    { data: categoryLinks, error: categoryLinksError },
     { data: duplicateItem, error: duplicateError },
-    { count: activePersonalizationCount },
+    { data: existingRelations, error: existingRelationsError },
   ] = await Promise.all([
     admin
       .schema("pass")
@@ -241,7 +231,7 @@ async function updateMenuItem(formData: FormData) {
       .schema("pass")
       .from("commercial_categories")
       .select("id,name,code,site_id,is_active")
-      .eq("id", commercialCategoryId)
+      .eq("id", categoryId)
       .eq("site_id", siteId)
       .eq("is_active", true)
       .maybeSingle(),
@@ -254,104 +244,120 @@ async function updateMenuItem(formData: FormData) {
       .eq("is_active", true),
     admin
       .schema("pass")
+      .from("commercial_collection_categories")
+      .select("collection_id,commercial_category_id,is_active")
+      .in("collection_id", collectionIds)
+      .eq("commercial_category_id", categoryId)
+      .eq("is_active", true),
+    admin
+      .schema("pass")
       .from("catalog_items")
       .select("id")
       .eq("site_id", siteId)
       .eq("product_id", productId)
       .neq("id", id)
+      .eq("is_active", true)
       .limit(1)
       .maybeSingle(),
     admin
       .schema("pass")
-      .from("catalog_item_option_groups")
-      .select("id", { count: "exact", head: true })
-      .eq("catalog_item_id", id)
-      .eq("is_active", true),
+      .from("catalog_item_collections")
+      .select("commercial_collection_id,sort_order,is_active,is_primary")
+      .eq("catalog_item_id", id),
   ]);
 
-  if (sellOptionError || !sellOption) {
-    redirect(`/menu/${id}?error=${encodeURIComponent(sellOptionError?.message || "El producto no está habilitado para esta sede.")}`);
+  const validationError =
+    sellOptionError?.message ||
+    categoryError?.message ||
+    collectionsError?.message ||
+    categoryLinksError?.message ||
+    duplicateError?.message ||
+    existingRelationsError?.message;
+
+  if (validationError) {
+    redirect(`/menu/${id}?error=${encodeURIComponent(validationError)}`);
+  }
+  if (!sellOption) {
+    redirect(`/menu/${id}?error=${encodeURIComponent("El producto no está habilitado para esta sede.")}`);
+  }
+  if (!category) {
+    redirect(`/menu/${id}?error=${encodeURIComponent("La categoría no pertenece a esta sede o está inactiva.")}`);
+  }
+  if ((selectedCollections ?? []).length !== collectionIds.length) {
+    redirect(`/menu/${id}?error=${encodeURIComponent("Una colección no pertenece a esta sede o está inactiva.")}`);
   }
 
-  if (categoryError || !category) {
-    redirect(`/menu/${id}?error=${encodeURIComponent(categoryError?.message || "La sección seleccionada no pertenece a esta sede.")}`);
+  const linkedCollectionIds = new Set(
+    (categoryLinks ?? []).map((link) => String(link.collection_id ?? "")),
+  );
+  if (collectionIds.some((collectionId) => !linkedCollectionIds.has(collectionId))) {
+    redirect(
+      `/menu/${id}?error=${encodeURIComponent(
+        "La categoría elegida no está configurada dentro de una de las colecciones seleccionadas.",
+      )}`,
+    );
+  }
+  if (duplicateItem) {
+    redirect(
+      `/menu/${id}?error=${encodeURIComponent(
+        "Ya existe otro producto comercial para esta referencia en la sede.",
+      )}`,
+    );
   }
 
-  if (collectionsError || (validCollections ?? []).length !== collectionIds.length) {
-    redirect(`/menu/${id}?error=${encodeURIComponent(collectionsError?.message || "Uno de los menús o temporadas no pertenece a esta sede.")}`);
+  const existingRelationByCollectionId = new Map<
+    string,
+    { sort_order: number | null; is_active: boolean | null; is_primary: boolean | null }
+  >();
+  for (const relation of existingRelations ?? []) {
+    existingRelationByCollectionId.set(String(relation.commercial_collection_id), {
+      sort_order: relation.sort_order,
+      is_active: relation.is_active,
+      is_primary: relation.is_primary,
+    });
   }
 
-  if (duplicateError || duplicateItem) {
-    redirect(`/menu/${id}?error=${encodeURIComponent(duplicateError?.message || "Ya existe otro producto comercial para esta referencia en la sede.")}`);
-  }
+  const explicitSortOrderText = asText(formData.get("sort_order"));
+  const explicitSortOrder = Math.round(asNonNegativeNumber(formData.get("sort_order")));
+  let relationRows: Array<{
+    catalog_item_id: string;
+    commercial_collection_id: string;
+    sort_order: number;
+    is_active: boolean;
+    is_primary: boolean;
+    metadata: Record<string, unknown>;
+  }>;
 
-  const collectionCategoryRows = collectionIds.map((collectionId, index) => ({
-    collection_id: collectionId,
-    commercial_category_id: commercialCategoryId,
-    sort_order: index * 10,
-  }));
-
-  const { error: categoryLinksError } = await supabase
-    .schema("pass")
-    .from("commercial_collection_categories")
-    .upsert(collectionCategoryRows, { onConflict: "collection_id,commercial_category_id" });
-
-  if (categoryLinksError) {
-    redirect(`/menu/${id}?error=${encodeURIComponent(categoryLinksError.message)}`);
-  }
-
-  const { data: existingRelationsRaw, error: existingRelationsError } = await admin
-    .schema("pass")
-    .from("catalog_item_collections")
-    .select("commercial_collection_id,sort_order,is_active,is_primary")
-    .eq("catalog_item_id", id);
-
-  if (existingRelationsError) {
-    redirect(`/menu/${id}?error=${encodeURIComponent(existingRelationsError.message)}`);
-  }
-
-  const existingRelationByCollectionId = new Map<string, ExistingItemCollectionRelation>();
-  for (const relation of (existingRelationsRaw ?? []) as ExistingItemCollectionRelation[]) {
-    const current = existingRelationByCollectionId.get(relation.commercial_collection_id);
-    if (!current || (relation.sort_order ?? Number.MAX_SAFE_INTEGER) < (current.sort_order ?? Number.MAX_SAFE_INTEGER)) {
-      existingRelationByCollectionId.set(relation.commercial_collection_id, relation);
-    }
-  }
-
-  let resolvedCollectionRelations: Array<ExistingItemCollectionRelation & { catalog_item_id: string; metadata: Record<string, unknown> }>;
   try {
-    resolvedCollectionRelations = await Promise.all(collectionIds.map(async (collectionId, index) => {
-      const existing = existingRelationByCollectionId.get(collectionId);
-      const sortOrder = hasExplicitSortOrder
-        ? explicitSortOrder
-        : existing?.sort_order ?? await getNextCatalogItemRelationSortOrder(supabase, collectionId, commercialCategoryId);
-      return {
+    relationRows = await Promise.all(
+      collectionIds.map(async (collectionId, index) => ({
         catalog_item_id: id,
         commercial_collection_id: collectionId,
-        sort_order: sortOrder,
+        sort_order: explicitSortOrderText
+          ? explicitSortOrder
+          : existingRelationByCollectionId.get(collectionId)?.sort_order ??
+            (await getNextCatalogItemRelationSortOrder(supabase, collectionId, categoryId)),
         is_active: true,
         is_primary: index === 0,
         metadata: { configured_from: "viso_product_form" },
-      };
-    }));
+      })),
+    );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo calcular el orden de las colecciones.";
-    redirect(`/menu/${id}?error=${encodeURIComponent(message)}`);
+    redirect(
+      `/menu/${id}?error=${encodeURIComponent(
+        error instanceof Error ? error.message : "No se pudo calcular el orden.",
+      )}`,
+    );
   }
 
-  const currentMetadata = parseMetadata(asText(formData.get("metadata_extra")));
-  delete currentMetadata.commercial_collection_id;
-  const metadata = {
-    ...currentMetadata,
-    source_app: "viso",
-    source_module: "menu_comercial",
-    operational_product_id: productId,
-    commercial_category_id: commercialCategoryId,
-    base_price_amount: toOptionalNumber(sellOption.base_price),
-    recipe_cost_amount: toOptionalNumber(sellOption.recipe_cost_amount),
-    display_group: asText(formData.get("display_group")) || null,
-    variant_label: asText(formData.get("variant_label")) || null,
-  };
+  const compareAtRaw = asText(formData.get("compare_at_amount"));
+  const compareAtAmount = compareAtRaw
+    ? asNonNegativeNumber(formData.get("compare_at_amount"))
+    : null;
+  const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
+  const opensDetailModal = asBool(formData.get("opens_detail_modal"));
+  const metadata = parseMetadata(asText(formData.get("metadata_extra")));
+  delete metadata.commercial_collection_id;
 
   const { error: updateError } = await supabase
     .schema("pass")
@@ -359,20 +365,30 @@ async function updateMenuItem(formData: FormData) {
     .update({
       code,
       name,
-      description: asText(formData.get("description")) || null,
       site_id: siteId,
       product_id: productId,
-      commercial_category_id: commercialCategoryId,
+      description: asText(formData.get("description")) || null,
+      commercial_category_id: categoryId,
       category_label: category.name || category.code || "",
       image_url: asText(formData.get("image_url")) || null,
       price_amount: priceAmount,
       compare_at_amount: compareAtAmount,
-      ...(hasExplicitSortOrder ? { sort_order: explicitSortOrder } : {}),
+      sort_order: relationRows[0]?.sort_order ?? explicitSortOrder,
       is_active: asBool(formData.get("is_active")),
       is_featured: asBool(formData.get("is_featured")),
       badges: parseBadgesCsv(asText(formData.get("badges_csv"))),
       fulfillment_modes: parseFulfillmentModes(formData),
-      metadata,
+      metadata: {
+        ...metadata,
+        source_app: "viso",
+        source_module: "menu_comercial",
+        operational_product_id: productId,
+        commercial_category_id: categoryId,
+        base_price_amount: toOptionalNumber(sellOption.base_price),
+        recipe_cost_amount: toOptionalNumber(sellOption.recipe_cost_amount),
+        display_group: asText(formData.get("display_group")) || null,
+        variant_label: asText(formData.get("variant_label")) || null,
+      },
     })
     .eq("id", id);
 
@@ -380,34 +396,25 @@ async function updateMenuItem(formData: FormData) {
     redirect(`/menu/${id}?error=${encodeURIComponent(updateError.message)}`);
   }
 
-  const relationRows = resolvedCollectionRelations;
+  const { error: deactivateError } = await supabase
+    .schema("pass")
+    .from("catalog_item_collections")
+    .update({ is_active: false, is_primary: false })
+    .eq("catalog_item_id", id);
 
-  const { error: relationUpsertError } = await supabase
+  if (deactivateError) {
+    redirect(`/menu/${id}?error=${encodeURIComponent(deactivateError.message)}`);
+  }
+
+  const { error: relationsError } = await supabase
     .schema("pass")
     .from("catalog_item_collections")
     .upsert(relationRows, { onConflict: "catalog_item_id,commercial_collection_id" });
 
-  if (relationUpsertError) {
-    redirect(`/menu/${id}?error=${encodeURIComponent(relationUpsertError.message)}`);
+  if (relationsError) {
+    redirect(`/menu/${id}?error=${encodeURIComponent(relationsError.message)}`);
   }
 
-  const removedCollectionIds = Array.from(existingRelationByCollectionId.keys())
-    .filter((collectionId) => collectionId && !collectionIds.includes(collectionId));
-
-  if (removedCollectionIds.length > 0) {
-    const { error: deactivateError } = await supabase
-      .schema("pass")
-      .from("catalog_item_collections")
-      .update({ is_active: false, is_primary: false })
-      .eq("catalog_item_id", id)
-      .in("commercial_collection_id", removedCollectionIds);
-
-    if (deactivateError) {
-      redirect(`/menu/${id}?error=${encodeURIComponent(deactivateError.message)}`);
-    }
-  }
-
-  const opensDetailModal = requestedOpensDetailModal || Number(activePersonalizationCount ?? 0) > 0;
   const { error: presentationError } = await supabase
     .schema("pass")
     .from("catalog_item_presentation")
@@ -453,12 +460,9 @@ export default async function MenuItemEditPage({
   const okMessage = safeDecode(query.ok);
   const errorMessage = safeDecode(query.error);
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo: `/menu/${id}`,
-  });
-
+  await requireAppAccess({ appId: "viso", returnTo: `/menu/${id}` });
   const admin = createAdminClient();
+
   const [
     { data: itemRaw },
     { data: sitesRaw },
@@ -473,34 +477,37 @@ export default async function MenuItemEditPage({
     admin
       .schema("pass")
       .from("catalog_items")
-      .select("id,code,name,description,site_id,product_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata")
+      .select(
+        "id,code,name,description,site_id,product_id,commercial_category_id,category_label,image_url,price_amount,compare_at_amount,sort_order,is_active,is_featured,badges,fulfillment_modes,metadata",
+      )
       .eq("id", id)
       .maybeSingle(),
-    admin.from("sites").select("id,code,name,is_active").eq("is_active", true).order("name", { ascending: true }),
+    admin.from("sites").select("id,code,name,is_active").eq("is_active", true).order("name"),
     admin
       .schema("pass")
       .from("sell_products_by_site")
       .select("site_id,product_id,name,sku,description,base_price,recipe_cost_amount")
-      .order("name", { ascending: true }),
+      .order("name"),
     admin
       .schema("pass")
       .from("commercial_categories")
       .select("id,site_id,name,code,is_active")
       .eq("is_active", true)
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true }),
+      .order("sort_order")
+      .order("name"),
     admin
       .schema("pass")
       .from("commercial_collections")
       .select("id,site_id,name,subtitle,code,kind,is_active")
       .eq("is_active", true)
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true }),
+      .order("sort_order")
+      .order("name"),
     admin
       .schema("pass")
       .from("commercial_collection_categories")
-      .select("collection_id,commercial_category_id,sort_order")
-      .order("sort_order", { ascending: true }),
+      .select("collection_id,commercial_category_id,sort_order,is_active")
+      .eq("is_active", true)
+      .order("sort_order"),
     admin
       .schema("pass")
       .from("catalog_items")
@@ -508,14 +515,15 @@ export default async function MenuItemEditPage({
       .not("site_id", "is", null)
       .not("product_id", "is", null)
       .eq("is_active", true)
-      .order("name", { ascending: true }),
+      .order("name"),
     admin
       .schema("pass")
       .from("catalog_item_collections")
       .select("catalog_item_id,commercial_collection_id,sort_order,is_active,is_primary")
       .eq("catalog_item_id", id)
+      .eq("is_active", true)
       .order("is_primary", { ascending: false })
-      .order("sort_order", { ascending: true }),
+      .order("sort_order"),
     admin
       .schema("pass")
       .from("catalog_item_presentation")
@@ -533,16 +541,12 @@ export default async function MenuItemEditPage({
   const sites = (sitesRaw ?? []) as SiteRow[];
   const categories = (categoriesRaw ?? []) as CommercialCategoryRow[];
   const collections = (collectionsRaw ?? []) as CommercialCollectionRow[];
-  const collectionCategoryLinks = (collectionCategoryLinksRaw ?? []) as CollectionCategoryLinkRow[];
-  const existingCommercialItems = ((existingItemsRaw ?? []) as ExistingCommercialItemRow[])
-    .map((existingItem) => ({
-      id: existingItem.id,
-      site_id: existingItem.site_id ?? "",
-      product_id: existingItem.product_id,
-      name: existingItem.name,
-      is_active: existingItem.is_active,
-    }))
-    .filter((existingItem) => existingItem.site_id && existingItem.product_id);
+  const collectionCategoryLinks =
+    (collectionCategoryLinksRaw ?? []) as CollectionCategoryLinkRow[];
+  const existingCommercialItems =
+    (existingItemsRaw ?? []) as ExistingCommercialItemRow[];
+  const itemCollections = (itemCollectionsRaw ?? []) as CatalogItemCollectionRow[];
+  const presentation = (presentationRaw ?? null) as CatalogItemPresentationRow | null;
 
   const productsMap = new Map<
     string,
@@ -558,52 +562,51 @@ export default async function MenuItemEditPage({
     }
   >();
 
-  for (const sellOption of (sellOptionsRaw ?? []) as SellOptionRow[]) {
-    const productId = String(sellOption.product_id ?? "").trim();
-    const siteId = String(sellOption.site_id ?? "").trim();
-    if (!productId || !siteId) continue;
+  for (const row of (sellOptionsRaw ?? []) as SellOptionRow[]) {
+    const productId = String(row.product_id ?? "").trim();
+    const rowSiteId = String(row.site_id ?? "").trim();
+    if (!productId || !rowSiteId) continue;
 
     const current = productsMap.get(productId) ?? {
       id: productId,
-      name: sellOption.name,
-      sku: sellOption.sku,
-      description: sellOption.description,
+      name: row.name,
+      sku: row.sku,
+      description: row.description,
       site_ids: new Set<string>(),
       site_prices: {},
       site_recipe_costs: {},
       default_price: null,
     };
 
-    current.site_ids.add(siteId);
-    const price = toOptionalNumber(sellOption.base_price);
-    const recipeCost = toOptionalNumber(sellOption.recipe_cost_amount);
-    current.site_prices[siteId] = price;
-    current.site_recipe_costs[siteId] = recipeCost;
+    current.site_ids.add(rowSiteId);
+    const price = toOptionalNumber(row.base_price);
+    const recipeCost = toOptionalNumber(row.recipe_cost_amount);
+    current.site_prices[rowSiteId] = price;
+    current.site_recipe_costs[rowSiteId] = recipeCost;
     if (current.default_price == null && price != null) current.default_price = price;
     productsMap.set(productId, current);
   }
 
   const products = Array.from(productsMap.values())
-    .map((product) => ({
-      ...product,
-      site_ids: Array.from(product.site_ids),
-    }))
+    .map((product) => ({ ...product, site_ids: Array.from(product.site_ids) }))
     .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "es-CO"));
 
-  const itemCollections = ((itemCollectionsRaw ?? []) as CatalogItemCollectionRow[])
+  const selectedCollectionIds = itemCollections
     .filter((relation) => relation.is_active !== false)
+    .sort((a, b) => {
+      if (Boolean(a.is_primary) !== Boolean(b.is_primary)) return a.is_primary ? -1 : 1;
+      return Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0);
+    })
     .map((relation) => relation.commercial_collection_id);
-  const selectedCollectionIds = Array.from(new Set(itemCollections));
 
   const metadata = item.metadata ?? {};
   const fulfillmentModes = item.fulfillment_modes ?? [];
-  const presentation = (presentationRaw ?? null) as CatalogItemPresentationRow | null;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Editar producto en Vento Pass"
-        subtitle="Revisa la ficha comercial, sus menús y la forma en que el cliente lo agrega al pedido."
+        subtitle="La colección principal determina las categorías disponibles para este producto."
         actions={
           <Link href="/menu" className="ui-btn ui-btn--ghost">
             Volver
@@ -621,7 +624,13 @@ export default async function MenuItemEditPage({
         categories={categories}
         collections={collections}
         collectionCategoryLinks={collectionCategoryLinks}
-        existingCommercialItems={existingCommercialItems}
+        existingCommercialItems={existingCommercialItems.map((existingItem) => ({
+          id: existingItem.id,
+          site_id: existingItem.site_id ?? "",
+          product_id: existingItem.product_id,
+          name: existingItem.name,
+          is_active: existingItem.is_active,
+        }))}
         initial={{
           id: item.id,
           code: item.code,
@@ -629,7 +638,8 @@ export default async function MenuItemEditPage({
           description: item.description ?? "",
           product_id: item.product_id ?? "",
           price_amount: String(item.price_amount ?? ""),
-          compare_at_amount: item.compare_at_amount == null ? "" : String(item.compare_at_amount),
+          compare_at_amount:
+            item.compare_at_amount == null ? "" : String(item.compare_at_amount),
           sort_order: String(item.sort_order ?? 0),
           is_active: item.is_active,
           is_featured: item.is_featured,

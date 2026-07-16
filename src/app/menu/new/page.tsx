@@ -1,13 +1,20 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
-import { PageHeader } from "@/components/vento/standard/page-header";
 import { MenuItemForm } from "@/components/viso/menu-item-form";
+import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
+
+type SiteRow = {
+  id: string;
+  code: string | null;
+  name: string | null;
+  is_active: boolean | null;
+};
 
 type SellOptionRow = {
   site_id: string | null;
@@ -41,20 +48,13 @@ type CollectionCategoryLinkRow = {
   collection_id: string;
   commercial_category_id: string;
   sort_order: number | null;
+  is_active: boolean | null;
 };
 
 type ExistingCommercialItemRow = {
   id: string;
   site_id: string | null;
   product_id: string | null;
-  name: string | null;
-  is_active: boolean | null;
-  metadata: Record<string, unknown> | null;
-};
-
-type SiteRow = {
-  id: string;
-  code: string | null;
   name: string | null;
   is_active: boolean | null;
 };
@@ -69,14 +69,19 @@ function asBool(value: FormDataEntryValue | null) {
 
 function asNonNegativeNumber(value: FormDataEntryValue | null) {
   const parsed = Number(asText(value));
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.max(0, parsed);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function toOptionalNumber(value: number | string | null | undefined) {
+  if (value == null || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parseBadgesCsv(value: string) {
   return value
     .split(",")
-    .map((item) => item.trim())
+    .map((entry) => entry.trim())
     .filter(Boolean);
 }
 
@@ -85,18 +90,11 @@ function parseFulfillmentModes(formData: FormData) {
   if (asBool(formData.get("fulfillment_delivery"))) modes.push("delivery");
   if (asBool(formData.get("fulfillment_pickup"))) modes.push("pickup");
   if (asBool(formData.get("fulfillment_on_premise"))) modes.push("on_premise");
-  if (modes.length === 0) modes.push("delivery");
-  return modes;
+  return modes.length > 0 ? modes : ["delivery"];
 }
 
-function parsePassCardLayout(value: FormDataEntryValue | string | null | undefined) {
-  const layout = typeof value === "string" ? value.trim() : "";
-  return layout === "featured" ? "featured" : "compact";
-}
-
-function toOptionalNumber(value: number | string | null | undefined) {
-  const parsed = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+function parsePassCardLayout(value: FormDataEntryValue | null) {
+  return asText(value) === "featured" ? "featured" : "compact";
 }
 
 function slugify(value: string) {
@@ -108,244 +106,13 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-type MenuReferencesValidation = {
-  error: string;
-  categoryLabel: string;
-  basePriceAmount: number | null;
-  recipeCostAmount: number | null;
-  siteCode: string;
-  collectionCode: string;
-  productCode: string;
-};
-
-async function validateCommercialMenuReferences(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  productId: string,
-  siteId: string,
-  commercialCategoryId: string,
-  commercialCollectionId: string,
-): Promise<MenuReferencesValidation> {
-  const [
-    { data: site, error: siteError },
-    { data: sellOption, error: sellOptionError },
-    { data: commercialCategory, error: commercialCategoryError },
-    { data: commercialCollection, error: commercialCollectionError },
-    { data: collectionCategoryLink, error: collectionCategoryLinkError },
-    { data: existingItem, error: existingItemError },
-  ] = await Promise.all([
-    supabase
-      .from("sites")
-      .select("id,code,name")
-      .eq("id", siteId)
-      .maybeSingle(),
-    supabase
-      .schema("pass")
-      .from("sell_products_by_site")
-      .select("product_id,name,sku,base_price,recipe_cost_amount")
-      .eq("product_id", productId)
-      .eq("site_id", siteId)
-      .maybeSingle(),
-    supabase
-      .schema("pass")
-      .from("commercial_categories")
-      .select("id,name,code,site_id,is_active")
-      .eq("id", commercialCategoryId)
-      .eq("site_id", siteId)
-      .eq("is_active", true)
-      .maybeSingle(),
-    supabase
-      .schema("pass")
-      .from("commercial_collections")
-      .select("id,name,code,site_id,kind,is_active")
-      .eq("id", commercialCollectionId)
-      .eq("site_id", siteId)
-      .eq("is_active", true)
-      .maybeSingle(),
-    supabase
-      .schema("pass")
-      .from("commercial_collection_categories")
-      .select("collection_id,commercial_category_id")
-      .eq("collection_id", commercialCollectionId)
-      .eq("commercial_category_id", commercialCategoryId)
-      .maybeSingle(),
-    supabase
-      .schema("pass")
-      .from("catalog_items")
-      .select("id,name")
-      .eq("product_id", productId)
-      .eq("site_id", siteId)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle(),
-  ]);
-
-  if (siteError) {
-    return {
-      error: `No se pudo validar la sede: ${siteError.message}`,
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (!site) {
-    return {
-      error: "La sede seleccionada no existe.",
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (sellOptionError) {
-    return {
-      error: `No se pudo validar el producto operacional: ${sellOptionError.message}`,
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (!sellOption) {
-    return {
-      error: "El producto operacional no esta habilitado para esta sede.",
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (commercialCategoryError) {
-    return {
-      error: `No se pudo validar la categoría comercial: ${commercialCategoryError.message}`,
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (!commercialCategory) {
-    return {
-      error: "La categoría comercial seleccionada no existe, esta inactiva o no pertenece a esta sede.",
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (commercialCollectionError) {
-    return {
-      error: `No se pudo validar la coleccion comercial: ${commercialCollectionError.message}`,
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (!commercialCollection) {
-    return {
-      error: "La coleccion comercial seleccionada no existe, esta inactiva o no pertenece a esta sede.",
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (collectionCategoryLinkError) {
-    return {
-      error: `No se pudo validar la relación entre colección y categoría comercial: ${collectionCategoryLinkError.message}`,
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (!collectionCategoryLink) {
-    return {
-      error: "La categoría comercial seleccionada no pertenece a la colección comercial seleccionada.",
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (existingItemError) {
-    return {
-      error: `No se pudo validar si el item ya existe: ${existingItemError.message}`,
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  if (existingItem) {
-    return {
-      error: "Ya existe un item comercial activo para este producto en esta sede. Edita el item existente en lugar de crear otro.",
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  const categoryLabel = commercialCategory.name || commercialCategory.code || "";
-
-  if (!categoryLabel) {
-    return {
-      error: "La categoría comercial seleccionada no tiene nombre ni codigo.",
-      categoryLabel: "",
-      basePriceAmount: null,
-      recipeCostAmount: null,
-      siteCode: "",
-      collectionCode: "",
-      productCode: "",
-    };
-  }
-
-  return {
-    error: "",
-    categoryLabel,
-    basePriceAmount: toOptionalNumber(sellOption.base_price),
-    recipeCostAmount: toOptionalNumber(sellOption.recipe_cost_amount),
-    siteCode: site.code || site.name || siteId,
-    collectionCode: commercialCollection.code || commercialCollection.name || commercialCollectionId,
-    productCode: sellOption.sku || sellOption.name || productId,
-  };
+function getRequestedCollectionIds(formData: FormData) {
+  const selected = formData
+    .getAll("commercial_collection_ids")
+    .map((value) => asText(value))
+    .filter(Boolean);
+  const fallback = asText(formData.get("commercial_collection_id"));
+  return Array.from(new Set(selected.length > 0 ? selected : fallback ? [fallback] : []));
 }
 
 async function getAvailableCatalogItemCode(
@@ -353,16 +120,13 @@ async function getAvailableCatalogItemCode(
   baseCode: string,
 ) {
   const normalizedBase = slugify(baseCode) || `item-${Date.now()}`;
-
   const { data, error } = await supabase
     .schema("pass")
     .from("catalog_items")
     .select("code")
     .ilike("code", `${normalizedBase}%`);
 
-  if (error) {
-    throw new Error(`No se pudo validar el código automático: ${error.message}`);
-  }
+  if (error) throw new Error(error.message);
 
   const existingCodes = new Set(
     ((data ?? []) as { code: string | null }[])
@@ -370,53 +134,53 @@ async function getAvailableCatalogItemCode(
       .filter(Boolean),
   );
 
-  if (!existingCodes.has(normalizedBase)) {
-    return normalizedBase;
-  }
-
+  if (!existingCodes.has(normalizedBase)) return normalizedBase;
   for (let index = 2; index <= 99; index += 1) {
     const candidate = `${normalizedBase}-${index}`;
-    if (!existingCodes.has(candidate)) {
-      return candidate;
-    }
+    if (!existingCodes.has(candidate)) return candidate;
   }
-
   return `${normalizedBase}-${Date.now()}`;
 }
 
 async function getNextCatalogItemSortOrder(
   supabase: Awaited<ReturnType<typeof createClient>>,
   siteId: string,
-  commercialCollectionId: string,
-  commercialCategoryId: string,
+  collectionId: string,
+  categoryId: string,
 ) {
   const { data, error } = await supabase
     .schema("pass")
     .from("catalog_item_collections")
-    .select("sort_order,catalog_item:catalog_items!inner(site_id,product_id,commercial_category_id,price_amount,is_active,metadata)")
-    .eq("commercial_collection_id", commercialCollectionId)
+    .select(
+      "sort_order,catalog_item:catalog_items!inner(site_id,product_id,commercial_category_id,price_amount,is_active,metadata)",
+    )
+    .eq("commercial_collection_id", collectionId)
     .eq("is_active", true);
 
-  if (error) {
-    throw new Error(`No se pudo calcular el orden automático: ${error.message}`);
-  }
+  if (error) throw new Error(error.message);
 
-  const highestOrder = (data ?? []).reduce((highest, relation) => {
-    const item = Array.isArray(relation.catalog_item) ? relation.catalog_item[0] : relation.catalog_item;
+  const highest = (data ?? []).reduce((currentHighest, relation) => {
+    const item = Array.isArray(relation.catalog_item)
+      ? relation.catalog_item[0]
+      : relation.catalog_item;
+
     if (
       !item ||
       item.site_id !== siteId ||
-      item.commercial_category_id !== commercialCategoryId ||
+      item.commercial_category_id !== categoryId ||
       item.is_active === false ||
       !item.product_id ||
       Number(item.price_amount ?? 0) <= 0 ||
       item.metadata?.source_app !== "viso" ||
       item.metadata?.source_module !== "menu_comercial"
-    ) return highest;
-    return Math.max(highest, Number(relation.sort_order ?? 0));
+    ) {
+      return currentHighest;
+    }
+
+    return Math.max(currentHighest, Number(relation.sort_order ?? 0));
   }, 0);
 
-  return highestOrder + 10;
+  return highest + 10;
 }
 
 async function cleanupCreatedCatalogItem(
@@ -425,104 +189,168 @@ async function cleanupCreatedCatalogItem(
   deleteRelations = false,
 ) {
   if (deleteRelations) {
-    await supabase.schema("pass").from("catalog_item_collections").delete().eq("catalog_item_id", catalogItemId);
+    await supabase
+      .schema("pass")
+      .from("catalog_item_collections")
+      .delete()
+      .eq("catalog_item_id", catalogItemId);
   }
   await supabase.schema("pass").from("catalog_items").delete().eq("id", catalogItemId);
 }
 
 async function createMenuItem(formData: FormData) {
   "use server";
-  const supabase = await createClient();
 
-  const name = asText(formData.get("name"));
+  const supabase = await createClient();
   const siteId = asText(formData.get("site_id"));
   const productId = asText(formData.get("product_id"));
-  const requestedCollectionIds = Array.from(new Set(
-    formData.getAll("commercial_collection_ids").map((value) => asText(value)).filter(Boolean),
-  ));
-  const fallbackCollectionId = asText(formData.get("commercial_collection_id"));
-  const collectionIds = requestedCollectionIds.length > 0
-    ? requestedCollectionIds
-    : fallbackCollectionId
-      ? [fallbackCollectionId]
-      : [];
-  const commercialCollectionId = collectionIds[0] ?? "";
-  const commercialCategoryId = asText(formData.get("commercial_category_id"));
+  const name = asText(formData.get("name"));
+  const categoryId = asText(formData.get("commercial_category_id"));
+  const collectionIds = getRequestedCollectionIds(formData);
+  const primaryCollectionId = collectionIds[0] ?? "";
 
-  if (!name || !siteId || !productId || collectionIds.length === 0 || !commercialCategoryId) {
-    redirect("/menu/new?error=" + encodeURIComponent("Faltan campos obligatorios."));
+  if (!siteId || !productId || !name || !categoryId || collectionIds.length === 0) {
+    redirect(`/menu/new?error=${encodeURIComponent("Faltan campos obligatorios.")}`);
   }
 
   const priceAmount = asNonNegativeNumber(formData.get("price_amount"));
-
   if (priceAmount <= 0) {
-    redirect("/menu/new?error=" + encodeURIComponent("El precio comercial debe ser mayor a 0."));
+    redirect(`/menu/new?error=${encodeURIComponent("El precio comercial debe ser mayor a 0.")}`);
   }
 
-  const compareAtAmountRaw = asText(formData.get("compare_at_amount"));
-  const compareAtAmount = compareAtAmountRaw
-    ? asNonNegativeNumber(formData.get("compare_at_amount"))
-    : null;
+  const [
+    { data: site, error: siteError },
+    { data: sellOption, error: sellOptionError },
+    { data: category, error: categoryError },
+    { data: selectedCollections, error: collectionsError },
+    { data: categoryLinks, error: categoryLinksError },
+    { data: duplicateItem, error: duplicateError },
+  ] = await Promise.all([
+    supabase.from("sites").select("id,code,name").eq("id", siteId).maybeSingle(),
+    supabase
+      .schema("pass")
+      .from("sell_products_by_site")
+      .select("product_id,name,sku,base_price,recipe_cost_amount")
+      .eq("site_id", siteId)
+      .eq("product_id", productId)
+      .maybeSingle(),
+    supabase
+      .schema("pass")
+      .from("commercial_categories")
+      .select("id,name,code,site_id,is_active")
+      .eq("id", categoryId)
+      .eq("site_id", siteId)
+      .eq("is_active", true)
+      .maybeSingle(),
+    supabase
+      .schema("pass")
+      .from("commercial_collections")
+      .select("id,name,code,site_id,is_active")
+      .in("id", collectionIds)
+      .eq("site_id", siteId)
+      .eq("is_active", true),
+    supabase
+      .schema("pass")
+      .from("commercial_collection_categories")
+      .select("collection_id,commercial_category_id,is_active")
+      .in("collection_id", collectionIds)
+      .eq("commercial_category_id", categoryId)
+      .eq("is_active", true),
+    supabase
+      .schema("pass")
+      .from("catalog_items")
+      .select("id")
+      .eq("site_id", siteId)
+      .eq("product_id", productId)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
-  const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
-  const opensDetailModal = asBool(formData.get("opens_detail_modal"));
+  const validationError =
+    siteError?.message ||
+    sellOptionError?.message ||
+    categoryError?.message ||
+    collectionsError?.message ||
+    categoryLinksError?.message ||
+    duplicateError?.message;
 
-  const referencesValidations = await Promise.all(
-    collectionIds.map((collectionId) =>
-      validateCommercialMenuReferences(supabase, productId, siteId, commercialCategoryId, collectionId),
-    ),
+  if (validationError) {
+    redirect(`/menu/new?error=${encodeURIComponent(validationError)}`);
+  }
+  if (!site) {
+    redirect(`/menu/new?error=${encodeURIComponent("La sede seleccionada no existe.")}`);
+  }
+  if (!sellOption) {
+    redirect(`/menu/new?error=${encodeURIComponent("El producto no está habilitado para esta sede.")}`);
+  }
+  if (!category) {
+    redirect(`/menu/new?error=${encodeURIComponent("La categoría no pertenece a esta sede o está inactiva.")}`);
+  }
+  if ((selectedCollections ?? []).length !== collectionIds.length) {
+    redirect(`/menu/new?error=${encodeURIComponent("Una colección no pertenece a la sede o está inactiva.")}`);
+  }
+
+  const linkedCollectionIds = new Set(
+    (categoryLinks ?? []).map((link) => String(link.collection_id ?? "")),
   );
-  const referencesValidation = referencesValidations[0];
-
-  if (!referencesValidation || referencesValidations.some((validation) => validation.error)) {
-    redirect("/menu/new?error=" + encodeURIComponent("Una o más colecciones no son válidas para la sede o sección seleccionada."));
+  const incompatibleCollection = collectionIds.find((id) => !linkedCollectionIds.has(id));
+  if (incompatibleCollection) {
+    redirect(
+      `/menu/new?error=${encodeURIComponent(
+        "La categoría elegida no está asignada a una de las colecciones seleccionadas.",
+      )}`,
+    );
+  }
+  if (duplicateItem) {
+    redirect(
+      `/menu/new?error=${encodeURIComponent(
+        "Ya existe un producto comercial activo para esta referencia en la sede.",
+      )}`,
+    );
   }
 
-  let code = "";
-  let sortOrder = 0;
-  const requestedSortOrder = asText(formData.get("sort_order"));
+  const requestedCode = slugify(asText(formData.get("code")));
+  const primaryCollection = (selectedCollections ?? []).find(
+    (collection) => collection.id === primaryCollectionId,
+  );
 
+  let code: string;
+  let relationSortOrders: number[];
   try {
-    const requestedCode = slugify(asText(formData.get("code")));
-    if (requestedCode) {
-      const availableCode = await getAvailableCatalogItemCode(supabase, requestedCode);
-      if (availableCode !== requestedCode) {
-        redirect("/menu/new?error=" + encodeURIComponent("Ya existe un item comercial con ese código."));
-      }
-      code = requestedCode;
-    } else {
-      code = await getAvailableCatalogItemCode(
-        supabase,
-        [
-          referencesValidation.siteCode,
-          referencesValidation.collectionCode,
-          referencesValidation.productCode,
-        ]
+    code = await getAvailableCatalogItemCode(
+      supabase,
+      requestedCode ||
+        [site.code || site.name, primaryCollection?.code || primaryCollection?.name, sellOption.sku || sellOption.name]
           .filter(Boolean)
           .join("-"),
-      );
-    }
+    );
 
-    sortOrder = requestedSortOrder
-      ? Math.round(asNonNegativeNumber(formData.get("sort_order")))
-      : await getNextCatalogItemSortOrder(supabase, siteId, commercialCollectionId, commercialCategoryId);
+    const explicitSortOrderText = asText(formData.get("sort_order"));
+    relationSortOrders = explicitSortOrderText
+      ? collectionIds.map(() => Math.round(asNonNegativeNumber(formData.get("sort_order"))))
+      : await Promise.all(
+          collectionIds.map((collectionId) =>
+            getNextCatalogItemSortOrder(supabase, siteId, collectionId, categoryId),
+          ),
+        );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo generar código u orden automático.";
-    redirect("/menu/new?error=" + encodeURIComponent(message));
+    redirect(
+      `/menu/new?error=${encodeURIComponent(
+        error instanceof Error ? error.message : "No se pudo generar el código u orden.",
+      )}`,
+    );
   }
 
-  const commercialMetadata = {
-    source_app: "viso",
-    source_module: "menu_comercial",
-    operational_product_id: productId,
-    commercial_category_id: commercialCategoryId,
-    base_price_amount: referencesValidation.basePriceAmount,
-    recipe_cost_amount: referencesValidation.recipeCostAmount,
-    display_group: asText(formData.get("display_group")) || null,
-    variant_label: asText(formData.get("variant_label")) || null,
-  };
+  const compareAtRaw = asText(formData.get("compare_at_amount"));
+  const compareAtAmount = compareAtRaw
+    ? asNonNegativeNumber(formData.get("compare_at_amount"))
+    : null;
+  const passCardLayout = parsePassCardLayout(formData.get("pass_card_layout"));
+  const opensDetailModal = asBool(formData.get("opens_detail_modal"));
+  const categoryDisplayLabel = category.name || category.code || "";
 
-  const { data: createdItem, error } = await supabase
+  const { data: createdItem, error: createError } = await supabase
     .schema("pass")
     .from("catalog_items")
     .insert({
@@ -531,51 +359,53 @@ async function createMenuItem(formData: FormData) {
       site_id: siteId,
       product_id: productId,
       description: asText(formData.get("description")) || null,
-      commercial_category_id: commercialCategoryId,
-      category_label: referencesValidation.categoryLabel,
+      commercial_category_id: categoryId,
+      category_label: categoryDisplayLabel,
       image_url: asText(formData.get("image_url")) || null,
       price_amount: priceAmount,
       compare_at_amount: compareAtAmount,
-      sort_order: sortOrder,
+      sort_order: relationSortOrders[0] ?? 10,
       is_active: asBool(formData.get("is_active")),
       is_featured: asBool(formData.get("is_featured")),
       badges: parseBadgesCsv(asText(formData.get("badges_csv"))),
       fulfillment_modes: parseFulfillmentModes(formData),
-      metadata: commercialMetadata,
+      metadata: {
+        source_app: "viso",
+        source_module: "menu_comercial",
+        operational_product_id: productId,
+        commercial_category_id: categoryId,
+        base_price_amount: toOptionalNumber(sellOption.base_price),
+        recipe_cost_amount: toOptionalNumber(sellOption.recipe_cost_amount),
+        display_group: asText(formData.get("display_group")) || null,
+        variant_label: asText(formData.get("variant_label")) || null,
+      },
     })
     .select("id")
     .single();
 
-  if (error) {
-    redirect("/menu/new?error=" + encodeURIComponent(error.message));
+  if (createError || !createdItem?.id) {
+    redirect(
+      `/menu/new?error=${encodeURIComponent(createError?.message || "No se pudo crear el producto.")}`,
+    );
   }
 
-  if (!createdItem?.id) {
-    redirect("/menu/new?error=" + encodeURIComponent("Item creado sin identificador."));
-  }
-
-  const relationSortOrders = requestedSortOrder
-    ? collectionIds.map(() => sortOrder)
-    : await Promise.all(collectionIds.map((collectionId) =>
-      getNextCatalogItemSortOrder(supabase, siteId, collectionId, commercialCategoryId),
-    ));
   const collectionRows = collectionIds.map((collectionId, index) => ({
     catalog_item_id: createdItem.id,
     commercial_collection_id: collectionId,
-    sort_order: relationSortOrders[index],
+    sort_order: relationSortOrders[index] ?? relationSortOrders[0] ?? 10,
     is_active: true,
     is_primary: index === 0,
     metadata: { configured_from: "viso_product_form" },
   }));
 
-  const { error: collectionsError } = await supabase
+  const { error: relationsError } = await supabase
     .schema("pass")
     .from("catalog_item_collections")
     .upsert(collectionRows, { onConflict: "catalog_item_id,commercial_collection_id" });
 
-  if (collectionsError) {
+  if (relationsError) {
     await cleanupCreatedCatalogItem(supabase, createdItem.id);
-    redirect("/menu/new?error=" + encodeURIComponent(collectionsError.message));
+    redirect(`/menu/new?error=${encodeURIComponent(relationsError.message)}`);
   }
 
   const { error: presentationError } = await supabase
@@ -596,10 +426,14 @@ async function createMenuItem(formData: FormData) {
 
   if (presentationError) {
     await cleanupCreatedCatalogItem(supabase, createdItem.id, true);
-    redirect("/menu/new?error=" + encodeURIComponent(presentationError.message));
+    redirect(`/menu/new?error=${encodeURIComponent(presentationError.message)}`);
   }
 
-  redirect(`/menu/${createdItem.id}?ok=${encodeURIComponent("Producto creado. Ahora puedes configurar sus opciones.")}`);
+  redirect(
+    `/menu/${createdItem.id}?ok=${encodeURIComponent(
+      "Producto creado. Ahora puedes configurar sus opciones.",
+    )}`,
+  );
 }
 
 function safeDecode(value: string | null | undefined) {
@@ -616,64 +450,65 @@ export default async function NewMenuItemPage({
 }: {
   searchParams?: Promise<{ error?: string }>;
 }) {
-  const sp = (await searchParams) ?? {};
-  const errorMsg = sp.error ? safeDecode(sp.error) : "";
+  const query = (await searchParams) ?? {};
+  const errorMessage = safeDecode(query.error);
 
-  await requireAppAccess({
-    appId: "viso",
-    returnTo: "/menu/new",
-  });
-  const supabase = createAdminClient();
-
-  const { data: sitesRaw } = await supabase
-    .from("sites")
-    .select("id,code,name,is_active")
-    .eq("is_active", true)
-    .order("name", { ascending: true });
-  const activeSites = (sitesRaw ?? []) as SiteRow[];
+  await requireAppAccess({ appId: "viso", returnTo: "/menu/new" });
+  const admin = createAdminClient();
 
   const [
+    { data: sitesRaw },
     { data: sellOptionsRaw },
     { data: categoriesRaw },
     { data: collectionsRaw },
     { data: collectionCategoryLinksRaw },
     { data: existingCommercialItemsRaw },
   ] = await Promise.all([
-    supabase
+    admin.from("sites").select("id,code,name,is_active").eq("is_active", true).order("name"),
+    admin
       .schema("pass")
       .from("sell_products_by_site")
       .select("site_id,product_id,name,sku,description,base_price,recipe_cost_amount")
-      .order("name", { ascending: true }),
-    supabase
+      .order("name"),
+    admin
       .schema("pass")
       .from("commercial_categories")
       .select("id,site_id,name,code,is_active")
       .eq("is_active", true)
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true }),
-    supabase
+      .order("sort_order")
+      .order("name"),
+    admin
       .schema("pass")
       .from("commercial_collections")
       .select("id,site_id,name,subtitle,code,kind,is_active")
       .eq("is_active", true)
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true }),
-    supabase
+      .order("sort_order")
+      .order("name"),
+    admin
       .schema("pass")
       .from("commercial_collection_categories")
-      .select("collection_id,commercial_category_id,sort_order")
-      .order("sort_order", { ascending: true }),
-    supabase
+      .select("collection_id,commercial_category_id,sort_order,is_active")
+      .eq("is_active", true)
+      .order("sort_order"),
+    admin
       .schema("pass")
       .from("catalog_items")
-      .select("id,site_id,product_id,name,is_active,metadata")
+      .select("id,site_id,product_id,name,is_active")
       .not("site_id", "is", null)
       .not("product_id", "is", null)
       .eq("is_active", true)
       .eq("metadata->>source_app", "viso")
       .eq("metadata->>source_module", "menu_comercial")
-      .order("name", { ascending: true }),
+      .order("name"),
   ]);
+
+  const sites = (sitesRaw ?? []) as SiteRow[];
+  const categories = (categoriesRaw ?? []) as CommercialCategoryRow[];
+  const collections = (collectionsRaw ?? []) as CommercialCollectionRow[];
+  const collectionCategoryLinks =
+    (collectionCategoryLinksRaw ?? []) as CollectionCategoryLinkRow[];
+  const existingCommercialItems =
+    (existingCommercialItemsRaw ?? []) as ExistingCommercialItemRow[];
 
   const productsMap = new Map<
     string,
@@ -689,112 +524,57 @@ export default async function NewMenuItemPage({
     }
   >();
 
-  for (const row of (sellOptionsRaw || []) as SellOptionRow[]) {
-    const productId = (row.product_id || "").trim();
-    const siteId = (row.site_id || "").trim();
+  for (const row of (sellOptionsRaw ?? []) as SellOptionRow[]) {
+    const productId = String(row.product_id ?? "").trim();
+    const siteId = String(row.site_id ?? "").trim();
     if (!productId || !siteId) continue;
 
-    if (!productsMap.has(productId)) {
-      productsMap.set(productId, {
-        id: productId,
-        name: row.name ?? null,
-        sku: row.sku ?? null,
-        description: row.description ?? null,
-        site_ids: new Set<string>(),
-        site_prices: {},
-        site_recipe_costs: {},
-        default_price: null,
-      });
-    }
+    const current = productsMap.get(productId) ?? {
+      id: productId,
+      name: row.name,
+      sku: row.sku,
+      description: row.description,
+      site_ids: new Set<string>(),
+      site_prices: {},
+      site_recipe_costs: {},
+      default_price: null,
+    };
 
-    const entry = productsMap.get(productId);
-    if (!entry) continue;
-
-    entry.site_ids.add(siteId);
-    const rawPrice = row.base_price;
-    const parsedPrice =
-      typeof rawPrice === "number" ? rawPrice : Number(rawPrice);
-    if (Number.isFinite(parsedPrice)) {
-      entry.site_prices[siteId] = parsedPrice;
-      if (entry.default_price == null) {
-        entry.default_price = parsedPrice;
-      }
-    } else {
-      entry.site_prices[siteId] = null;
-    }
-
-    const rawRecipeCost = row.recipe_cost_amount;
-    const parsedRecipeCost =
-      typeof rawRecipeCost === "number" ? rawRecipeCost : Number(rawRecipeCost);
-    entry.site_recipe_costs[siteId] = Number.isFinite(parsedRecipeCost) ? parsedRecipeCost : null;
+    current.site_ids.add(siteId);
+    const price = toOptionalNumber(row.base_price);
+    const recipeCost = toOptionalNumber(row.recipe_cost_amount);
+    current.site_prices[siteId] = price;
+    current.site_recipe_costs[siteId] = recipeCost;
+    if (current.default_price == null && price != null) current.default_price = price;
+    productsMap.set(productId, current);
   }
 
   const products = Array.from(productsMap.values())
-    .map((item) => ({
-      id: item.id,
-      name: item.name,
-      sku: item.sku,
-      description: item.description,
-      site_ids: Array.from(item.site_ids),
-      site_prices: item.site_prices,
-      site_recipe_costs: item.site_recipe_costs,
-      default_price: item.default_price,
-    }))
-    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "es-CO"));
+    .map((product) => ({ ...product, site_ids: Array.from(product.site_ids) }))
+    .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "es-CO"));
 
-  const categorySiteIds = new Set(
-    ((categoriesRaw ?? []) as CommercialCategoryRow[])
-      .map((category) => String(category.site_id ?? "").trim())
-      .filter(Boolean),
-  );
-
-  const collectionSiteIds = new Set(
-    ((collectionsRaw ?? []) as CommercialCollectionRow[])
-      .map((collection) => String(collection.site_id ?? "").trim())
-      .filter(Boolean),
-  );
-
-  const commercialSites = activeSites.filter((site) => {
-    return categorySiteIds.has(site.id) && collectionSiteIds.has(site.id);
-  });
-
-  const categories = (categoriesRaw ?? []) as CommercialCategoryRow[];
-  const collections = (collectionsRaw ?? []) as CommercialCollectionRow[];
-  const collectionCategoryLinks = (collectionCategoryLinksRaw ?? []) as CollectionCategoryLinkRow[];
-  const existingCommercialItems = ((existingCommercialItemsRaw ?? []) as ExistingCommercialItemRow[])
-    .map((item) => ({
-      id: item.id,
-      site_id: item.site_id ?? "",
-      product_id: item.product_id ?? "",
-      name: item.name,
-      is_active: item.is_active,
-    }))
-    .filter((item) => item.site_id && item.product_id);
-
-  const existingProductIdsBySite = new Map<string, Set<string>>();
-
+  const publishedBySite = new Map<string, Set<string>>();
   for (const item of existingCommercialItems) {
-    const current = existingProductIdsBySite.get(item.site_id) ?? new Set<string>();
-    current.add(item.product_id);
-    existingProductIdsBySite.set(item.site_id, current);
+    const itemSiteId = String(item.site_id ?? "").trim();
+    const itemProductId = String(item.product_id ?? "").trim();
+    if (!itemSiteId || !itemProductId || item.is_active === false) continue;
+    const current = publishedBySite.get(itemSiteId) ?? new Set<string>();
+    current.add(itemProductId);
+    publishedBySite.set(itemSiteId, current);
   }
 
-  const commercialCoverage = commercialSites.map((site) => {
-    const sellableProducts = products.filter((product) => product.site_ids.includes(site.id));
-    const existingProductIds = existingProductIdsBySite.get(site.id) ?? new Set<string>();
-    const missingProducts = sellableProducts
-      .filter((product) => !existingProductIds.has(product.id))
-      .map((product) => ({
-        id: product.id,
-        name: product.name,
-        sku: product.sku,
-      }));
+  const commercialCoverage = sites.map((site) => {
+    const sellable = products.filter((product) => product.site_ids.includes(site.id));
+    const published = publishedBySite.get(site.id) ?? new Set<string>();
+    const missingProducts = sellable
+      .filter((product) => !published.has(product.id))
+      .map((product) => ({ id: product.id, name: product.name, sku: product.sku }));
 
     return {
       site_id: site.id,
       site_label: site.name ?? site.code ?? "Sin sede",
-      total_sellable: sellableProducts.length,
-      created_count: sellableProducts.length - missingProducts.length,
+      total_sellable: sellable.length,
+      created_count: sellable.length - missingProducts.length,
       missing_count: missingProducts.length,
       missing_products: missingProducts,
     };
@@ -804,7 +584,7 @@ export default async function NewMenuItemPage({
     <div className="space-y-6">
       <PageHeader
         title="Publicar producto en Vento Pass"
-        subtitle="Elige el producto, revisa su información y decide dónde aparecerá. VISO completa el resto automáticamente."
+        subtitle="Selecciona primero la colección y después una de las categorías configuradas dentro de ella."
         actions={
           <Link href="/menu" className="ui-btn ui-btn--ghost">
             Volver
@@ -812,16 +592,22 @@ export default async function NewMenuItemPage({
         }
       />
 
-      {errorMsg ? <div className="ui-alert ui-alert--error">{errorMsg}</div> : null}
+      {errorMessage ? <div className="ui-alert ui-alert--error">{errorMessage}</div> : null}
 
       <MenuItemForm
         mode="create"
-        sites={commercialSites}
+        sites={sites}
         products={products}
         categories={categories}
         collections={collections}
         collectionCategoryLinks={collectionCategoryLinks}
-        existingCommercialItems={existingCommercialItems}
+        existingCommercialItems={existingCommercialItems.map((item) => ({
+          id: item.id,
+          site_id: item.site_id ?? "",
+          product_id: item.product_id,
+          name: item.name,
+          is_active: item.is_active,
+        }))}
         commercialCoverage={commercialCoverage}
         initial={{
           code: "",
@@ -833,14 +619,15 @@ export default async function NewMenuItemPage({
           sort_order: "",
           is_active: true,
           is_featured: false,
-          site_id: commercialSites[0]?.id ?? "",
+          site_id: sites[0]?.id ?? "",
+          commercial_collection_ids: [],
           commercial_category_id: "",
           category_label: "",
           image_url: "",
           badges_csv: "",
           fulfillment_delivery: true,
           fulfillment_pickup: true,
-          fulfillment_on_premise: true,
+          fulfillment_on_premise: false,
           metadata_extra: "",
           display_group: "",
           variant_label: "",
