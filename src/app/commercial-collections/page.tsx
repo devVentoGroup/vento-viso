@@ -3,8 +3,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { CommercialCollectionCategoryOrderEditor } from "@/components/viso/commercial-collection-category-order-editor";
-import { PageHeader } from "@/components/vento/standard/page-header";
+import { CommercialCollectionOrderEditor } from "@/components/viso/commercial-collection-order-editor";
 import { CommercialCollectionHeroField } from "@/components/viso/commercial-collection-hero-field";
+import { PageHeader } from "@/components/vento/standard/page-header";
 import { requireAppAccess } from "@/lib/auth/guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -57,6 +58,11 @@ type CollectionCategoryRow = {
   commercial_category_id: string;
   sort_order: number | null;
   is_active: boolean | null;
+};
+
+type SaveOrderResult = {
+  ok: boolean;
+  error?: string;
 };
 
 function asText(value: FormDataEntryValue | null) {
@@ -118,26 +124,31 @@ function toDateTimeLocalValue(value: string | null | undefined) {
 function collectionKindLabel(kind: string | null | undefined) {
   switch (kind) {
     case "main":
-      return "Menu principal";
+      return "Menú principal";
     case "seasonal":
       return "Temporada";
     case "special":
-      return "Menu especial";
+      return "Menú especial";
     case "campaign":
-      return "Campana";
+      return "Campaña";
     case "event":
       return "Evento";
     default:
-      return kind || "Coleccion";
+      return kind || "Colección";
   }
 }
 
-function commercialCollectionsPath(siteId?: string | null, status?: "ok" | "error", message?: string, collectionId?: string | null) {
+function commercialCollectionsPath(
+  siteId?: string | null,
+  status?: "ok" | "error",
+  message?: string,
+  collectionId?: string | null,
+) {
   const params = new URLSearchParams();
   const cleanSiteId = String(siteId ?? "").trim();
+  const cleanCollectionId = String(collectionId ?? "").trim();
 
   if (cleanSiteId) params.set("site", cleanSiteId);
-  const cleanCollectionId = String(collectionId ?? "").trim();
   if (cleanCollectionId) params.set("collection", cleanCollectionId);
   if (status && message) params.set(status, message);
 
@@ -149,8 +160,7 @@ function pathWithSite(path: string, siteId?: string | null) {
   const cleanSiteId = String(siteId ?? "").trim();
   if (!cleanSiteId) return path;
 
-  const params = new URLSearchParams();
-  params.set("site", cleanSiteId);
+  const params = new URLSearchParams({ site: cleanSiteId });
   return `${path}?${params.toString()}`;
 }
 
@@ -158,7 +168,6 @@ async function saveCollection(formData: FormData) {
   "use server";
 
   const supabase = createAdminClient();
-
   const id = asText(formData.get("id"));
   const returnCollectionId = asText(formData.get("return_collection_id"));
   const safeReturnCollectionId = id && returnCollectionId === id ? id : "";
@@ -168,7 +177,14 @@ async function saveCollection(formData: FormData) {
   const kind = asText(formData.get("kind")) || "seasonal";
 
   if (!siteId || !name || !code) {
-    redirect(commercialCollectionsPath(siteId, "error", "Sede y nombre son obligatorios.", safeReturnCollectionId));
+    redirect(
+      commercialCollectionsPath(
+        siteId,
+        "error",
+        "Sede y nombre son obligatorios.",
+        safeReturnCollectionId,
+      ),
+    );
   }
 
   let sortOrder = 0;
@@ -211,29 +227,43 @@ async function saveCollection(formData: FormData) {
 
   const { error } = id
     ? await supabase
-      .schema("pass")
-      .from("commercial_collections")
-      .update(payload)
-      .eq("id", id)
+        .schema("pass")
+        .from("commercial_collections")
+        .update(payload)
+        .eq("id", id)
     : await supabase
-      .schema("pass")
-      .from("commercial_collections")
-      .upsert(payload, { onConflict: "site_id,code" });
+        .schema("pass")
+        .from("commercial_collections")
+        .upsert(payload, { onConflict: "site_id,code" });
 
   if (error) {
-    redirect(commercialCollectionsPath(siteId, "error", error.message, safeReturnCollectionId));
+    redirect(
+      commercialCollectionsPath(
+        siteId,
+        "error",
+        error.message,
+        safeReturnCollectionId,
+      ),
+    );
   }
 
   revalidatePath("/commercial-collections");
+  revalidatePath("/commercial-collections/overview");
   revalidatePath("/menu");
-  redirect(commercialCollectionsPath(siteId, "ok", "Coleccion guardada.", safeReturnCollectionId));
+  redirect(
+    commercialCollectionsPath(
+      siteId,
+      "ok",
+      "Colección guardada.",
+      safeReturnCollectionId,
+    ),
+  );
 }
 
 async function saveCollectionCategories(formData: FormData) {
   "use server";
 
   const supabase = createAdminClient();
-
   const collectionId = asText(formData.get("collection_id"));
   const returnCollectionId = asText(formData.get("return_collection_id"));
   const selectedCategoryIds = Array.from(
@@ -246,7 +276,7 @@ async function saveCollectionCategories(formData: FormData) {
   );
 
   if (!collectionId) {
-    redirect(commercialCollectionsPath(null, "error", "Coleccion invalida."));
+    redirect(commercialCollectionsPath(null, "error", "Colección inválida."));
   }
 
   const { data: collection, error: collectionError } = await supabase
@@ -263,11 +293,13 @@ async function saveCollectionCategories(formData: FormData) {
       commercialCollectionsPath(
         redirectSiteId,
         "error",
-        collectionError?.message || "La coleccion no existe.",
+        collectionError?.message || "La colección no existe.",
       ),
     );
   }
-  const safeReturnCollectionId = returnCollectionId === collection.id ? collection.id : "";
+
+  const safeReturnCollectionId =
+    returnCollectionId === collection.id ? collection.id : "";
 
   if (selectedCategoryIds.length > 0) {
     const { data: selectedCategories, error: categoriesError } = await supabase
@@ -277,7 +309,14 @@ async function saveCollectionCategories(formData: FormData) {
       .in("id", selectedCategoryIds);
 
     if (categoriesError) {
-      redirect(commercialCollectionsPath(collection.site_id, "error", categoriesError.message, safeReturnCollectionId));
+      redirect(
+        commercialCollectionsPath(
+          collection.site_id,
+          "error",
+          categoriesError.message,
+          safeReturnCollectionId,
+        ),
+      );
     }
 
     const validCategoryIds = new Set(
@@ -286,16 +325,13 @@ async function saveCollectionCategories(formData: FormData) {
         .map((category) => category.id),
     );
 
-    const hasInvalidCategory = selectedCategoryIds.some(
-      (categoryId) => !validCategoryIds.has(categoryId),
-    );
-
-    if (hasInvalidCategory) {
+    if (selectedCategoryIds.some((categoryId) => !validCategoryIds.has(categoryId))) {
       redirect(
         commercialCollectionsPath(
           collection.site_id,
           "error",
-          "Una o mas categorias no pertenecen a la sede de la coleccion.", safeReturnCollectionId,
+          "Una o más categorías no pertenecen a la sede de la colección.",
+          safeReturnCollectionId,
         ),
       );
     }
@@ -309,7 +345,14 @@ async function saveCollectionCategories(formData: FormData) {
     .order("sort_order", { ascending: true });
 
   if (existingLinksError) {
-    redirect(commercialCollectionsPath(collection.site_id, "error", existingLinksError.message, safeReturnCollectionId));
+    redirect(
+      commercialCollectionsPath(
+        collection.site_id,
+        "error",
+        existingLinksError.message,
+        safeReturnCollectionId,
+      ),
+    );
   }
 
   const existingOrderByCategoryId = new Map<string, number>();
@@ -337,14 +380,14 @@ async function saveCollectionCategories(formData: FormData) {
     const aOrder = existingOrderByCategoryId.get(a);
     const bOrder = existingOrderByCategoryId.get(b);
 
-    if (aOrder != null && bOrder != null && aOrder !== bOrder) {
-      return aOrder - bOrder;
-    }
-
+    if (aOrder != null && bOrder != null && aOrder !== bOrder) return aOrder - bOrder;
     if (aOrder != null && bOrder == null) return -1;
     if (aOrder == null && bOrder != null) return 1;
 
-    return (fallbackPositionByCategoryId.get(a) ?? 0) - (fallbackPositionByCategoryId.get(b) ?? 0);
+    return (
+      (fallbackPositionByCategoryId.get(a) ?? 0) -
+      (fallbackPositionByCategoryId.get(b) ?? 0)
+    );
   });
 
   const { error: deactivateError } = await supabase
@@ -354,7 +397,14 @@ async function saveCollectionCategories(formData: FormData) {
     .eq("collection_id", collectionId);
 
   if (deactivateError) {
-    redirect(commercialCollectionsPath(collection.site_id, "error", deactivateError.message, safeReturnCollectionId));
+    redirect(
+      commercialCollectionsPath(
+        collection.site_id,
+        "error",
+        deactivateError.message,
+        safeReturnCollectionId,
+      ),
+    );
   }
 
   if (orderedCategoryIds.length > 0) {
@@ -371,20 +421,36 @@ async function saveCollectionCategories(formData: FormData) {
       .upsert(payload, { onConflict: "collection_id,commercial_category_id" });
 
     if (upsertError) {
-      redirect(commercialCollectionsPath(collection.site_id, "error", upsertError.message, safeReturnCollectionId));
+      redirect(
+        commercialCollectionsPath(
+          collection.site_id,
+          "error",
+          upsertError.message,
+          safeReturnCollectionId,
+        ),
+      );
     }
   }
 
   revalidatePath("/commercial-collections");
   revalidatePath("/menu");
-  redirect(commercialCollectionsPath(collection.site_id, "ok", "Secciones de coleccion guardadas.", safeReturnCollectionId));
+  redirect(
+    commercialCollectionsPath(
+      collection.site_id,
+      "ok",
+      "Categorías de la colección guardadas.",
+      safeReturnCollectionId,
+    ),
+  );
 }
 
-async function saveCollectionCategoryOrder(collectionId: string, orderedLinkIds: string[]) {
+async function saveCollectionCategoryOrder(
+  collectionId: string,
+  orderedLinkIds: string[],
+): Promise<SaveOrderResult> {
   "use server";
 
   const supabase = createAdminClient();
-
   const cleanCollectionId = String(collectionId ?? "").trim();
   const cleanOrderedLinkIds = Array.from(
     new Set(
@@ -395,10 +461,7 @@ async function saveCollectionCategoryOrder(collectionId: string, orderedLinkIds:
   );
 
   if (!cleanCollectionId || cleanOrderedLinkIds.length === 0) {
-    return {
-      ok: false,
-      error: "Orden inválido.",
-    };
+    return { ok: false, error: "Orden inválido." };
   }
 
   const { data: activeLinksRaw, error: activeLinksError } = await supabase
@@ -409,10 +472,7 @@ async function saveCollectionCategoryOrder(collectionId: string, orderedLinkIds:
     .eq("is_active", true);
 
   if (activeLinksError) {
-    return {
-      ok: false,
-      error: activeLinksError.message,
-    };
+    return { ok: false, error: activeLinksError.message };
   }
 
   const activeLinks = (activeLinksRaw ?? []) as {
@@ -424,25 +484,18 @@ async function saveCollectionCategoryOrder(collectionId: string, orderedLinkIds:
 
   const activeLinkById = new Map(activeLinks.map((link) => [link.id, link]));
 
-  const hasInvalidLink = cleanOrderedLinkIds.some((linkId) => !activeLinkById.has(linkId));
-
-  if (hasInvalidLink) {
+  if (cleanOrderedLinkIds.some((linkId) => !activeLinkById.has(linkId))) {
     return {
       ok: false,
-      error: "Una sección no pertenece a esta colección o ya no está activa.",
+      error: "Una categoría no pertenece a esta colección o ya no está activa.",
     };
   }
 
   const orderedLinks = cleanOrderedLinkIds
     .map((linkId) => activeLinkById.get(linkId))
-    .filter((link): link is {
-      id: string;
-      collection_id: string;
-      commercial_category_id: string;
-      is_active: boolean | null;
-    } => Boolean(link));
+    .filter((link): link is (typeof activeLinks)[number] => Boolean(link));
 
-  const linkUpdates = await Promise.all(
+  const updates = await Promise.all(
     orderedLinks.map((link, index) =>
       supabase
         .schema("pass")
@@ -452,41 +505,102 @@ async function saveCollectionCategoryOrder(collectionId: string, orderedLinkIds:
     ),
   );
 
-  const failedLinkUpdate = linkUpdates.find((result) => result.error);
-
-  if (failedLinkUpdate?.error) {
-    return {
-      ok: false,
-      error: failedLinkUpdate.error.message,
-    };
+  const failedUpdate = updates.find((result) => result.error);
+  if (failedUpdate?.error) {
+    return { ok: false, error: failedUpdate.error.message };
   }
 
   revalidatePath("/commercial-collections");
   revalidatePath("/menu");
+  return { ok: true };
+}
 
-  return {
-    ok: true,
-  };
+async function saveCollectionOrder(
+  siteId: string,
+  orderedCollectionIds: string[],
+): Promise<SaveOrderResult> {
+  "use server";
+
+  const supabase = createAdminClient();
+  const cleanSiteId = String(siteId ?? "").trim();
+  const cleanOrderedIds = Array.from(
+    new Set(
+      (orderedCollectionIds ?? [])
+        .map((collectionId) => String(collectionId ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (!cleanSiteId || cleanOrderedIds.length === 0) {
+    return { ok: false, error: "Orden de colecciones inválido." };
+  }
+
+  const { data: siteCollectionsRaw, error: collectionsError } = await supabase
+    .schema("pass")
+    .from("commercial_collections")
+    .select("id,site_id")
+    .eq("site_id", cleanSiteId);
+
+  if (collectionsError) {
+    return { ok: false, error: collectionsError.message };
+  }
+
+  const siteCollections = (siteCollectionsRaw ?? []) as {
+    id: string;
+    site_id: string;
+  }[];
+  const validIds = new Set(siteCollections.map((collection) => collection.id));
+
+  if (
+    cleanOrderedIds.length !== siteCollections.length ||
+    cleanOrderedIds.some((collectionId) => !validIds.has(collectionId))
+  ) {
+    return {
+      ok: false,
+      error: "La lista cambió o contiene una colección de otra sede. Recarga la página.",
+    };
+  }
+
+  const updates = await Promise.all(
+    cleanOrderedIds.map((collectionId, index) =>
+      supabase
+        .schema("pass")
+        .from("commercial_collections")
+        .update({ sort_order: index * 10 })
+        .eq("id", collectionId)
+        .eq("site_id", cleanSiteId),
+    ),
+  );
+
+  const failedUpdate = updates.find((result) => result.error);
+  if (failedUpdate?.error) {
+    return { ok: false, error: failedUpdate.error.message };
+  }
+
+  revalidatePath("/commercial-collections");
+  revalidatePath("/commercial-collections/overview");
+  revalidatePath("/menu");
+  return { ok: true };
 }
 
 async function deleteCollection(formData: FormData) {
   "use server";
 
   const supabase = createAdminClient();
-
   const id = asText(formData.get("id"));
   const returnCollectionId = asText(formData.get("return_collection_id"));
 
   if (!id) {
-    redirect(commercialCollectionsPath(null, "error", "Coleccion invalida."));
+    redirect(commercialCollectionsPath(null, "error", "Colección inválida."));
   }
 
-  const { data: collectionForRedirect, error: collectionForRedirectError } = await supabase
-    .schema("pass")
-    .from("commercial_collections")
-    .select("id,site_id")
-    .eq("id", id)
-    .maybeSingle();
+  const { data: collectionForRedirect, error: collectionForRedirectError } =
+    await supabase
+      .schema("pass")
+      .from("commercial_collections")
+      .select("id,site_id")
+      .eq("id", id)
+      .maybeSingle();
 
   const redirectSiteId = collectionForRedirect?.site_id ?? null;
   const safeReturnCollectionId = returnCollectionId === id ? id : "";
@@ -496,7 +610,8 @@ async function deleteCollection(formData: FormData) {
       commercialCollectionsPath(
         redirectSiteId,
         "error",
-        collectionForRedirectError?.message || "La coleccion no existe.", safeReturnCollectionId,
+        collectionForRedirectError?.message || "La colección no existe.",
+        safeReturnCollectionId,
       ),
     );
   }
@@ -513,7 +628,8 @@ async function deleteCollection(formData: FormData) {
         redirectSiteId,
         "error",
         relationsError.message ||
-        "No se pudo validar si la coleccion tiene items asignados.", safeReturnCollectionId,
+          "No se pudo validar si la colección tiene productos asignados.",
+        safeReturnCollectionId,
       ),
     );
   }
@@ -523,7 +639,8 @@ async function deleteCollection(formData: FormData) {
       commercialCollectionsPath(
         redirectSiteId,
         "error",
-        "No puedes eliminar una coleccion con items comerciales asignados. Desactivala o mueve esos productos primero.", safeReturnCollectionId,
+        "No puedes eliminar una colección con productos asignados. Desactívala o mueve esos productos primero.",
+        safeReturnCollectionId,
       ),
     );
   }
@@ -535,7 +652,14 @@ async function deleteCollection(formData: FormData) {
     .eq("collection_id", id);
 
   if (linksError) {
-    redirect(commercialCollectionsPath(redirectSiteId, "error", linksError.message, safeReturnCollectionId));
+    redirect(
+      commercialCollectionsPath(
+        redirectSiteId,
+        "error",
+        linksError.message,
+        safeReturnCollectionId,
+      ),
+    );
   }
 
   const { error } = await supabase
@@ -545,18 +669,31 @@ async function deleteCollection(formData: FormData) {
     .eq("id", id);
 
   if (error) {
-    redirect(commercialCollectionsPath(redirectSiteId, "error", error.message, safeReturnCollectionId));
+    redirect(
+      commercialCollectionsPath(
+        redirectSiteId,
+        "error",
+        error.message,
+        safeReturnCollectionId,
+      ),
+    );
   }
 
   revalidatePath("/commercial-collections");
+  revalidatePath("/commercial-collections/overview");
   revalidatePath("/menu");
-  redirect(commercialCollectionsPath(redirectSiteId, "ok", "Coleccion eliminada."));
+  redirect(commercialCollectionsPath(redirectSiteId, "ok", "Colección eliminada."));
 }
 
 export default async function CommercialCollectionsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ ok?: string; error?: string; site?: string; collection?: string }>;
+  searchParams?: Promise<{
+    ok?: string;
+    error?: string;
+    site?: string;
+    collection?: string;
+  }>;
 }) {
   const sp = (await searchParams) ?? {};
   const requestedSiteId = safeDecode(sp.site);
@@ -580,7 +717,6 @@ export default async function CommercialCollectionsPage({
     .order("sort_order", { ascending: true });
 
   const businesses = (businessesRaw ?? []) as BusinessRow[];
-
   const businessSiteIds = Array.from(
     new Set(
       businesses
@@ -597,41 +733,43 @@ export default async function CommercialCollectionsPage({
   ] =
     businessSiteIds.length > 0
       ? await Promise.all([
-        supabase
-          .from("sites")
-          .select("id,name,code,is_active,is_public")
-          .eq("is_active", true)
-          .in("id", businessSiteIds),
-        supabase
-          .schema("pass")
-          .from("commercial_collections")
-          .select("id,site_id,code,name,subtitle,description,kind,hero_image_url,starts_at,ends_at,sort_order,is_active")
-          .in("site_id", businessSiteIds)
-          .order("site_id", { ascending: true })
-          .order("sort_order", { ascending: true })
-          .order("name", { ascending: true }),
-        supabase
-          .schema("pass")
-          .from("commercial_categories")
-          .select("id,site_id,code,name,description,sort_order,is_active")
-          .in("site_id", businessSiteIds)
-          .eq("is_active", true)
-          .order("site_id", { ascending: true })
-          .order("sort_order", { ascending: true })
-          .order("name", { ascending: true }),
-        supabase
-          .schema("pass")
-          .from("commercial_collection_categories")
-          .select("id,collection_id,commercial_category_id,sort_order,is_active")
-          .eq("is_active", true)
-          .order("sort_order", { ascending: true }),
-      ])
+          supabase
+            .from("sites")
+            .select("id,name,code,is_active,is_public")
+            .eq("is_active", true)
+            .in("id", businessSiteIds),
+          supabase
+            .schema("pass")
+            .from("commercial_collections")
+            .select(
+              "id,site_id,code,name,subtitle,description,kind,hero_image_url,starts_at,ends_at,sort_order,is_active",
+            )
+            .in("site_id", businessSiteIds)
+            .order("site_id", { ascending: true })
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
+          supabase
+            .schema("pass")
+            .from("commercial_categories")
+            .select("id,site_id,code,name,description,sort_order,is_active")
+            .in("site_id", businessSiteIds)
+            .eq("is_active", true)
+            .order("site_id", { ascending: true })
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
+          supabase
+            .schema("pass")
+            .from("commercial_collection_categories")
+            .select("id,collection_id,commercial_category_id,sort_order,is_active")
+            .eq("is_active", true)
+            .order("sort_order", { ascending: true }),
+        ])
       : [
-        { data: [], error: null },
-        { data: [], error: null },
-        { data: [], error: null },
-        { data: [], error: null },
-      ];
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+        ];
 
   const siteOrderById = new Map(
     businessSiteIds.map((siteId, index) => [siteId, index]),
@@ -654,7 +792,9 @@ export default async function CommercialCollectionsPage({
 
   const collectionsBySite = new Map<string, CollectionRow[]>();
   for (const collection of collections) {
-    if (!collectionsBySite.has(collection.site_id)) collectionsBySite.set(collection.site_id, []);
+    if (!collectionsBySite.has(collection.site_id)) {
+      collectionsBySite.set(collection.site_id, []);
+    }
     collectionsBySite.get(collection.site_id)!.push(collection);
   }
 
@@ -663,19 +803,18 @@ export default async function CommercialCollectionsPage({
 
   for (const category of categories) {
     categoriesById.set(category.id, category);
-    if (!categoriesBySite.has(category.site_id)) categoriesBySite.set(category.site_id, []);
+    if (!categoriesBySite.has(category.site_id)) {
+      categoriesBySite.set(category.site_id, []);
+    }
     categoriesBySite.get(category.site_id)!.push(category);
   }
 
   const categoryLinksByCollection = new Map<string, CollectionCategoryRow[]>();
-
   for (const link of links) {
     if (link.is_active === false) continue;
-
     if (!categoryLinksByCollection.has(link.collection_id)) {
       categoryLinksByCollection.set(link.collection_id, []);
     }
-
     categoryLinksByCollection.get(link.collection_id)!.push(link);
   }
 
@@ -683,18 +822,27 @@ export default async function CommercialCollectionsPage({
     collectionLinks.sort((a, b) => {
       const aOrder = Number(a.sort_order ?? Number.MAX_SAFE_INTEGER);
       const bOrder = Number(b.sort_order ?? Number.MAX_SAFE_INTEGER);
-
       if (aOrder !== bOrder) return aOrder - bOrder;
       return a.commercial_category_id.localeCompare(b.commercial_category_id);
     });
   }
 
-  const selectedSiteCollections = selectedSiteId ? collectionsBySite.get(selectedSiteId) ?? [] : [];
-  const focusedCollection = selectedSiteCollections.find((collection) => collection.id === requestedCollectionId) ?? null;
+  const selectedSiteCollections = selectedSiteId
+    ? collectionsBySite.get(selectedSiteId) ?? []
+    : [];
+  const focusedCollection =
+    selectedSiteCollections.find(
+      (collection) => collection.id === requestedCollectionId,
+    ) ?? null;
   const isFocusedMode = Boolean(focusedCollection);
-  const visibleCollections = focusedCollection ? [focusedCollection] : selectedSiteCollections;
-  const hasInvalidFocusedCollection = Boolean(requestedCollectionId) && !focusedCollection;
-  const selectedSiteCategories = selectedSiteId ? categoriesBySite.get(selectedSiteId) ?? [] : [];
+  const visibleCollections = focusedCollection
+    ? [focusedCollection]
+    : selectedSiteCollections;
+  const hasInvalidFocusedCollection =
+    Boolean(requestedCollectionId) && !focusedCollection;
+  const selectedSiteCategories = selectedSiteId
+    ? categoriesBySite.get(selectedSiteId) ?? []
+    : [];
 
   const effectiveError =
     errorMsg ||
@@ -709,20 +857,28 @@ export default async function CommercialCollectionsPage({
     <div className="space-y-6">
       <PageHeader
         title="Colecciones comerciales"
-        subtitle="Agrupa productos publicados en Vento Pass por menu principal, temporadas, campanas o menus especiales."
+        subtitle="Agrupa productos publicados en Vento Pass por menú principal, temporadas, campañas o menús especiales."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link href={pathWithSite("/commercial-categories", selectedSiteId)} className="ui-btn ui-btn--ghost">
-              Categorias comerciales
+            <Link
+              href={pathWithSite("/commercial-categories", selectedSiteId)}
+              className="ui-btn ui-btn--ghost"
+            >
+              Categorías comerciales
             </Link>
-            <Link href={pathWithSite("/menu", selectedSiteId)} className="ui-btn ui-btn--ghost">
-              Volver al menu
+            <Link
+              href={pathWithSite("/menu", selectedSiteId)}
+              className="ui-btn ui-btn--ghost"
+            >
+              Volver al menú
             </Link>
           </div>
         }
       />
 
-      {effectiveError ? <div className="ui-alert ui-alert--error">{effectiveError}</div> : null}
+      {effectiveError ? (
+        <div className="ui-alert ui-alert--error">{effectiveError}</div>
+      ) : null}
       {okMsg ? <div className="ui-alert ui-alert--success">{okMsg}</div> : null}
 
       {sites.length > 0 ? (
@@ -731,21 +887,18 @@ export default async function CommercialCollectionsPage({
             <h2 className="ui-h3">Sede comercial</h2>
             <p className="ui-caption">Solo aparecen sedes habilitadas para venta.</p>
           </div>
-
           <div className="flex flex-wrap gap-2">
-            {sites.map((site) => {
-              const isSelected = site.id === selectedSiteId;
-
-              return (
-                <Link
-                  key={site.id}
-                  href={commercialCollectionsPath(site.id)}
-                  className={isSelected ? "ui-chip ui-chip--brand" : "ui-chip"}
-                >
-                  {siteLabel(site)}
-                </Link>
-              );
-            })}
+            {sites.map((site) => (
+              <Link
+                key={site.id}
+                href={commercialCollectionsPath(site.id)}
+                className={
+                  site.id === selectedSiteId ? "ui-chip ui-chip--brand" : "ui-chip"
+                }
+              >
+                {siteLabel(site)}
+              </Link>
+            ))}
           </div>
         </div>
       ) : null}
@@ -756,57 +909,95 @@ export default async function CommercialCollectionsPage({
         </div>
       ) : (
         <>
-          {!isFocusedMode ? <div className="ui-panel space-y-4">
-            <h2 className="ui-h3">Crear coleccion</h2>
-            <form action={saveCollection} className="grid gap-4 xl:grid-cols-[1fr_1fr_1fr_auto]">
-              <input type="hidden" name="site_id" value={selectedSiteId} />
-              <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
-                <div className="ui-label">Sede activa</div>
-                <div className="text-sm font-black text-[var(--ui-text)]">
-                  {siteLabel(selectedSite)}
+          {!isFocusedMode ? (
+            <div className="ui-panel space-y-4">
+              <h2 className="ui-h3">Crear colección</h2>
+              <form
+                action={saveCollection}
+                className="grid gap-4 xl:grid-cols-[1fr_1fr_1fr_auto]"
+              >
+                <input type="hidden" name="site_id" value={selectedSiteId} />
+                <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
+                  <div className="ui-label">Sede activa</div>
+                  <div className="text-sm font-black text-[var(--ui-text)]">
+                    {siteLabel(selectedSite)}
+                  </div>
                 </div>
-              </div>
 
-              <label className="space-y-2">
-                <span className="ui-label">Tipo</span>
-                <select name="kind" className="ui-input" defaultValue="seasonal">
-                  <option value="main">Menu principal</option>
-                  <option value="seasonal">Temporada</option>
-                  <option value="special">Menu especial</option>
-                  <option value="campaign">Campana</option>
-                  <option value="event">Evento</option>
-                </select>
-              </label>
+                <label className="space-y-2">
+                  <span className="ui-label">Tipo</span>
+                  <select name="kind" className="ui-input" defaultValue="seasonal">
+                    <option value="main">Menú principal</option>
+                    <option value="seasonal">Temporada</option>
+                    <option value="special">Menú especial</option>
+                    <option value="campaign">Campaña</option>
+                    <option value="event">Evento</option>
+                  </select>
+                </label>
 
-              <label className="space-y-2">
-                <span className="ui-label">Nombre</span>
-                <input name="name" className="ui-input" placeholder="Menu especial de mayo" required />
-              </label>
+                <label className="space-y-2">
+                  <span className="ui-label">Nombre</span>
+                  <input
+                    name="name"
+                    className="ui-input"
+                    placeholder="Menú especial de mayo"
+                    required
+                  />
+                </label>
 
-              <div className="flex items-end">
-                <input type="hidden" name="is_active" value="on" />
-                <button type="submit" className="ui-btn ui-btn--brand w-full">
-                  Crear
-                </button>
-              </div>
+                <div className="flex items-end">
+                  <input type="hidden" name="is_active" value="on" />
+                  <button type="submit" className="ui-btn ui-btn--brand w-full">
+                    Crear
+                  </button>
+                </div>
 
-              <label className="space-y-2 xl:col-span-2">
-                <span className="ui-label">Subtitulo</span>
-                <input name="subtitle" className="ui-input" placeholder="Coleccion Madres 2026" />
-              </label>
+                <label className="space-y-2 xl:col-span-2">
+                  <span className="ui-label">Subtítulo</span>
+                  <input
+                    name="subtitle"
+                    className="ui-input"
+                    placeholder="Colección Madres 2026"
+                  />
+                </label>
 
-              <CommercialCollectionHeroField ownerId={`new-${selectedSiteId}`} initialUrl="" className="xl:col-span-2" />
-            </form>
-          </div> : null}
+                <CommercialCollectionHeroField
+                  ownerId={`new-${selectedSiteId}`}
+                  initialUrl=""
+                  className="xl:col-span-2"
+                />
+              </form>
+            </div>
+          ) : null}
 
           {hasInvalidFocusedCollection ? (
-            <div className="ui-alert ui-alert--error">La colección solicitada no existe o no pertenece a esta sede.</div>
+            <div className="ui-alert ui-alert--error">
+              La colección solicitada no existe o no pertenece a esta sede.
+            </div>
           ) : null}
 
           {isFocusedMode ? (
             <div className="ui-panel flex flex-wrap items-center justify-between gap-3">
-              <div><div className="ui-caption">Editando una colección</div><div className="text-lg font-black text-[var(--ui-text)]">{focusedCollection?.name}</div></div>
-              <div className="flex gap-2"><Link href={`/commercial-collections/overview?site=${encodeURIComponent(selectedSiteId)}`} className="ui-btn ui-btn--ghost">Volver a menús y temporadas</Link><Link href={commercialCollectionsPath(selectedSiteId)} className="ui-btn ui-btn--ghost">Ver todas</Link></div>
+              <div>
+                <div className="ui-caption">Editando una colección</div>
+                <div className="text-lg font-black text-[var(--ui-text)]">
+                  {focusedCollection?.name}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Link
+                  href={`/commercial-collections/overview?site=${encodeURIComponent(selectedSiteId)}`}
+                  className="ui-btn ui-btn--ghost"
+                >
+                  Volver a menús y temporadas
+                </Link>
+                <Link
+                  href={commercialCollectionsPath(selectedSiteId)}
+                  className="ui-btn ui-btn--ghost"
+                >
+                  Ver todas
+                </Link>
+              </div>
             </div>
           ) : null}
 
@@ -819,13 +1010,29 @@ export default async function CommercialCollectionsPage({
               <h2 className="text-lg font-semibold text-[var(--ui-text)]">
                 {siteLabel(selectedSite)}
                 <span className="ml-2 text-sm font-normal text-[var(--ui-muted)]">
-                  ({visibleCollections.length} visibles de {selectedSiteCollections.length} {selectedSiteCollections.length === 1 ? "coleccion" : "colecciones"})
+                  ({visibleCollections.length} visibles de {selectedSiteCollections.length}{" "}
+                  {selectedSiteCollections.length === 1 ? "colección" : "colecciones"})
                 </span>
               </h2>
 
+              {!isFocusedMode && selectedSiteCollections.length > 0 ? (
+                <CommercialCollectionOrderEditor
+                  siteId={selectedSite.id}
+                  items={selectedSiteCollections.map((collection) => ({
+                    id: collection.id,
+                    name: collection.name,
+                    subtitle: collection.subtitle,
+                    kind: collection.kind,
+                    isActive: collection.is_active !== false,
+                  }))}
+                  saveOrderAction={saveCollectionOrder}
+                />
+              ) : null}
+
               {selectedSiteCategories.length === 0 ? (
                 <div className="ui-alert ui-alert--warning">
-                  Esta sede todavia no tiene categorias comerciales activas. Crea categorias antes de asignar secciones a una coleccion.
+                  Esta sede todavía no tiene categorías comerciales activas. Crea
+                  categorías antes de asignarlas a una colección.
                 </div>
               ) : null}
 
@@ -834,9 +1041,12 @@ export default async function CommercialCollectionsPage({
               ) : (
                 <div className="grid gap-4">
                   {visibleCollections.map((collection) => {
-                    const assignedCategoryLinks = categoryLinksByCollection.get(collection.id) ?? [];
+                    const assignedCategoryLinks =
+                      categoryLinksByCollection.get(collection.id) ?? [];
                     const assignedCategoryIds = new Set(
-                      assignedCategoryLinks.map((link) => link.commercial_category_id),
+                      assignedCategoryLinks.map(
+                        (link) => link.commercial_category_id,
+                      ),
                     );
                     const assignedCategories = assignedCategoryLinks
                       .map((link) => ({
@@ -844,8 +1054,12 @@ export default async function CommercialCollectionsPage({
                         category: categoriesById.get(link.commercial_category_id),
                       }))
                       .filter(
-                        (entry): entry is { link: CollectionCategoryRow; category: CategoryRow } =>
-                          Boolean(entry.category),
+                        (
+                          entry,
+                        ): entry is {
+                          link: CollectionCategoryRow;
+                          category: CategoryRow;
+                        } => Boolean(entry.category),
                       );
 
                     return (
@@ -861,8 +1075,16 @@ export default async function CommercialCollectionsPage({
                               className="grid gap-3 md:grid-cols-2"
                             >
                               <input type="hidden" name="id" value={collection.id} />
-                              <input type="hidden" name="site_id" value={collection.site_id} />
-                              <input type="hidden" name="return_collection_id" value={isFocusedMode ? collection.id : ""} />
+                              <input
+                                type="hidden"
+                                name="site_id"
+                                value={collection.site_id}
+                              />
+                              <input
+                                type="hidden"
+                                name="return_collection_id"
+                                value={isFocusedMode ? collection.id : ""}
+                              />
 
                               <label className="space-y-1">
                                 <span className="ui-label">Nombre</span>
@@ -894,7 +1116,11 @@ export default async function CommercialCollectionsPage({
                                 />
                               </label>
 
-                              <CommercialCollectionHeroField initialUrl={collection.hero_image_url} ownerId={collection.id} className="md:col-span-2" />
+                              <CommercialCollectionHeroField
+                                initialUrl={collection.hero_image_url}
+                                ownerId={collection.id}
+                                className="md:col-span-2"
+                              />
                             </form>
 
                             <details className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
@@ -902,21 +1128,39 @@ export default async function CommercialCollectionsPage({
                                 Categorías de esta colección
                               </summary>
 
-                              <form action={saveCollectionCategories} className="mt-3 space-y-3">
-                                <input type="hidden" name="collection_id" value={collection.id} />
-                                <input type="hidden" name="return_collection_id" value={isFocusedMode ? collection.id : ""} />
+                              <form
+                                action={saveCollectionCategories}
+                                className="mt-3 space-y-3"
+                              >
+                                <input
+                                  type="hidden"
+                                  name="collection_id"
+                                  value={collection.id}
+                                />
+                                <input
+                                  type="hidden"
+                                  name="return_collection_id"
+                                  value={isFocusedMode ? collection.id : ""}
+                                />
 
                                 {selectedSiteCategories.length === 0 ? (
-                                  <div className="ui-empty">No hay categorías disponibles para esta sede.</div>
+                                  <div className="ui-empty">
+                                    No hay categorías disponibles para esta sede.
+                                  </div>
                                 ) : (
                                   <div className="grid max-h-56 gap-2 overflow-auto pr-2 sm:grid-cols-2 xl:grid-cols-3">
                                     {selectedSiteCategories.map((category) => (
-                                      <label key={category.id} className="flex items-center gap-2 text-sm">
+                                      <label
+                                        key={category.id}
+                                        className="flex items-center gap-2 text-sm"
+                                      >
                                         <input
                                           type="checkbox"
                                           name="category_ids"
                                           value={category.id}
-                                          defaultChecked={assignedCategoryIds.has(category.id)}
+                                          defaultChecked={assignedCategoryIds.has(
+                                            category.id,
+                                          )}
                                         />
                                         {category.name}
                                       </label>
@@ -927,11 +1171,16 @@ export default async function CommercialCollectionsPage({
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="min-w-0 text-xs text-[var(--ui-muted)]">
                                     {assignedCategories.length > 0
-                                      ? assignedCategories.map(({ category }) => category.name).join(" · ")
-                                      : "Sin secciones asignadas"}
+                                      ? assignedCategories
+                                          .map(({ category }) => category.name)
+                                          .join(" · ")
+                                      : "Sin categorías asignadas"}
                                   </div>
 
-                                  <button type="submit" className="ui-btn ui-btn--ghost ui-btn--sm">
+                                  <button
+                                    type="submit"
+                                    className="ui-btn ui-btn--ghost ui-btn--sm"
+                                  >
                                     Guardar categorías
                                   </button>
                                 </div>
@@ -978,7 +1227,9 @@ export default async function CommercialCollectionsPage({
                                   type="datetime-local"
                                   name="starts_at"
                                   className="ui-input h-10"
-                                  defaultValue={toDateTimeLocalValue(collection.starts_at)}
+                                  defaultValue={toDateTimeLocalValue(
+                                    collection.starts_at,
+                                  )}
                                 />
                               </label>
 
@@ -989,7 +1240,9 @@ export default async function CommercialCollectionsPage({
                                   type="datetime-local"
                                   name="ends_at"
                                   className="ui-input h-10"
-                                  defaultValue={toDateTimeLocalValue(collection.ends_at)}
+                                  defaultValue={toDateTimeLocalValue(
+                                    collection.ends_at,
+                                  )}
                                 />
                               </label>
 
@@ -1013,9 +1266,20 @@ export default async function CommercialCollectionsPage({
                                 </button>
 
                                 <form action={deleteCollection}>
-                                  <input type="hidden" name="id" value={collection.id} />
-                                  <input type="hidden" name="return_collection_id" value={isFocusedMode ? collection.id : ""} />
-                                  <button type="submit" className="ui-btn ui-btn--danger ui-btn--sm">
+                                  <input
+                                    type="hidden"
+                                    name="id"
+                                    value={collection.id}
+                                  />
+                                  <input
+                                    type="hidden"
+                                    name="return_collection_id"
+                                    value={isFocusedMode ? collection.id : ""}
+                                  />
+                                  <button
+                                    type="submit"
+                                    className="ui-btn ui-btn--danger ui-btn--sm"
+                                  >
                                     Eliminar
                                   </button>
                                 </form>
