@@ -7,7 +7,6 @@ import { notifyShiftChange } from "@/lib/anima/shift-notify";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 import {
-  asNumber,
   asText,
   cleanOptionalText,
   endOfMonth,
@@ -20,6 +19,22 @@ import {
   type SiteOperationalRoleRow,
 } from "../helpers";
 import { MONTHLY_SCHEDULE_LIMIT_MINUTES } from "./constants";
+
+const MAX_MONTHLY_SHIFT_BLOCKS = 12;
+
+type MonthlyShiftBlockInput = {
+  roleContext: string;
+  startTime: string;
+  endTime: string;
+  notes: string;
+  dates: string[];
+};
+
+type ResolvedMonthlyShiftBlock = MonthlyShiftBlockInput & {
+  matrixRow: SiteOperationalRoleRow;
+  checkinSiteId: string | null;
+  checkoutSiteId: string | null;
+};
 
 function parseMonth(value: string) {
   const match = /^(\d{4})-(\d{2})$/.exec(value);
@@ -52,6 +67,85 @@ function normalizeRoleContext(value: string) {
     roleCode: roleCode.trim(),
     areaId: cleanOptionalText(areaId),
   };
+}
+
+function readJsonString(value: unknown, maxLength = 500) {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function parseMonthlyShiftBlocks(value: string) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return { blocks: [] as MonthlyShiftBlockInput[], error: "La configuración de horarios no es válida." };
+  }
+
+  if (!Array.isArray(parsed)) {
+    return { blocks: [] as MonthlyShiftBlockInput[], error: "La configuración de horarios no es válida." };
+  }
+  if (parsed.length > MAX_MONTHLY_SHIFT_BLOCKS) {
+    return {
+      blocks: [] as MonthlyShiftBlockInput[],
+      error: `Solo se permiten hasta ${MAX_MONTHLY_SHIFT_BLOCKS} horarios por operación.`,
+    };
+  }
+
+  const blocks = parsed
+    .map((raw): MonthlyShiftBlockInput | null => {
+      if (!raw || typeof raw !== "object") return null;
+      const record = raw as Record<string, unknown>;
+      const dates = Array.isArray(record.dates)
+        ? [
+            ...new Set(
+              record.dates
+                .map((date) => readJsonString(date, 10))
+                .filter(Boolean),
+            ),
+          ].sort()
+        : [];
+
+      return {
+        roleContext: readJsonString(record.roleContext, 200),
+        startTime: readJsonString(record.startTime, 5),
+        endTime: readJsonString(record.endTime, 5),
+        notes: readJsonString(record.notes, 240),
+        dates,
+      };
+    })
+    .filter((block): block is MonthlyShiftBlockInput => Boolean(block))
+    .filter((block) => block.dates.length > 0);
+
+  return { blocks, error: "" };
+}
+
+function isValidTime(value: string) {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return false;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+}
+
+function resolveMatrixRow(
+  rows: Array<SiteOperationalRoleRow & { is_active?: boolean | null }>,
+  roleContextValue: string,
+) {
+  const roleContext = normalizeRoleContext(roleContextValue);
+  let selected = rows.find(
+    (row) =>
+      row.role_code === roleContext.roleCode &&
+      cleanOptionalText(row.area_id) === roleContext.areaId,
+  );
+
+  if (!selected && roleContext.roleCode) {
+    const roleRows = rows.filter((row) => row.role_code === roleContext.roleCode);
+    selected =
+      roleRows.find((row) => row.is_default) ??
+      (roleRows.length === 1 ? roleRows[0] : undefined);
+  }
+
+  return selected ?? null;
 }
 
 async function validateEmployeeSiteLink(
@@ -98,117 +192,159 @@ export async function createMonthlyShiftsAction(formData: FormData) {
   const employeeId = asText(formData.get("employee_id"));
   const siteId = asText(formData.get("site_id"));
   const month = asText(formData.get("month"));
-  const startTime = asText(formData.get("start_time"));
-  const endTime = asText(formData.get("end_time"));
-  const breakMinutes = Math.max(0, asNumber(formData.get("break_minutes"), 0));
-  const notes = asText(formData.get("notes"));
-  const roleContext = normalizeRoleContext(asText(formData.get("role_context")));
-  const selectedDates = [
-    ...new Set(
-      formData
-        .getAll("shift_dates")
-        .map((value) => asText(value))
-        .filter(Boolean),
-    ),
-  ].sort();
   const returnTo =
     asText(formData.get("return_to")) || buildMonthReturnTo(siteId, month);
+  const parsedBlocks = parseMonthlyShiftBlocks(asText(formData.get("blocks_json")));
 
   await requireStaffScheduleAccess(returnTo, siteId);
 
   const monthDate = parseMonth(month);
-  if (
-    !employeeId ||
-    !siteId ||
-    !monthDate ||
-    !startTime ||
-    !endTime ||
-    selectedDates.length === 0
-  ) {
-    redirectWithMessage(
-      returnTo,
-      "error",
-      "Completa trabajador, horario y al menos un día del mes.",
-    );
+  if (!employeeId || !siteId || !monthDate) {
+    redirectWithMessage(returnTo, "error", "Trabajador, sede o mes inválidos.");
   }
-
-  if (endTime <= startTime) {
+  if (parsedBlocks.error) {
+    redirectWithMessage(returnTo, "error", parsedBlocks.error);
+  }
+  if (parsedBlocks.blocks.length === 0) {
     redirectWithMessage(
       returnTo,
       "error",
-      "La hora de fin debe ser posterior a la hora de inicio.",
+      "Configura al menos un horario con uno o más días seleccionados.",
     );
   }
 
   const monthStartIso = isoDate(startOfMonth(monthDate));
   const monthEndIso = isoDate(endOfMonth(monthDate));
-  const invalidDate = selectedDates.find(
-    (date) =>
-      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-      date < monthStartIso ||
-      date > monthEndIso,
-  );
-  if (invalidDate) {
-    redirectWithMessage(
-      returnTo,
-      "error",
-      "Todos los días seleccionados deben pertenecer al mes visible.",
-    );
-  }
+  const dateOwner = new Map<string, number>();
 
-  const grossMinutes = getShiftMinutes({
-    start_time: startTime,
-    end_time: endTime,
-    break_minutes: breakMinutes,
-    shift_kind: "laboral",
-  });
-  if (grossMinutes <= 0) {
-    redirectWithMessage(
-      returnTo,
-      "error",
-      "El descanso no puede consumir toda la duración del turno.",
-    );
+  for (const [index, block] of parsedBlocks.blocks.entries()) {
+    if (!block.roleContext || !isValidTime(block.startTime) || !isValidTime(block.endTime)) {
+      redirectWithMessage(
+        returnTo,
+        "error",
+        `Completa el área, rol y horario del bloque ${index + 1}.`,
+      );
+    }
+    if (block.endTime <= block.startTime) {
+      redirectWithMessage(
+        returnTo,
+        "error",
+        `La hora de fin del bloque ${index + 1} debe ser posterior a la hora de inicio.`,
+      );
+    }
+
+    const minutes = getShiftMinutes({
+      start_time: block.startTime,
+      end_time: block.endTime,
+      break_minutes: 0,
+      shift_kind: "laboral",
+    });
+    if (minutes <= 0) {
+      redirectWithMessage(returnTo, "error", `El bloque ${index + 1} no tiene una duración válida.`);
+    }
+
+    for (const date of block.dates) {
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        date < monthStartIso ||
+        date > monthEndIso
+      ) {
+        redirectWithMessage(
+          returnTo,
+          "error",
+          "Todos los días seleccionados deben pertenecer al mes visible.",
+        );
+      }
+      const previousBlock = dateOwner.get(date);
+      if (previousBlock !== undefined) {
+        redirectWithMessage(
+          returnTo,
+          "error",
+          `El día ${Number(date.slice(-2))} aparece en los bloques ${previousBlock + 1} y ${index + 1}. Cada día puede pertenecer a un solo horario en esta modalidad.`,
+        );
+      }
+      dateOwner.set(date, index);
+    }
   }
 
   const employee = await validateEmployeeSiteLink(employeeId, siteId, returnTo);
   const supabase = createAdminClient();
 
-  const { data: matrixRows, error: matrixError } = await supabase
-    .from("vento_site_operational_role_matrix_v1")
-    .select(
-      "site_id,area_id,area_name,area_kind,role_code,role_label,role_family,is_default,requires_external_checkin,requires_external_checkout,is_active",
-    )
-    .eq("site_id", siteId)
-    .eq("is_active", true);
+  const [{ data: matrixRows, error: matrixError }, { data: profileRows, error: profileError }] =
+    await Promise.all([
+      supabase
+        .from("vento_site_operational_role_matrix_v1")
+        .select(
+          "site_id,area_id,area_name,area_kind,role_code,role_label,role_family,is_default,requires_external_checkin,requires_external_checkout,is_active",
+        )
+        .eq("site_id", siteId)
+        .eq("is_active", true),
+      supabase
+        .from("employee_site_operational_profiles")
+        .select(
+          "default_checkin_site_id,default_checkout_site_id,default_operational_role,is_active",
+        )
+        .eq("employee_id", employeeId)
+        .eq("site_id", siteId)
+        .neq("is_active", false),
+    ]);
 
   if (matrixError) redirectWithMessage(returnTo, "error", matrixError.message);
+  if (profileError) redirectWithMessage(returnTo, "error", profileError.message);
 
   const activeRows = (matrixRows ?? []) as Array<SiteOperationalRoleRow & {
     is_active?: boolean | null;
   }>;
-  let selectedMatrixRow = activeRows.find(
-    (row) =>
-      row.role_code === roleContext.roleCode &&
-      cleanOptionalText(row.area_id) === roleContext.areaId,
+  const profiles = (profileRows ?? []) as Array<{
+    default_checkin_site_id?: string | null;
+    default_checkout_site_id?: string | null;
+    default_operational_role?: string | null;
+    is_active?: boolean | null;
+  }>;
+
+  const resolvedBlocks: ResolvedMonthlyShiftBlock[] = parsedBlocks.blocks.map(
+    (block, index) => {
+      const matrixRow = resolveMatrixRow(activeRows, block.roleContext);
+      if (!matrixRow) {
+        redirectWithMessage(
+          returnTo,
+          "error",
+          `Selecciona un área y rol operativo válidos en el bloque ${index + 1}.`,
+        );
+      }
+
+      const profile = profiles.find(
+        (candidate) =>
+          cleanOptionalText(candidate.default_operational_role) === matrixRow.role_code,
+      );
+      const checkinSiteId = cleanOptionalText(profile?.default_checkin_site_id);
+      const checkoutSiteId = cleanOptionalText(profile?.default_checkout_site_id);
+
+      if (matrixRow.requires_external_checkin && !checkinSiteId) {
+        redirectWithMessage(
+          returnTo,
+          "error",
+          `El rol del bloque ${index + 1} exige un punto externo de entrada y el trabajador no lo tiene configurado.`,
+        );
+      }
+      if (matrixRow.requires_external_checkout && !checkoutSiteId) {
+        redirectWithMessage(
+          returnTo,
+          "error",
+          `El rol del bloque ${index + 1} exige un punto externo de salida y el trabajador no lo tiene configurado.`,
+        );
+      }
+
+      return {
+        ...block,
+        matrixRow,
+        checkinSiteId,
+        checkoutSiteId,
+      };
+    },
   );
 
-  if (!selectedMatrixRow && roleContext.roleCode) {
-    const roleRows = activeRows.filter(
-      (row) => row.role_code === roleContext.roleCode,
-    );
-    selectedMatrixRow =
-      roleRows.find((row) => row.is_default) ??
-      (roleRows.length === 1 ? roleRows[0] : undefined);
-  }
-
-  if (!selectedMatrixRow) {
-    redirectWithMessage(
-      returnTo,
-      "error",
-      "Selecciona un rol operativo válido para la sede y el área.",
-    );
-  }
-
+  const selectedDates = [...dateOwner.keys()].sort();
   const { data: existingRows, error: existingError } = await supabase
     .from("employee_shifts")
     .select(
@@ -220,64 +356,49 @@ export async function createMonthlyShiftsAction(formData: FormData) {
 
   if (existingError) redirectWithMessage(returnTo, "error", existingError.message);
 
-  const conflict = ((existingRows ?? []) as ShiftRow[]).find((shift) => {
-    if (shift.shift_kind === "descanso") return true;
-    return startTime < shift.end_time && shift.start_time < endTime;
-  });
-  if (conflict) {
-    redirectWithMessage(
-      returnTo,
-      "error",
-      `Ya existe un turno o descanso que se cruza el ${conflict.shift_date} (${conflict.start_time.slice(0, 5)}–${conflict.end_time.slice(0, 5)}).`,
-    );
+  const existingByDate = new Map<string, ShiftRow[]>();
+  for (const shift of (existingRows ?? []) as ShiftRow[]) {
+    const rows = existingByDate.get(shift.shift_date) ?? [];
+    rows.push(shift);
+    existingByDate.set(shift.shift_date, rows);
   }
 
-  const { data: profile } = await supabase
-    .from("employee_site_operational_profiles")
-    .select(
-      "default_checkin_site_id,default_checkout_site_id,default_operational_role,is_active",
-    )
-    .eq("employee_id", employeeId)
-    .eq("site_id", siteId)
-    .eq("default_operational_role", selectedMatrixRow.role_code)
-    .neq("is_active", false)
-    .maybeSingle();
-
-  const checkinSiteId = cleanOptionalText(profile?.default_checkin_site_id);
-  const checkoutSiteId = cleanOptionalText(profile?.default_checkout_site_id);
-  if (selectedMatrixRow.requires_external_checkin && !checkinSiteId) {
-    redirectWithMessage(
-      returnTo,
-      "error",
-      "El rol exige un punto externo de entrada y el trabajador no lo tiene configurado.",
-    );
-  }
-  if (selectedMatrixRow.requires_external_checkout && !checkoutSiteId) {
-    redirectWithMessage(
-      returnTo,
-      "error",
-      "El rol exige un punto externo de salida y el trabajador no lo tiene configurado.",
-    );
+  for (const block of resolvedBlocks) {
+    for (const shiftDate of block.dates) {
+      const conflict = (existingByDate.get(shiftDate) ?? []).find((shift) => {
+        if (shift.shift_kind === "descanso") return true;
+        return block.startTime < shift.end_time && shift.start_time < block.endTime;
+      });
+      if (conflict) {
+        redirectWithMessage(
+          returnTo,
+          "error",
+          `Ya existe un turno o descanso que se cruza el ${conflict.shift_date} (${conflict.start_time.slice(0, 5)}–${conflict.end_time.slice(0, 5)}).`,
+        );
+      }
+    }
   }
 
-  const payload = selectedDates.map((shiftDate) => ({
-    employee_id: employeeId,
-    site_id: siteId,
-    area_id: selectedMatrixRow?.area_id ?? null,
-    shift_date: shiftDate,
-    start_time: startTime,
-    end_time: endTime,
-    shift_kind: "laboral",
-    operational_role: selectedMatrixRow?.role_code ?? null,
-    show_end_as_close: false,
-    break_minutes: breakMinutes,
-    status: "scheduled",
-    notes: notes || null,
-    checkin_site_id: checkinSiteId,
-    checkout_site_id: checkoutSiteId,
-    published_at: null,
-    published_by: null,
-  }));
+  const payload = resolvedBlocks.flatMap((block) =>
+    block.dates.map((shiftDate) => ({
+      employee_id: employeeId,
+      site_id: siteId,
+      area_id: block.matrixRow.area_id ?? null,
+      shift_date: shiftDate,
+      start_time: block.startTime,
+      end_time: block.endTime,
+      shift_kind: "laboral",
+      operational_role: block.matrixRow.role_code ?? null,
+      show_end_as_close: false,
+      break_minutes: 0,
+      status: "scheduled",
+      notes: block.notes || null,
+      checkin_site_id: block.checkinSiteId,
+      checkout_site_id: block.checkoutSiteId,
+      published_at: null,
+      published_by: null,
+    })),
+  );
 
   const { error: insertError } = await supabase
     .from("employee_shifts")
@@ -307,19 +428,20 @@ export async function createMonthlyShiftsAction(formData: FormData) {
 
   const employeeName =
     employee.full_name ?? employee.alias ?? "El trabajador seleccionado";
+  const blockCount = resolvedBlocks.length;
   if (projectedMinutes > MONTHLY_SCHEDULE_LIMIT_MINUTES) {
     const excessMinutes = projectedMinutes - MONTHLY_SCHEDULE_LIMIT_MINUTES;
     redirectWithMessage(
       returnTo,
       "warning",
-      `${employeeName} quedó con ${(projectedMinutes / 60).toFixed(1).replace(".", ",")} h. Excede el límite mensual por ${(excessMinutes / 60).toFixed(1).replace(".", ",")} h. Los turnos permanecen en borrador y no podrán publicarse hasta corregirlos.`,
+      `${payload.length} turnos de ${blockCount} ${blockCount === 1 ? "horario" : "horarios"} quedaron en borrador. ${employeeName} suma ${(projectedMinutes / 60).toFixed(1).replace(".", ",")} h y excede el límite mensual por ${(excessMinutes / 60).toFixed(1).replace(".", ",")} h. No podrá publicarse hasta corregirlo.`,
     );
   }
 
   redirectWithMessage(
     returnTo,
     "ok",
-    `${payload.length} ${payload.length === 1 ? "turno guardado" : "turnos guardados"} en borrador. Total proyectado: ${(projectedMinutes / 60).toFixed(1).replace(".", ",")} h de 186 h.`,
+    `${payload.length} ${payload.length === 1 ? "turno guardado" : "turnos guardados"} en ${blockCount} ${blockCount === 1 ? "horario" : "horarios"}. Total proyectado: ${(projectedMinutes / 60).toFixed(1).replace(".", ",")} h de 186 h.`,
   );
 }
 

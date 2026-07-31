@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Script from "next/script";
 
+import { MonthlyShiftBuilder } from "@/components/viso/monthly-shift-builder";
 import { PageHeader } from "@/components/vento/standard/page-header";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -26,7 +27,6 @@ import {
   type SiteRow,
 } from "../helpers";
 import {
-  createMonthlyShiftsAction,
   deleteMonthlyDraftShiftAction,
   deleteMonthlyDraftsAction,
   publishMonthAction,
@@ -295,12 +295,11 @@ export default async function StaffScheduleMonthPage({
     const baseCandidate = getOperationalRoleCandidateFromBaseRole(employee.role);
     const candidate = profileRole ?? cleanOptionalText(baseCandidate);
     const matching = roleOptions.filter((option) => option.roleCode === candidate);
-    return (
-      matching.find((option) => option.isDefault)?.value ??
-      (matching.length === 1 ? matching[0]?.value : "") ??
-      (roleOptions.length === 1 ? roleOptions[0]?.value : "") ??
-      ""
-    );
+    const directOption =
+      matching.find((option) => option.isDefault) ??
+      (matching.length === 1 ? matching[0] : null);
+    if (directOption) return directOption.value;
+    return roleOptions.length === 1 ? roleOptions[0]?.value ?? "" : "";
   };
 
   const requestedEmployeeId = safeDecode(sp.employee_id);
@@ -501,245 +500,32 @@ export default async function StaffScheduleMonthPage({
       </div>
 
       {formOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-3 py-6 backdrop-blur-[1px] sm:px-6"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-6xl rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4 shadow-2xl sm:p-5">
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="ui-h3">Crear múltiples turnos del mes</div>
-                <p className="mt-1 text-sm text-[var(--ui-muted)]">
-                  Selecciona una persona, el horario y todos los días que compartirán ese turno.
-                </p>
-              </div>
-              <Link href={closeFormHref} className="ui-btn ui-btn--ghost ui-btn--sm">
-                Cerrar
-              </Link>
-            </div>
-
-            <form
-              action={createMonthlyShiftsAction}
-              className="grid gap-4 xl:grid-cols-12"
-              data-monthly-shift-form
-              data-limit-minutes={MONTHLY_SCHEDULE_LIMIT_MINUTES}
-              data-warning-minutes={MONTHLY_SCHEDULE_WARNING_MINUTES}
-            >
-              <input type="hidden" name="site_id" value={selectedSiteId} />
-              <input type="hidden" name="month" value={selectedMonthKey} />
-              <input type="hidden" name="return_to" value={returnTo} />
-
-              <label className="flex flex-col gap-1 xl:col-span-4">
-                <span className="ui-label">Trabajador</span>
-                <select
-                  name="employee_id"
-                  className="ui-input"
-                  defaultValue={defaultEmployeeId}
-                  required
-                  data-monthly-employee
-                >
-                  {employees.map((employee) => {
-                    const total = totalsByEmployee.get(employee.id)?.total ?? 0;
-                    return (
-                      <option
-                        key={employee.id}
-                        value={employee.id}
-                        data-current-minutes={total}
-                        data-default-role={getDefaultRoleContext(employee)}
-                      >
-                        {employee.full_name ?? employee.alias ?? employee.id} · {formatHours(total)}
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
-
-              <label className="flex flex-col gap-1 xl:col-span-4">
-                <span className="ui-label">Área y rol operativo</span>
-                <select
-                  name="role_context"
-                  className="ui-input"
-                  defaultValue={
-                    employees.find((employee) => employee.id === defaultEmployeeId)
-                      ? getDefaultRoleContext(
-                          employees.find(
-                            (employee) => employee.id === defaultEmployeeId,
-                          ) as EmployeeRow,
-                        )
-                      : ""
-                  }
-                  required
-                  data-monthly-role
-                >
-                  <option value="" disabled>
-                    Seleccionar
-                  </option>
-                  {roleOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="flex flex-col gap-1 xl:col-span-2">
-                <span className="ui-label">Inicio</span>
-                <input
-                  type="time"
-                  name="start_time"
-                  className="ui-input"
-                  defaultValue="06:00"
-                  step={1800}
-                  required
-                  data-monthly-start
-                />
-              </label>
-
-              <label className="flex flex-col gap-1 xl:col-span-2">
-                <span className="ui-label">Fin</span>
-                <input
-                  type="time"
-                  name="end_time"
-                  className="ui-input"
-                  defaultValue="14:00"
-                  step={1800}
-                  required
-                  data-monthly-end
-                />
-              </label>
-
-              <label className="flex flex-col gap-1 xl:col-span-3">
-                <span className="ui-label">Descanso descontado</span>
-                <select
-                  name="break_minutes"
-                  className="ui-input"
-                  defaultValue="0"
-                  data-monthly-break
-                >
-                  <option value="0">Sin descuento</option>
-                  <option value="30">30 minutos</option>
-                  <option value="60">1 hora</option>
-                  <option value="90">1 hora 30 minutos</option>
-                </select>
-              </label>
-
-              <label className="flex flex-col gap-1 xl:col-span-9">
-                <span className="ui-label">Nota opcional</span>
-                <input
-                  name="notes"
-                  className="ui-input"
-                  maxLength={240}
-                  placeholder="Ej. Caja, apertura, apoyo de barra"
-                />
-              </label>
-
-              <div className="xl:col-span-12 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-[var(--ui-text)]">
-                      Días del mes
-                    </div>
-                    <div className="text-xs text-[var(--ui-muted)]">
-                      Se creará un turno independiente por cada fecha marcada.
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn--ghost ui-btn--sm"
-                      data-select-month-days="weekdays"
-                    >
-                      Lunes a viernes
-                    </button>
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn--ghost ui-btn--sm"
-                      data-select-month-days="all"
-                    >
-                      Todo el mes
-                    </button>
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn--ghost ui-btn--sm"
-                      data-select-month-days="clear"
-                    >
-                      Limpiar
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-7 lg:grid-cols-10 xl:grid-cols-12">
-                  {monthDays.map((day) => (
-                    <label
-                      key={day.iso}
-                      className={`flex cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-2 text-sm transition hover:bg-[var(--ui-surface)] ${day.isWeekend ? "border-amber-200 bg-amber-50/60" : "border-[var(--ui-border)] bg-[var(--ui-surface)]"}`}
-                    >
-                      <input
-                        type="checkbox"
-                        name="shift_dates"
-                        value={day.iso}
-                        defaultChecked={day.iso === defaultDate}
-                        data-month-day
-                        data-weekend={day.isWeekend ? "1" : "0"}
-                        className="rounded border-[var(--ui-border)]"
-                      />
-                      <span className="min-w-0">
-                        <span className="block font-semibold text-[var(--ui-text)]">
-                          {day.dayNumber}
-                        </span>
-                        <span className="block truncate text-[10px] uppercase text-[var(--ui-muted)]">
-                          {day.weekday}
-                        </span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div
-                className="xl:col-span-12 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900"
-                data-monthly-projection
-              >
-                <div className="grid gap-3 sm:grid-cols-4">
-                  <div>
-                    <div className="text-xs font-semibold uppercase opacity-70">Actual</div>
-                    <div className="mt-1 text-xl font-bold" data-projection-current>
-                      0 h
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold uppercase opacity-70">Nuevas</div>
-                    <div className="mt-1 text-xl font-bold" data-projection-new>
-                      0 h
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold uppercase opacity-70">Proyectado</div>
-                    <div className="mt-1 text-xl font-bold" data-projection-total>
-                      0 h / 186 h
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold uppercase opacity-70">Estado</div>
-                    <div className="mt-1 text-sm font-bold" data-projection-status>
-                      Dentro del límite
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 xl:col-span-12">
-                <Link href={closeFormHref} className="ui-btn ui-btn--ghost">
-                  Cancelar
-                </Link>
-                <button type="submit" className="ui-btn ui-btn--brand">
-                  Guardar como borrador
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <MonthlyShiftBuilder
+          siteId={selectedSiteId}
+          month={selectedMonthKey}
+          returnTo={returnTo}
+          closeHref={closeFormHref}
+          employees={employees.map((employee) => ({
+            id: employee.id,
+            label: employee.full_name ?? employee.alias ?? employee.id,
+            currentMinutes: totalsByEmployee.get(employee.id)?.total ?? 0,
+            defaultRoleContext: getDefaultRoleContext(employee),
+          }))}
+          roleOptions={roleOptions.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          days={monthDays.map((day) => ({
+            iso: day.iso,
+            dayNumber: day.dayNumber,
+            weekday: day.weekday,
+            isWeekend: day.isWeekend,
+          }))}
+          defaultEmployeeId={defaultEmployeeId}
+          defaultDate={defaultDate}
+          limitMinutes={MONTHLY_SCHEDULE_LIMIT_MINUTES}
+          warningMinutes={MONTHLY_SCHEDULE_WARNING_MINUTES}
+        />
       ) : null}
 
       {!selectedSiteId ? (
@@ -964,135 +750,31 @@ export default async function StaffScheduleMonthPage({
       <Script id="viso-monthly-schedule-controls" strategy="afterInteractive">
         {`
           (function () {
-            function parseMinutes(value) {
-              var parts = String(value || "").split(":");
-              if (parts.length < 2) return 0;
-              return Number(parts[0] || 0) * 60 + Number(parts[1] || 0);
-            }
+            if (window.__visoMonthlyScheduleControlsReady) return;
+            window.__visoMonthlyScheduleControlsReady = true;
 
-            function formatHours(minutes) {
-              var hours = Math.max(0, minutes) / 60;
-              var decimals = Number.isInteger(hours) ? 0 : 1;
-              return hours.toFixed(decimals).replace(".", ",") + " h";
-            }
-
-            function initForm(form) {
-              if (!form || form.dataset.ready === "1") return;
-              form.dataset.ready = "1";
-
-              var employeeSelect = form.querySelector("[data-monthly-employee]");
-              var roleSelect = form.querySelector("[data-monthly-role]");
-              var startInput = form.querySelector("[data-monthly-start]");
-              var endInput = form.querySelector("[data-monthly-end]");
-              var breakSelect = form.querySelector("[data-monthly-break]");
-              var projection = form.querySelector("[data-monthly-projection]");
-              var limit = Number(form.getAttribute("data-limit-minutes") || "11160");
-              var warning = Number(form.getAttribute("data-warning-minutes") || "10440");
-
-              function selectedEmployeeOption() {
-                if (!employeeSelect || employeeSelect.selectedIndex < 0) return null;
-                return employeeSelect.options[employeeSelect.selectedIndex] || null;
-              }
-
-              function applyEmployeeDefaultRole() {
-                var option = selectedEmployeeOption();
-                var defaultRole = option ? option.getAttribute("data-default-role") || "" : "";
-                if (roleSelect && defaultRole) roleSelect.value = defaultRole;
-              }
-
-              function refreshProjection() {
-                var option = selectedEmployeeOption();
-                var current = Number(option ? option.getAttribute("data-current-minutes") || "0" : "0");
-                var count = form.querySelectorAll("[data-month-day]:checked").length;
-                var gross = Math.max(0, parseMinutes(endInput ? endInput.value : "") - parseMinutes(startInput ? startInput.value : ""));
-                var breakMinutes = Number(breakSelect ? breakSelect.value || "0" : "0");
-                var perShift = Math.max(0, gross - breakMinutes);
-                var added = perShift * count;
-                var total = current + added;
-
-                var currentNode = form.querySelector("[data-projection-current]");
-                var newNode = form.querySelector("[data-projection-new]");
-                var totalNode = form.querySelector("[data-projection-total]");
-                var statusNode = form.querySelector("[data-projection-status]");
-                if (currentNode) currentNode.textContent = formatHours(current);
-                if (newNode) newNode.textContent = "+" + formatHours(added);
-                if (totalNode) totalNode.textContent = formatHours(total) + " / 186 h";
-
-                if (projection) {
-                  projection.classList.remove("border-emerald-200", "bg-emerald-50", "text-emerald-900", "border-amber-300", "bg-amber-50", "text-amber-900", "border-red-300", "bg-red-50", "text-red-900");
-                }
-                if (total > limit) {
-                  if (statusNode) statusNode.textContent = "Excede por " + formatHours(total - limit) + ". Se guardará solo como borrador.";
-                  if (projection) projection.classList.add("border-red-300", "bg-red-50", "text-red-900");
-                } else if (total >= warning) {
-                  if (statusNode) statusNode.textContent = "Cerca del límite";
-                  if (projection) projection.classList.add("border-amber-300", "bg-amber-50", "text-amber-900");
-                } else {
-                  if (statusNode) statusNode.textContent = "Dentro del límite";
-                  if (projection) projection.classList.add("border-emerald-200", "bg-emerald-50", "text-emerald-900");
-                }
-              }
-
-              form.querySelectorAll("[data-select-month-days]").forEach(function (button) {
-                button.addEventListener("click", function () {
-                  var mode = button.getAttribute("data-select-month-days");
-                  form.querySelectorAll("[data-month-day]").forEach(function (input) {
-                    if (mode === "clear") input.checked = false;
-                    else if (mode === "all") input.checked = true;
-                    else if (mode === "weekdays") input.checked = input.getAttribute("data-weekend") !== "1";
-                  });
-                  refreshProjection();
-                });
+            document.addEventListener("toggle", function (event) {
+              var menu = event.target;
+              if (!menu || !menu.matches || !menu.matches("[data-month-shift-menu]") || !menu.open) return;
+              document.querySelectorAll("[data-month-shift-menu][open]").forEach(function (current) {
+                if (current !== menu) current.removeAttribute("open");
               });
+            }, true);
 
-              form.addEventListener("change", function (event) {
-                var target = event.target;
-                if (target === employeeSelect) applyEmployeeDefaultRole();
-                refreshProjection();
+            document.addEventListener("pointerdown", function (event) {
+              var target = event.target;
+              if (!target || !target.closest || target.closest("[data-month-shift-menu]")) return;
+              document.querySelectorAll("[data-month-shift-menu][open]").forEach(function (menu) {
+                menu.removeAttribute("open");
               });
-              form.addEventListener("input", refreshProjection);
-              applyEmployeeDefaultRole();
-              refreshProjection();
-            }
+            });
 
-            function initMenus() {
-              document.addEventListener("toggle", function (event) {
-                var menu = event.target;
-                if (!menu || !menu.matches || !menu.matches("[data-month-shift-menu]") || !menu.open) return;
-                document.querySelectorAll("[data-month-shift-menu][open]").forEach(function (current) {
-                  if (current !== menu) current.removeAttribute("open");
-                });
-              }, true);
-              document.addEventListener("pointerdown", function (event) {
-                var target = event.target;
-                if (!target || !target.closest || target.closest("[data-month-shift-menu]")) return;
-                document.querySelectorAll("[data-month-shift-menu][open]").forEach(function (menu) {
-                  menu.removeAttribute("open");
-                });
-              });
-            }
-
-            function initConfirmations() {
-              document.addEventListener("submit", function (event) {
-                var form = event.target;
-                if (!form || !form.getAttribute) return;
-                var message = form.getAttribute("data-confirm-message");
-                if (!message) return;
-                if (!window.confirm(message)) event.preventDefault();
-              });
-            }
-
-            function init() {
-              document.querySelectorAll("[data-monthly-shift-form]").forEach(initForm);
-              initMenus();
-              initConfirmations();
-            }
-
-            if (document.readyState === "loading") {
-              document.addEventListener("DOMContentLoaded", init, { once: true });
-            } else {
-              init();
-            }
+            document.addEventListener("submit", function (event) {
+              var form = event.target;
+              if (!form || !form.getAttribute) return;
+              var message = form.getAttribute("data-confirm-message");
+              if (message && !window.confirm(message)) event.preventDefault();
+            });
           })();
         `}
       </Script>
