@@ -25,18 +25,26 @@ function normalizeLabel(value: string | null | undefined, fallback: string) {
 function collectRows() {
   const table = document.querySelector<HTMLTableElement>("table[data-month-table]");
   const body = table?.tBodies.item(0);
-  if (!table || !body) return { table: null, body: null, employees: [] as EmployeeSummary[] };
+  if (!table || !body) {
+    return { table: null, body: null, employees: [] as EmployeeSummary[] };
+  }
 
   const employees: EmployeeSummary[] = [];
-  const rows = Array.from(body.querySelectorAll<HTMLTableRowElement>("tr"))
-    .filter((row) => !row.hasAttribute("data-month-area-header"));
+  const rows = Array.from(body.querySelectorAll<HTMLTableRowElement>("tr")).filter(
+    (row) => !row.hasAttribute("data-month-area-header"),
+  );
 
   for (const row of rows) {
-    const employeeLink = row.querySelector<HTMLAnchorElement>('a[href*="employee_id="]');
+    const employeeLink = row.querySelector<HTMLAnchorElement>(
+      'a[href*="employee_id="]',
+    );
     const firstCell = row.cells.item(0);
     if (!employeeLink || !firstCell) continue;
 
-    const employeeId = new URL(employeeLink.href, window.location.origin).searchParams.get("employee_id");
+    const employeeId = new URL(
+      employeeLink.href,
+      window.location.origin,
+    ).searchParams.get("employee_id");
     if (!employeeId) continue;
 
     const name = normalizeLabel(
@@ -52,7 +60,7 @@ function collectRows() {
     row.dataset.monthEmployeeName = name;
     row.dataset.monthArea = area;
 
-    if (!firstCell.querySelector('[data-month-hide-employee]')) {
+    if (!firstCell.querySelector("[data-month-hide-employee]")) {
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.monthHideEmployee = employeeId;
@@ -70,25 +78,25 @@ function collectRows() {
 }
 
 function synchronizeBuilderSelect(hiddenIds: Set<string>) {
-  const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="monthly-shift-builder-title"]');
+  const dialog = document.querySelector<HTMLElement>(
+    '[role="dialog"][aria-labelledby="monthly-shift-builder-title"]',
+  );
   const select = dialog?.querySelector<HTMLSelectElement>("select");
   if (!select) return;
 
-  let selectedIsHidden = hiddenIds.has(select.value);
   for (const option of Array.from(select.options)) {
     const hidden = hiddenIds.has(option.value);
     option.hidden = hidden;
     option.disabled = hidden;
   }
 
-  if (selectedIsHidden) {
+  if (hiddenIds.has(select.value)) {
     const replacement = Array.from(select.options).find(
       (option) => !option.disabled && !option.hidden,
     );
     if (replacement) {
       select.value = replacement.value;
       select.dispatchEvent(new Event("change", { bubbles: true }));
-      selectedIsHidden = false;
     }
   }
 }
@@ -98,17 +106,18 @@ function organizeRows(hiddenIds: Set<string>) {
   if (!table || !body) return employees;
 
   body
-    .querySelectorAll<HTMLTableRowElement>('tr[data-month-area-header]')
+    .querySelectorAll<HTMLTableRowElement>("tr[data-month-area-header]")
     .forEach((row) => row.remove());
 
   const rows = Array.from(
-    body.querySelectorAll<HTMLTableRowElement>('tr[data-month-employee-id]'),
+    body.querySelectorAll<HTMLTableRowElement>("tr[data-month-employee-id]"),
   ).sort((first, second) => {
-    const areaComparison = normalizeLabel(first.dataset.monthArea, "General").localeCompare(
-      normalizeLabel(second.dataset.monthArea, "General"),
-      "es",
-      { sensitivity: "base" },
-    );
+    const areaComparison = normalizeLabel(
+      first.dataset.monthArea,
+      "General",
+    ).localeCompare(normalizeLabel(second.dataset.monthArea, "General"), "es", {
+      sensitivity: "base",
+    });
     if (areaComparison !== 0) return areaComparison;
     return normalizeLabel(first.dataset.monthEmployeeName, "").localeCompare(
       normalizeLabel(second.dataset.monthEmployeeName, ""),
@@ -130,20 +139,19 @@ function organizeRows(hiddenIds: Set<string>) {
   const columnCount = table.tHead?.rows.item(0)?.cells.length ?? 1;
   for (const [area, areaRows] of groups) {
     const visibleRows = areaRows.filter((row) => !row.hidden);
-    if (visibleRows.length === 0) {
-      areaRows.forEach((row) => body.appendChild(row));
-      continue;
+    if (visibleRows.length > 0) {
+      const header = document.createElement("tr");
+      header.dataset.monthAreaHeader = area;
+      const cell = document.createElement("td");
+      cell.colSpan = columnCount;
+      cell.className =
+        "border-b border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs font-black uppercase tracking-wide text-[var(--ui-text)]";
+      cell.textContent = `${area} · ${visibleRows.length} ${
+        visibleRows.length === 1 ? "trabajador" : "trabajadores"
+      }`;
+      header.appendChild(cell);
+      body.appendChild(header);
     }
-
-    const header = document.createElement("tr");
-    header.dataset.monthAreaHeader = area;
-    const cell = document.createElement("td");
-    cell.colSpan = columnCount;
-    cell.className =
-      "border-b border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs font-black uppercase tracking-wide text-[var(--ui-text)]";
-    cell.textContent = `${area} · ${visibleRows.length} ${visibleRows.length === 1 ? "trabajador" : "trabajadores"}`;
-    header.appendChild(cell);
-    body.appendChild(header);
     areaRows.forEach((row) => body.appendChild(row));
   }
 
@@ -151,7 +159,9 @@ function organizeRows(hiddenIds: Set<string>) {
   return employees;
 }
 
-export function MonthlyScheduleOrganizer({ returnTo }: MonthlyScheduleOrganizerProps) {
+export function MonthlyScheduleOrganizer({
+  returnTo,
+}: MonthlyScheduleOrganizerProps) {
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [employees, setEmployees] = useState<EmployeeSummary[]>([]);
   const [ready, setReady] = useState(false);
@@ -175,25 +185,54 @@ export function MonthlyScheduleOrganizer({ returnTo }: MonthlyScheduleOrganizerP
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        setError(cause instanceof Error ? cause.message : "No fue posible cargar los trabajadores ocultos.");
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "No fue posible cargar los trabajadores ocultos.",
+        );
         refreshLayout(new Set());
         setReady(true);
       });
 
-    const observer = new MutationObserver(() => refreshLayout(hiddenIds));
-    const target = document.querySelector("main") ?? document.body;
-    observer.observe(target, { childList: true, subtree: true });
-
     return () => {
       cancelled = true;
-      observer.disconnect();
     };
-  }, [hiddenIds, refreshLayout, returnTo]);
+  }, [refreshLayout, returnTo]);
+
+  useEffect(() => {
+    if (ready) refreshLayout(hiddenIds);
+  }, [hiddenIds, ready, refreshLayout]);
+
+  const updateVisibility = useCallback(
+    (employeeId: string, hidden: boolean) => {
+      setError("");
+      startTransition(async () => {
+        try {
+          await setScheduleEmployeeHiddenAction({ employeeId, hidden, returnTo });
+          setHiddenIds((current) => {
+            const next = new Set(current);
+            if (hidden) next.add(employeeId);
+            else next.delete(employeeId);
+            return next;
+          });
+        } catch (cause: unknown) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "No fue posible cambiar la visibilidad.",
+          );
+        }
+      });
+    },
+    [returnTo],
+  );
 
   useEffect(() => {
     function handleHideClick(event: MouseEvent) {
       const target = event.target as HTMLElement | null;
-      const button = target?.closest<HTMLButtonElement>("[data-month-hide-employee]");
+      const button = target?.closest<HTMLButtonElement>(
+        "[data-month-hide-employee]",
+      );
       const employeeId = button?.dataset.monthHideEmployee;
       if (!employeeId || hiddenIds.has(employeeId)) return;
       updateVisibility(employeeId, true);
@@ -201,25 +240,7 @@ export function MonthlyScheduleOrganizer({ returnTo }: MonthlyScheduleOrganizerP
 
     document.addEventListener("click", handleHideClick);
     return () => document.removeEventListener("click", handleHideClick);
-  });
-
-  function updateVisibility(employeeId: string, hidden: boolean) {
-    setError("");
-    startTransition(async () => {
-      try {
-        await setScheduleEmployeeHiddenAction({ employeeId, hidden, returnTo });
-        setHiddenIds((current) => {
-          const next = new Set(current);
-          if (hidden) next.add(employeeId);
-          else next.delete(employeeId);
-          refreshLayout(next);
-          return next;
-        });
-      } catch (cause: unknown) {
-        setError(cause instanceof Error ? cause.message : "No fue posible cambiar la visibilidad.");
-      }
-    });
-  }
+  }, [hiddenIds, updateVisibility]);
 
   const hiddenEmployees = employees
     .filter((employee) => hiddenIds.has(employee.id))
@@ -231,7 +252,9 @@ export function MonthlyScheduleOrganizer({ returnTo }: MonthlyScheduleOrganizerP
     <div className="fixed bottom-4 right-4 z-50 w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 shadow-xl">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-bold text-[var(--ui-text)]">Vista mensual por áreas</div>
+          <div className="text-sm font-bold text-[var(--ui-text)]">
+            Vista mensual por áreas
+          </div>
           <div className="text-xs text-[var(--ui-muted)]">
             {hiddenEmployees.length} ocultos en todas las vistas de horarios
           </div>
@@ -242,7 +265,9 @@ export function MonthlyScheduleOrganizer({ returnTo }: MonthlyScheduleOrganizerP
           </summary>
           <div className="absolute bottom-full right-0 mb-2 max-h-72 min-w-64 overflow-auto rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1 shadow-xl">
             {hiddenEmployees.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-[var(--ui-muted)]">No hay trabajadores ocultos.</div>
+              <div className="px-3 py-2 text-xs text-[var(--ui-muted)]">
+                No hay trabajadores ocultos.
+              </div>
             ) : (
               hiddenEmployees.map((employee) => (
                 <button
@@ -252,8 +277,12 @@ export function MonthlyScheduleOrganizer({ returnTo }: MonthlyScheduleOrganizerP
                   onClick={() => updateVisibility(employee.id, false)}
                   disabled={pending}
                 >
-                  <span className="block font-semibold text-[var(--ui-text)]">{employee.name}</span>
-                  <span className="block text-[10px] text-[var(--ui-muted)]">{employee.area} · Mostrar de nuevo</span>
+                  <span className="block font-semibold text-[var(--ui-text)]">
+                    {employee.name}
+                  </span>
+                  <span className="block text-[10px] text-[var(--ui-muted)]">
+                    {employee.area} · Mostrar de nuevo
+                  </span>
                 </button>
               ))
             )}
@@ -265,7 +294,9 @@ export function MonthlyScheduleOrganizer({ returnTo }: MonthlyScheduleOrganizerP
           {error}
         </div>
       ) : null}
-      {pending ? <div className="mt-2 text-xs text-[var(--ui-muted)]">Actualizando…</div> : null}
+      {pending ? (
+        <div className="mt-2 text-xs text-[var(--ui-muted)]">Actualizando…</div>
+      ) : null}
     </div>
   );
 }
