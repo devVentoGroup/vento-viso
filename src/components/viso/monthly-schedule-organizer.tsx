@@ -17,9 +17,35 @@ type MonthlyScheduleOrganizerProps = {
   returnTo: string;
 };
 
+const MONTHLY_AREA_ORDER = [
+  "caja",
+  "servicio",
+  "barra",
+  "cocina",
+  "general",
+] as const;
+
 function normalizeLabel(value: string | null | undefined, fallback: string) {
   const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
   return normalized || fallback;
+}
+
+function normalizeAreaKey(value: string | null | undefined) {
+  return normalizeLabel(value, "General")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function getAreaPriority(value: string | null | undefined) {
+  const normalized = normalizeAreaKey(value);
+  const matchedIndex = MONTHLY_AREA_ORDER.findIndex((area) =>
+    normalized.includes(area),
+  );
+  if (matchedIndex >= 0) return matchedIndex;
+
+  // Las áreas no previstas quedan antes de General, que siempre cierra la lista.
+  return MONTHLY_AREA_ORDER.length - 1;
 }
 
 function collectRows() {
@@ -112,13 +138,17 @@ function organizeRows(hiddenIds: Set<string>) {
   const rows = Array.from(
     body.querySelectorAll<HTMLTableRowElement>("tr[data-month-employee-id]"),
   ).sort((first, second) => {
-    const areaComparison = normalizeLabel(
-      first.dataset.monthArea,
-      "General",
-    ).localeCompare(normalizeLabel(second.dataset.monthArea, "General"), "es", {
+    const firstArea = normalizeLabel(first.dataset.monthArea, "General");
+    const secondArea = normalizeLabel(second.dataset.monthArea, "General");
+    const priorityComparison =
+      getAreaPriority(firstArea) - getAreaPriority(secondArea);
+    if (priorityComparison !== 0) return priorityComparison;
+
+    const areaComparison = firstArea.localeCompare(secondArea, "es", {
       sensitivity: "base",
     });
     if (areaComparison !== 0) return areaComparison;
+
     return normalizeLabel(first.dataset.monthEmployeeName, "").localeCompare(
       normalizeLabel(second.dataset.monthEmployeeName, ""),
       "es",

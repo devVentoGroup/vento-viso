@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 
-import { createMonthlyShiftsAction } from "@/app/staff/schedule/month/actions";
+import { createMonthlyScheduleBlocksAction } from "@/app/staff/schedule/month/block-actions";
 
 type EmployeeOption = {
   id: string;
@@ -27,6 +27,7 @@ type MonthDayOption = {
 
 type ShiftBlock = {
   id: string;
+  shiftKind: "laboral" | "descanso";
   roleContext: string;
   startTime: string;
   endTime: string;
@@ -67,7 +68,8 @@ function toTimeValue(minutes: number) {
   return `${String(hours).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
-function getBlockMinutes(block: Pick<ShiftBlock, "startTime" | "endTime">) {
+function getBlockMinutes(block: Pick<ShiftBlock, "shiftKind" | "startTime" | "endTime">) {
+  if (block.shiftKind === "descanso") return 0;
   const start = parseTimeMinutes(block.startTime);
   const end = parseTimeMinutes(block.endTime);
   if (start === null || end === null || end <= start) return 0;
@@ -97,6 +99,7 @@ function formatTimeLabel(value: string) {
 function createInitialBlock(defaultRoleContext: string, defaultDate?: string): ShiftBlock {
   return {
     id: "block-1",
+    shiftKind: "laboral",
     roleContext: defaultRoleContext,
     startTime: "06:00",
     endTime: "14:00",
@@ -167,9 +170,10 @@ export function MonthlyShiftBuilder({
     0,
   );
   const projectedMinutes = currentMinutes + newMinutes;
-  const invalidBlocks = effectiveBlocks.filter(
-    (block) => !block.roleContext || getBlockMinutes(block) <= 0,
-  );
+  const invalidBlocks = effectiveBlocks.filter((block) => {
+    if (block.shiftKind === "descanso") return false;
+    return !block.roleContext || getBlockMinutes(block) <= 0;
+  });
   const canSubmit =
     Boolean(employeeId) &&
     effectiveBlocks.length > 0 &&
@@ -177,9 +181,10 @@ export function MonthlyShiftBuilder({
 
   const serializedBlocks = JSON.stringify(
     effectiveBlocks.map((block) => ({
-      roleContext: block.roleContext,
-      startTime: block.startTime,
-      endTime: block.endTime,
+      shiftKind: block.shiftKind,
+      roleContext: block.shiftKind === "descanso" ? "" : block.roleContext,
+      startTime: block.shiftKind === "descanso" ? "00:00" : block.startTime,
+      endTime: block.shiftKind === "descanso" ? "23:59" : block.endTime,
       notes: block.notes.trim(),
       dates: [...block.dates].sort(),
     })),
@@ -234,7 +239,7 @@ export function MonthlyShiftBuilder({
       const previousIndex = blocks.findIndex((block) => block.id === previousOwnerId);
       const nextIndex = blocks.findIndex((block) => block.id === blockId);
       setMovementNotice(
-        `El día ${Number(date.slice(-2))} se movió de Horario ${previousIndex + 1} a Horario ${nextIndex + 1}.`,
+        `El día ${Number(date.slice(-2))} se movió del bloque ${previousIndex + 1} al bloque ${nextIndex + 1}.`,
       );
     } else {
       setMovementNotice("");
@@ -249,9 +254,7 @@ export function MonthlyShiftBuilder({
             .filter((day) => mode === "all" || !day.isWeekend)
             .map((day) => day.iso);
     const selectedSet = new Set(selected);
-    let movedCount = 0;
-
-    movedCount = blocks
+    const movedCount = blocks
       .filter((block) => block.id !== blockId)
       .reduce(
         (total, block) =>
@@ -271,7 +274,7 @@ export function MonthlyShiftBuilder({
 
     setMovementNotice(
       movedCount > 0
-        ? `${movedCount} ${movedCount === 1 ? "día se movió" : "días se movieron"} desde otros horarios.`
+        ? `${movedCount} ${movedCount === 1 ? "día se movió" : "días se movieron"} desde otros bloques.`
         : "",
     );
   }
@@ -281,10 +284,11 @@ export function MonthlyShiftBuilder({
       blocks.find((block) => block.id === activeBlockId) ?? blocks[blocks.length - 1];
     const sourceDuration = source ? getBlockMinutes(source) : 8 * 60;
     const sourceEnd = source ? parseTimeMinutes(source.endTime) : 14 * 60;
-    let startTime = source?.endTime ?? "14:00";
-    let endTime = "22:00";
+    let startTime = source?.shiftKind === "laboral" ? source.endTime : "06:00";
+    let endTime = "14:00";
 
     if (
+      source?.shiftKind !== "laboral" ||
       sourceEnd === null ||
       sourceDuration <= 0 ||
       sourceEnd + sourceDuration > 23 * 60 + 59
@@ -298,6 +302,7 @@ export function MonthlyShiftBuilder({
     const id = `block-${nextBlockNumber}`;
     const nextBlock: ShiftBlock = {
       id,
+      shiftKind: "laboral",
       roleContext:
         source?.roleContext ||
         employee?.defaultRoleContext ||
@@ -338,7 +343,7 @@ export function MonthlyShiftBuilder({
               Crear turnos del mes
             </div>
             <p className="mt-1 text-sm text-[var(--ui-muted)]">
-              Crea uno o varios horarios. Cada día puede pertenecer a un solo bloque para evitar duplicados accidentales.
+              Crea horarios laborales o marca varios días como descanso. Cada día puede pertenecer a un solo bloque.
             </p>
           </div>
           <Link href={closeHref} className="ui-btn ui-btn--ghost ui-btn--sm">
@@ -346,7 +351,7 @@ export function MonthlyShiftBuilder({
           </Link>
         </div>
 
-        <form action={createMonthlyShiftsAction} className="space-y-4">
+        <form action={createMonthlyScheduleBlocksAction} className="space-y-4">
           <input type="hidden" name="site_id" value={siteId} />
           <input type="hidden" name="month" value={month} />
           <input type="hidden" name="return_to" value={returnTo} />
@@ -373,10 +378,10 @@ export function MonthlyShiftBuilder({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-semibold text-[var(--ui-text)]">
-                  Horarios del mes
+                  Bloques del mes
                 </div>
                 <div className="text-xs text-[var(--ui-muted)]">
-                  Solo el horario que estás editando permanece desplegado.
+                  Cada bloque puede ser un horario laboral o un descanso de día completo.
                 </div>
               </div>
               <button
@@ -386,8 +391,8 @@ export function MonthlyShiftBuilder({
                 disabled={blocks.length >= MAX_MONTHLY_SHIFT_BLOCKS}
               >
                 {blocks.length >= MAX_MONTHLY_SHIFT_BLOCKS
-                  ? "Máximo de horarios alcanzado"
-                  : "+ Agregar otro horario"}
+                  ? "Máximo de bloques alcanzado"
+                  : "+ Agregar otro bloque"}
               </button>
             </div>
 
@@ -396,7 +401,9 @@ export function MonthlyShiftBuilder({
               const blockMinutes = getBlockMinutes(block);
               const blockTotal = blockMinutes * block.dates.length;
               const blockRoleLabel =
-                roleLabelByValue.get(block.roleContext) ?? "Rol sin seleccionar";
+                block.shiftKind === "descanso"
+                  ? "Descanso de día completo"
+                  : roleLabelByValue.get(block.roleContext) ?? "Rol sin seleccionar";
 
               return (
                 <section
@@ -416,13 +423,23 @@ export function MonthlyShiftBuilder({
                     >
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                         <span className="text-sm font-bold text-[var(--ui-text)]">
-                          Horario {blockIndex + 1}
+                          Bloque {blockIndex + 1}
                         </span>
-                        <span className="text-xs font-semibold text-[var(--ui-muted)]">
-                          {formatTimeLabel(block.startTime)}–{formatTimeLabel(block.endTime)}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          block.shiftKind === "descanso"
+                            ? "bg-slate-200 text-slate-800"
+                            : "bg-violet-100 text-violet-800"
+                        }`}>
+                          {block.shiftKind === "descanso" ? "Descanso" : "Laboral"}
                         </span>
+                        {block.shiftKind === "laboral" ? (
+                          <span className="text-xs font-semibold text-[var(--ui-muted)]">
+                            {formatTimeLabel(block.startTime)}–{formatTimeLabel(block.endTime)}
+                          </span>
+                        ) : null}
                         <span className="text-xs text-[var(--ui-muted)]">
-                          {block.dates.length} {block.dates.length === 1 ? "día" : "días"} · {formatHours(blockTotal)}
+                          {block.dates.length} {block.dates.length === 1 ? "día" : "días"}
+                          {block.shiftKind === "laboral" ? ` · ${formatHours(blockTotal)}` : " · 0 h"}
                         </span>
                       </div>
                       {!isActive ? (
@@ -445,71 +462,107 @@ export function MonthlyShiftBuilder({
 
                   {isActive ? (
                     <div className="space-y-4 border-t border-[var(--ui-border)] p-3 sm:p-4">
-                      <div className="grid gap-3 lg:grid-cols-8">
-                        <label className="flex flex-col gap-1 lg:col-span-4">
-                          <span className="ui-label">Área y rol operativo</span>
-                          <select
-                            className="ui-input"
-                            value={block.roleContext}
-                            onChange={(event) =>
-                              updateBlock(block.id, { roleContext: event.target.value })
-                            }
-                            required={block.dates.length > 0}
+                      <div>
+                        <div className="ui-label mb-2">Tipo de bloque</div>
+                        <div className="inline-flex rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1">
+                          <button
+                            type="button"
+                            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                              block.shiftKind === "laboral"
+                                ? "bg-[var(--ui-surface)] text-[var(--ui-brand)] shadow-sm"
+                                : "text-[var(--ui-muted)]"
+                            }`}
+                            onClick={() => updateBlock(block.id, { shiftKind: "laboral" })}
                           >
-                            <option value="" disabled>
-                              Seleccionar
-                            </option>
-                            {roleOptions.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="flex flex-col gap-1 lg:col-span-2">
-                          <span className="ui-label">Inicio</span>
-                          <input
-                            type="time"
-                            className="ui-input"
-                            value={block.startTime}
-                            step={1800}
-                            onChange={(event) =>
-                              updateBlock(block.id, { startTime: event.target.value })
-                            }
-                            required={block.dates.length > 0}
-                          />
-                        </label>
-
-                        <label className="flex flex-col gap-1 lg:col-span-2">
-                          <span className="ui-label">Fin</span>
-                          <input
-                            type="time"
-                            className="ui-input"
-                            value={block.endTime}
-                            step={1800}
-                            onChange={(event) =>
-                              updateBlock(block.id, { endTime: event.target.value })
-                            }
-                            required={block.dates.length > 0}
-                          />
-                        </label>
+                            Horario laboral
+                          </button>
+                          <button
+                            type="button"
+                            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                              block.shiftKind === "descanso"
+                                ? "bg-[var(--ui-surface)] text-[var(--ui-text)] shadow-sm"
+                                : "text-[var(--ui-muted)]"
+                            }`}
+                            onClick={() => updateBlock(block.id, { shiftKind: "descanso" })}
+                          >
+                            Descanso
+                          </button>
+                        </div>
                       </div>
 
-                      {block.dates.length > 0 && blockMinutes <= 0 ? (
-                        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-                          La hora de fin debe ser posterior a la hora de inicio.
+                      {block.shiftKind === "laboral" ? (
+                        <>
+                          <div className="grid gap-3 lg:grid-cols-8">
+                            <label className="flex flex-col gap-1 lg:col-span-4">
+                              <span className="ui-label">Área y rol operativo</span>
+                              <select
+                                className="ui-input"
+                                value={block.roleContext}
+                                onChange={(event) =>
+                                  updateBlock(block.id, { roleContext: event.target.value })
+                                }
+                                required={block.dates.length > 0}
+                              >
+                                <option value="" disabled>
+                                  Seleccionar
+                                </option>
+                                {roleOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="flex flex-col gap-1 lg:col-span-2">
+                              <span className="ui-label">Inicio</span>
+                              <input
+                                type="time"
+                                className="ui-input"
+                                value={block.startTime}
+                                step={1800}
+                                onChange={(event) =>
+                                  updateBlock(block.id, { startTime: event.target.value })
+                                }
+                                required={block.dates.length > 0}
+                              />
+                            </label>
+
+                            <label className="flex flex-col gap-1 lg:col-span-2">
+                              <span className="ui-label">Fin</span>
+                              <input
+                                type="time"
+                                className="ui-input"
+                                value={block.endTime}
+                                step={1800}
+                                onChange={(event) =>
+                                  updateBlock(block.id, { endTime: event.target.value })
+                                }
+                                required={block.dates.length > 0}
+                              />
+                            </label>
+                          </div>
+
+                          {block.dates.length > 0 && blockMinutes <= 0 ? (
+                            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                              La hora de fin debe ser posterior a la hora de inicio.
+                            </div>
+                          ) : null}
+                        </>
+                      ) : (
+                        <div className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-800">
+                          Los días seleccionados se guardarán como descanso de día completo, sin área, sin rango horario y sin sumar horas al mes.
                         </div>
-                      ) : null}
+                      )}
 
                       <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 sm:p-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
                             <div className="text-sm font-semibold text-[var(--ui-text)]">
-                              Días de este horario
+                              {block.shiftKind === "descanso" ? "Días de descanso" : "Días de este horario"}
                             </div>
                             <div className="text-xs text-[var(--ui-muted)]">
-                              Al seleccionar un día usado por otro horario, se moverá a este bloque.
+                              Al seleccionar un día usado por otro bloque, se moverá a este bloque.
                             </div>
                           </div>
                           <div className="flex flex-wrap gap-2">
@@ -551,7 +604,9 @@ export function MonthlyShiftBuilder({
                                 key={day.iso}
                                 className={`relative flex cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-2 text-sm transition hover:bg-[var(--ui-surface)] ${
                                   ownedHere
-                                    ? "border-[var(--ui-brand)] bg-violet-50/70"
+                                    ? block.shiftKind === "descanso"
+                                      ? "border-slate-500 bg-slate-100"
+                                      : "border-[var(--ui-brand)] bg-violet-50/70"
                                     : ownedElsewhere
                                       ? "border-violet-200 bg-violet-50/70"
                                       : day.isWeekend
@@ -577,7 +632,7 @@ export function MonthlyShiftBuilder({
                                 </span>
                                 {ownedElsewhere ? (
                                   <span className="absolute right-1 top-1 rounded bg-violet-100 px-1 text-[8px] font-bold text-violet-700">
-                                    H{ownerIndex + 1}
+                                    B{ownerIndex + 1}
                                   </span>
                                 ) : null}
                               </label>
@@ -597,7 +652,11 @@ export function MonthlyShiftBuilder({
                               onChange={(event) =>
                                 updateBlock(block.id, { notes: event.target.value })
                               }
-                              placeholder="Ej. Caja, apertura, apoyo de barra"
+                              placeholder={
+                                block.shiftKind === "descanso"
+                                  ? "Ej. Descanso compensatorio"
+                                  : "Ej. Caja, apertura, apoyo de barra"
+                              }
                             />
                             {!block.notes ? (
                               <button
@@ -618,7 +677,7 @@ export function MonthlyShiftBuilder({
                           className="text-left text-sm font-semibold text-[var(--ui-brand)]"
                           onClick={() => updateBlock(block.id, { notesOpen: true })}
                         >
-                          + Agregar nota a este horario
+                          + Agregar nota a este bloque
                         </button>
                       )}
                     </div>
@@ -669,7 +728,9 @@ export function MonthlyShiftBuilder({
                   const minutes = getBlockMinutes(block);
                   return (
                     <span key={block.id} className="mr-4 inline-block">
-                      Horario {index + 1}: {block.dates.length} × {formatHours(minutes)} = {formatHours(minutes * block.dates.length)}
+                      Bloque {index + 1}: {block.shiftKind === "descanso"
+                        ? `${block.dates.length} ${block.dates.length === 1 ? "descanso" : "descansos"} · 0 h`
+                        : `${block.dates.length} × ${formatHours(minutes)} = ${formatHours(minutes * block.dates.length)}`}
                     </span>
                   );
                 })}
@@ -680,8 +741,8 @@ export function MonthlyShiftBuilder({
           {!canSubmit ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               {effectiveBlocks.length === 0
-                ? "Selecciona al menos un día en alguno de los horarios."
-                : "Corrige los horarios seleccionados antes de guardar."}
+                ? "Selecciona al menos un día en alguno de los bloques."
+                : "Corrige los horarios laborales seleccionados antes de guardar."}
             </div>
           ) : null}
 
