@@ -1,7 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
+import {
+  getMonthlyOperationalViewAction,
+  type MonthlyOperationalShiftView,
+} from "@/app/staff/schedule/month/operational-view-actions";
 import {
   getScheduleHiddenEmployeeIdsAction,
   setScheduleEmployeeHiddenAction,
@@ -10,20 +14,31 @@ import {
 type EmployeeSummary = {
   id: string;
   name: string;
-  area: string;
+  baseArea: string;
+  operationalAreas: string[];
 };
 
 type MonthlyScheduleOrganizerProps = {
   returnTo: string;
 };
 
-const MONTHLY_AREA_ORDER = [
-  "caja",
-  "servicio",
-  "barra",
-  "cocina",
-  "general",
+const AREA_FILTERS = [
+  { key: "all", label: "Todas" },
+  { key: "caja", label: "Caja" },
+  { key: "servicio", label: "Servicio" },
+  { key: "barra", label: "Barra" },
+  { key: "cocina", label: "Cocina" },
+  { key: "general", label: "General" },
 ] as const;
+
+const MONTHLY_AREA_ORDER = AREA_FILTERS.filter((filter) => filter.key !== "all").map(
+  (filter) => filter.key,
+);
+
+function currentReturnTo(fallback: string) {
+  if (typeof window === "undefined") return fallback;
+  return `${window.location.pathname}${window.location.search}`;
+}
 
 function normalizeLabel(value: string | null | undefined, fallback: string) {
   const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
@@ -31,30 +46,94 @@ function normalizeLabel(value: string | null | undefined, fallback: string) {
 }
 
 function normalizeAreaKey(value: string | null | undefined) {
-  return normalizeLabel(value, "General")
+  const normalized = normalizeLabel(value, "General")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+
+  return (
+    MONTHLY_AREA_ORDER.find((area) => normalized.includes(area)) ?? "general"
+  );
+}
+
+function getAreaLabel(areaKey: string) {
+  return AREA_FILTERS.find((filter) => filter.key === areaKey)?.label ?? "General";
 }
 
 function getAreaPriority(value: string | null | undefined) {
-  const normalized = normalizeAreaKey(value);
-  const matchedIndex = MONTHLY_AREA_ORDER.findIndex((area) =>
-    normalized.includes(area),
-  );
-  if (matchedIndex >= 0) return matchedIndex;
-
-  // Las áreas no previstas quedan antes de General, que siempre cierra la lista.
-  return MONTHLY_AREA_ORDER.length - 1;
+  const areaKey = normalizeAreaKey(value);
+  const index = MONTHLY_AREA_ORDER.indexOf(areaKey);
+  return index >= 0 ? index : MONTHLY_AREA_ORDER.length - 1;
 }
 
-function collectRows() {
+function groupOperationalShifts(shifts: MonthlyOperationalShiftView[]) {
+  const grouped = new Map<string, MonthlyOperationalShiftView[]>();
+  for (const shift of shifts) {
+    const key = `${shift.employeeId}__${shift.shiftDate}`;
+    const rows = grouped.get(key) ?? [];
+    rows.push(shift);
+    grouped.set(key, rows);
+  }
+
+  for (const rows of grouped.values()) {
+    rows.sort((first, second) => {
+      const startComparison = first.startTime.localeCompare(second.startTime, "es");
+      return startComparison !== 0
+        ? startComparison
+        : first.endTime.localeCompare(second.endTime, "es");
+    });
+  }
+
+  return grouped;
+}
+
+function decorateShiftCard(
+  detail: HTMLDetailsElement,
+  shift: MonthlyOperationalShiftView,
+  selectedArea: string,
+) {
+  detail.dataset.operationalArea = normalizeAreaKey(shift.areaLabel);
+  detail.dataset.operationalRole = shift.roleLabel;
+
+  const summary = detail.querySelector<HTMLElement>("summary");
+  if (!summary) return;
+
+  let badge = summary.querySelector<HTMLElement>("[data-operational-shift-label]");
+  if (!badge) {
+    badge = document.createElement("div");
+    badge.dataset.operationalShiftLabel = "1";
+    badge.className =
+      "mt-1 rounded-md bg-white/80 px-1.5 py-1 text-[9px] font-bold leading-tight text-[var(--ui-text)] ring-1 ring-black/5";
+    summary.appendChild(badge);
+  }
+
+  badge.textContent =
+    shift.shiftKind === "descanso"
+      ? "Descanso"
+      : `${shift.areaLabel} · ${shift.roleLabel}`;
+
+  const matches =
+    selectedArea === "all" ||
+    (shift.shiftKind !== "descanso" &&
+      normalizeAreaKey(shift.areaLabel) === selectedArea);
+  detail.style.opacity = matches ? "1" : "0.28";
+  detail.style.filter = matches ? "none" : "grayscale(0.65)";
+  detail.title = matches
+    ? ""
+    : `Turno visible para control, pero pertenece a ${shift.areaLabel}`;
+}
+
+function collectAndDecorateRows(
+  shifts: MonthlyOperationalShiftView[],
+  selectedArea: string,
+) {
   const table = document.querySelector<HTMLTableElement>("table[data-month-table]");
   const body = table?.tBodies.item(0);
   if (!table || !body) {
     return { table: null, body: null, employees: [] as EmployeeSummary[] };
   }
 
+  const shiftsByEmployeeDay = groupOperationalShifts(shifts);
   const employees: EmployeeSummary[] = [];
   const rows = Array.from(body.querySelectorAll<HTMLTableRowElement>("tr")).filter(
     (row) => !row.hasAttribute("data-month-area-header"),
@@ -77,14 +156,23 @@ function collectRows() {
       firstCell.querySelector("div.font-semibold")?.textContent,
       employeeId,
     );
-    const area = normalizeLabel(
+    const baseArea = normalizeLabel(
       firstCell.querySelector("span.rounded-full")?.textContent,
       "General",
     );
 
     row.dataset.monthEmployeeId = employeeId;
     row.dataset.monthEmployeeName = name;
-    row.dataset.monthArea = area;
+    row.dataset.monthBaseArea = baseArea;
+
+    if (!firstCell.querySelector("[data-base-role-caption]")) {
+      const caption = document.createElement("div");
+      caption.dataset.baseRoleCaption = "1";
+      caption.className = "mt-1 text-[9px] font-semibold uppercase text-[var(--ui-muted)]";
+      caption.textContent = "Rol base del trabajador";
+      const chipRow = firstCell.querySelector("div.mt-1");
+      chipRow?.insertAdjacentElement("beforebegin", caption);
+    }
 
     if (!firstCell.querySelector("[data-month-hide-employee]")) {
       const button = document.createElement("button");
@@ -97,7 +185,32 @@ function collectRows() {
       firstCell.appendChild(button);
     }
 
-    employees.push({ id: employeeId, name, area });
+    const employeeShifts = shifts.filter((shift) => shift.employeeId === employeeId);
+    const operationalAreas = [
+      ...new Set(
+        employeeShifts
+          .filter((shift) => shift.shiftKind !== "descanso")
+          .map((shift) => normalizeAreaKey(shift.areaLabel)),
+      ),
+    ];
+    row.dataset.monthOperationalAreas = operationalAreas.join(",");
+
+    const month = employeeShifts[0]?.shiftDate.slice(0, 7) ?? "";
+    for (let dayNumber = 1; dayNumber < row.cells.length - 1; dayNumber += 1) {
+      const cell = row.cells.item(dayNumber);
+      if (!cell || !month) continue;
+      const shiftDate = `${month}-${String(dayNumber).padStart(2, "0")}`;
+      const dayShifts = shiftsByEmployeeDay.get(`${employeeId}__${shiftDate}`) ?? [];
+      const details = Array.from(
+        cell.querySelectorAll<HTMLDetailsElement>("details[data-month-shift-menu]"),
+      );
+      details.forEach((detail, index) => {
+        const shift = dayShifts[index];
+        if (shift) decorateShiftCard(detail, shift, selectedArea);
+      });
+    }
+
+    employees.push({ id: employeeId, name, baseArea, operationalAreas });
   }
 
   return { table, body, employees };
@@ -127,8 +240,12 @@ function synchronizeBuilderSelect(hiddenIds: Set<string>) {
   }
 }
 
-function organizeRows(hiddenIds: Set<string>) {
-  const { table, body, employees } = collectRows();
+function organizeRows(
+  hiddenIds: Set<string>,
+  shifts: MonthlyOperationalShiftView[],
+  selectedArea: string,
+) {
+  const { table, body, employees } = collectAndDecorateRows(shifts, selectedArea);
   if (!table || !body) return employees;
 
   body
@@ -138,16 +255,17 @@ function organizeRows(hiddenIds: Set<string>) {
   const rows = Array.from(
     body.querySelectorAll<HTMLTableRowElement>("tr[data-month-employee-id]"),
   ).sort((first, second) => {
-    const firstArea = normalizeLabel(first.dataset.monthArea, "General");
-    const secondArea = normalizeLabel(second.dataset.monthArea, "General");
-    const priorityComparison =
-      getAreaPriority(firstArea) - getAreaPriority(secondArea);
-    if (priorityComparison !== 0) return priorityComparison;
-
-    const areaComparison = firstArea.localeCompare(secondArea, "es", {
-      sensitivity: "base",
-    });
-    if (areaComparison !== 0) return areaComparison;
+    if (selectedArea === "all") {
+      const firstArea = normalizeLabel(first.dataset.monthBaseArea, "General");
+      const secondArea = normalizeLabel(second.dataset.monthBaseArea, "General");
+      const priorityComparison =
+        getAreaPriority(firstArea) - getAreaPriority(secondArea);
+      if (priorityComparison !== 0) return priorityComparison;
+      const areaComparison = firstArea.localeCompare(secondArea, "es", {
+        sensitivity: "base",
+      });
+      if (areaComparison !== 0) return areaComparison;
+    }
 
     return normalizeLabel(first.dataset.monthEmployeeName, "").localeCompare(
       normalizeLabel(second.dataset.monthEmployeeName, ""),
@@ -159,11 +277,20 @@ function organizeRows(hiddenIds: Set<string>) {
   const groups = new Map<string, HTMLTableRowElement[]>();
   for (const row of rows) {
     const employeeId = row.dataset.monthEmployeeId ?? "";
-    row.hidden = hiddenIds.has(employeeId);
-    const area = normalizeLabel(row.dataset.monthArea, "General");
-    const areaRows = groups.get(area) ?? [];
-    areaRows.push(row);
-    groups.set(area, areaRows);
+    const operationalAreas = (row.dataset.monthOperationalAreas ?? "")
+      .split(",")
+      .filter(Boolean);
+    const matchesArea =
+      selectedArea === "all" || operationalAreas.includes(selectedArea);
+    row.hidden = hiddenIds.has(employeeId) || !matchesArea;
+
+    const groupLabel =
+      selectedArea === "all"
+        ? normalizeLabel(row.dataset.monthBaseArea, "General")
+        : `${getAreaLabel(selectedArea)} · asignación operativa`;
+    const groupRows = groups.get(groupLabel) ?? [];
+    groupRows.push(row);
+    groups.set(groupLabel, groupRows);
   }
 
   const columnCount = table.tHead?.rows.item(0)?.cells.length ?? 1;
@@ -193,24 +320,40 @@ export function MonthlyScheduleOrganizer({
   returnTo,
 }: MonthlyScheduleOrganizerProps) {
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const [operationalShifts, setOperationalShifts] = useState<
+    MonthlyOperationalShiftView[]
+  >([]);
   const [employees, setEmployees] = useState<EmployeeSummary[]>([]);
+  const [selectedArea, setSelectedArea] = useState("all");
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
-  const refreshLayout = useCallback((nextHiddenIds: Set<string>) => {
-    setEmployees(organizeRows(nextHiddenIds));
-  }, []);
+  const refreshLayout = useCallback(
+    (
+      nextHiddenIds: Set<string>,
+      nextShifts: MonthlyOperationalShiftView[],
+      nextArea: string,
+    ) => {
+      setEmployees(organizeRows(nextHiddenIds, nextShifts, nextArea));
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
+    const safeReturnTo = currentReturnTo(returnTo);
 
-    getScheduleHiddenEmployeeIdsAction(returnTo)
-      .then((ids) => {
+    Promise.all([
+      getScheduleHiddenEmployeeIdsAction(safeReturnTo),
+      getMonthlyOperationalViewAction(safeReturnTo),
+    ])
+      .then(([ids, operationalView]) => {
         if (cancelled) return;
-        const next = new Set(ids);
-        setHiddenIds(next);
-        refreshLayout(next);
+        const nextHiddenIds = new Set(ids);
+        setHiddenIds(nextHiddenIds);
+        setOperationalShifts(operationalView.shifts);
+        refreshLayout(nextHiddenIds, operationalView.shifts, "all");
         setReady(true);
       })
       .catch((cause: unknown) => {
@@ -218,9 +361,9 @@ export function MonthlyScheduleOrganizer({
         setError(
           cause instanceof Error
             ? cause.message
-            : "No fue posible cargar los trabajadores ocultos.",
+            : "No fue posible cargar la organización operativa.",
         );
-        refreshLayout(new Set());
+        refreshLayout(new Set(), [], "all");
         setReady(true);
       });
 
@@ -230,15 +373,19 @@ export function MonthlyScheduleOrganizer({
   }, [refreshLayout, returnTo]);
 
   useEffect(() => {
-    if (ready) refreshLayout(hiddenIds);
-  }, [hiddenIds, ready, refreshLayout]);
+    if (ready) refreshLayout(hiddenIds, operationalShifts, selectedArea);
+  }, [hiddenIds, operationalShifts, ready, refreshLayout, selectedArea]);
 
   const updateVisibility = useCallback(
     (employeeId: string, hidden: boolean) => {
       setError("");
       startTransition(async () => {
         try {
-          await setScheduleEmployeeHiddenAction({ employeeId, hidden, returnTo });
+          await setScheduleEmployeeHiddenAction({
+            employeeId,
+            hidden,
+            returnTo: currentReturnTo(returnTo),
+          });
           setHiddenIds((current) => {
             const next = new Set(current);
             if (hidden) next.add(employeeId);
@@ -276,17 +423,28 @@ export function MonthlyScheduleOrganizer({
     .filter((employee) => hiddenIds.has(employee.id))
     .sort((first, second) => first.name.localeCompare(second.name, "es"));
 
+  const visibleCount = useMemo(
+    () =>
+      employees.filter(
+        (employee) =>
+          !hiddenIds.has(employee.id) &&
+          (selectedArea === "all" ||
+            employee.operationalAreas.includes(selectedArea)),
+      ).length,
+    [employees, hiddenIds, selectedArea],
+  );
+
   if (!ready && employees.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 shadow-xl">
-      <div className="flex items-center justify-between gap-3">
+    <div className="fixed bottom-4 right-4 z-50 w-[min(520px,calc(100vw-2rem))] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 shadow-xl">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-sm font-bold text-[var(--ui-text)]">
-            Vista mensual por áreas
+            Planeación por asignación operativa
           </div>
           <div className="text-xs text-[var(--ui-muted)]">
-            {hiddenEmployees.length} ocultos en todas las vistas de horarios
+            {visibleCount} trabajadores visibles · {hiddenEmployees.length} ocultos
           </div>
         </div>
         <details className="relative">
@@ -311,7 +469,7 @@ export function MonthlyScheduleOrganizer({
                     {employee.name}
                   </span>
                   <span className="block text-[10px] text-[var(--ui-muted)]">
-                    {employee.area} · Mostrar de nuevo
+                    Rol base: {employee.baseArea} · Mostrar de nuevo
                   </span>
                 </button>
               ))
@@ -319,6 +477,31 @@ export function MonthlyScheduleOrganizer({
           </div>
         </details>
       </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Filtrar por área operativa">
+        {AREA_FILTERS.map((filter) => (
+          <button
+            key={filter.key}
+            type="button"
+            className={
+              selectedArea === filter.key
+                ? "ui-btn ui-btn--brand ui-btn--sm"
+                : "ui-btn ui-btn--ghost ui-btn--sm"
+            }
+            onClick={() => setSelectedArea(filter.key)}
+          >
+            {filter.label}
+          </button>
+        ))}
+      </div>
+
+      {selectedArea !== "all" ? (
+        <div className="mt-2 text-[11px] text-[var(--ui-muted)]">
+          Se muestran quienes tienen al menos un turno de {getAreaLabel(selectedArea)}.
+          Sus asignaciones en otras áreas permanecen atenuadas para controlar cruces.
+        </div>
+      ) : null}
+
       {error ? (
         <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-800">
           {error}
