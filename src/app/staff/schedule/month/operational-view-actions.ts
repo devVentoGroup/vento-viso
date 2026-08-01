@@ -56,6 +56,35 @@ function normalizeReturnTo(value: string) {
     : "/staff/schedule/month";
 }
 
+function joinOperationalSignals(
+  values: Array<string | null | undefined>,
+) {
+  return values
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function resolvePlanningAreaLabel(
+  operationalRole: string | null,
+  matrixRow: SiteOperationalRoleRow | null,
+) {
+  const roleSignals = joinOperationalSignals([
+    operationalRole,
+    matrixRow?.role_code,
+    matrixRow?.role_label,
+    matrixRow?.role_family,
+  ]);
+  const roleArea = getAreaVisualFromRole(roleSignals);
+  if (roleArea.label !== "General") return roleArea.label;
+
+  const physicalAreaSignals = joinOperationalSignals([
+    matrixRow?.area_kind,
+    matrixRow?.area_name,
+  ]);
+  return getAreaVisualFromRole(physicalAreaSignals).label;
+}
+
 export async function getMonthlyOperationalViewAction(
   returnTo: string,
 ): Promise<MonthlyOperationalViewResult> {
@@ -159,7 +188,6 @@ export async function getMonthlyOperationalViewAction(
       exactRow ??
       activeMatrixRows.find((row) => row.role_code === shift.operational_role) ??
       null;
-    const areaVisual = getAreaVisualFromRole(shift.operational_role);
 
     return {
       id: shift.id,
@@ -168,7 +196,10 @@ export async function getMonthlyOperationalViewAction(
       startTime: shift.start_time,
       endTime: shift.end_time,
       shiftKind: shift.shift_kind ?? "laboral",
-      areaLabel: fallbackRow?.area_name ?? areaVisual.label ?? "General",
+      areaLabel: resolvePlanningAreaLabel(
+        shift.operational_role,
+        fallbackRow,
+      ),
       roleLabel:
         fallbackRow?.role_label ?? shift.operational_role ?? "Sin rol operativo",
     } satisfies MonthlyOperationalShiftView;
