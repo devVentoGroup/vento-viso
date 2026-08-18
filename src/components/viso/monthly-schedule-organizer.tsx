@@ -303,9 +303,8 @@ function organizeRows(
       cell.colSpan = columnCount;
       cell.className =
         "border-b border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs font-black uppercase tracking-wide text-[var(--ui-text)]";
-      cell.textContent = `${area} · ${visibleRows.length} ${
-        visibleRows.length === 1 ? "trabajador" : "trabajadores"
-      }`;
+      cell.textContent = `${area} · ${visibleRows.length} ${visibleRows.length === 1 ? "trabajador" : "trabajadores"
+        }`;
       header.appendChild(cell);
       body.appendChild(header);
     }
@@ -373,7 +372,13 @@ export function MonthlyScheduleOrganizer({
   }, [refreshLayout, returnTo]);
 
   useEffect(() => {
-    if (ready) refreshLayout(hiddenIds, operationalShifts, selectedArea);
+    if (!ready) return undefined;
+
+    const timer = window.setTimeout(() => {
+      refreshLayout(hiddenIds, operationalShifts, selectedArea);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [hiddenIds, operationalShifts, ready, refreshLayout, selectedArea]);
 
   const updateVisibility = useCallback(

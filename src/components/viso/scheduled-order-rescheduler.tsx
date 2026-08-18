@@ -117,8 +117,11 @@ export async function ScheduledOrderRescheduler({
 
   const admin = createAdminClient();
   const now = new Date().toISOString();
+  const nowInstant = new Date(now);
   const today = localDate(now);
-  const toDate = localDate(new Date(Date.now() + 30 * 86400000).toISOString());
+  const toDate = localDate(
+    new Date(nowInstant.getTime() + 30 * 86400000).toISOString(),
+  );
 
   const [ordersResult, exceptionsResult, resolutionsResult, slotsResult] = await Promise.all([
     admin

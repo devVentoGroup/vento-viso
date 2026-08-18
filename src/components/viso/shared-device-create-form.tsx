@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useMemo, useState } from "react";
 
 type SiteOption = {
@@ -409,11 +410,10 @@ export function SharedDeviceCreateForm({
             return (
               <label
                 key={app.code}
-                className={`rounded-2xl border px-4 py-3 text-sm ${
-                  checked
+                className={`rounded-2xl border px-4 py-3 text-sm ${checked
                     ? "border-[color-mix(in_srgb,var(--ui-accent)_44%,var(--ui-border))] bg-[color-mix(in_srgb,var(--ui-accent)_8%,var(--ui-surface))]"
                     : "border-[var(--ui-border)] bg-white/70"
-                }`}
+                  }`}
               >
                 <div className="flex items-start gap-3">
                   <input
@@ -567,9 +567,9 @@ export function SharedDeviceCreateForm({
           {pending ? "Creando..." : "Crear dispositivo compartido"}
         </button>
 
-        <a href="/staff?tab=devices" className="ui-btn ui-btn--ghost">
+        <Link href="/staff?tab=devices" className="ui-btn ui-btn--ghost">
           Cancelar
-        </a>
+        </Link>
       </div>
     </form>
   );

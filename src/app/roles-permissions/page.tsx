@@ -68,6 +68,25 @@ type PermissionScope = {
     scopeAreaKind: string | null;
 };
 
+type UntypedReadResult = {
+    data: unknown[] | null;
+    error: { message: string } | null;
+};
+
+type UntypedReadBuilder = PromiseLike<UntypedReadResult> & {
+    eq: (column: string, value: unknown) => UntypedReadBuilder;
+    order: (
+        column: string,
+        options?: { ascending?: boolean },
+    ) => UntypedReadBuilder;
+};
+
+type UntypedReadClient = {
+    from: (table: string) => {
+        select: (columns: string) => UntypedReadBuilder;
+    };
+};
+
 function asText(value: FormDataEntryValue | null) {
     return typeof value === "string" ? value.trim() : "";
 }
@@ -322,7 +341,7 @@ export default async function RolesPermissionsPage({
     });
 
     const supabase = createAdminClient();
-    const db = supabase as any;
+    const db = supabase as unknown as UntypedReadClient;
 
     const [
         { data: rolesData },

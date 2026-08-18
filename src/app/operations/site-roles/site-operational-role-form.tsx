@@ -52,7 +52,11 @@ export function SiteOperationalRoleForm({
   const [selectedSiteId, setSelectedSiteId] = useState(initialValues?.siteId ?? "");
 
   useEffect(() => {
-    setSelectedSiteId(initialValues?.siteId ?? "");
+    const timer = window.setTimeout(() => {
+      setSelectedSiteId(initialValues?.siteId ?? "");
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [initialValues?.siteId]);
 
   const filteredAreas = useMemo(

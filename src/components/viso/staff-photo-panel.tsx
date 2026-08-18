@@ -51,13 +51,18 @@ export function StaffPhotoPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
-  useEffect(() => {
-    setIsUploading(false);
-    setUploadError("");
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setIsUploading(false);
+      setUploadError("");
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [photoUrl]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

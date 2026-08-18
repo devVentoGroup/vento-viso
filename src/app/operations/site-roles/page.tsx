@@ -48,6 +48,27 @@ type SupabaseLike = {
   rpc: (functionName: string, args?: Record<string, unknown>) => Promise<RpcResponse>;
 };
 
+type MutationResponse<T = unknown> = {
+  data: T | null;
+  error: DbError | null;
+};
+
+type MutationFilterBuilder<T> = PromiseLike<MutationResponse<T>> & {
+  eq: (column: string, value: unknown) => MutationFilterBuilder<T>;
+  is: (column: string, value: null) => MutationFilterBuilder<T>;
+  maybeSingle: () => Promise<MutationResponse<Record<string, unknown>>>;
+};
+
+type MutationTableBuilder = {
+  select: (columns: string) => MutationFilterBuilder<Record<string, unknown>>;
+  update: (values: Record<string, unknown>) => MutationFilterBuilder<unknown>;
+  delete: () => MutationFilterBuilder<unknown>;
+};
+
+type MutationSupabaseLike = {
+  from: (table: string) => MutationTableBuilder;
+};
+
 type SiteRow = {
   [key: string]: unknown;
 };
@@ -244,9 +265,10 @@ async function saveSiteRole(formData: FormData) {
   });
 
   const db = supabase as unknown as SupabaseLike;
+  const mutationDb = supabase as unknown as MutationSupabaseLike;
 
   if (matrixIdValue) {
-    const roleCheck = await (supabase as any)
+    const roleCheck = await mutationDb
       .from("operational_roles")
       .select("code")
       .eq("code", roleCodeValue)
@@ -257,7 +279,7 @@ async function saveSiteRole(formData: FormData) {
     if (!roleCheck.data) buildRedirect("error", "El rol operativo no existe o está inactivo.");
 
     if (areaIdValue) {
-      const areaCheck = await (supabase as any)
+      const areaCheck = await mutationDb
         .from("areas")
         .select("id")
         .eq("id", areaIdValue)
@@ -269,7 +291,7 @@ async function saveSiteRole(formData: FormData) {
     }
 
     if (isDefault) {
-      const clearDefaultQuery = (supabase as any)
+      const clearDefaultQuery = mutationDb
         .from("site_operational_roles")
         .update({ is_default: false })
         .eq("site_id", siteIdValue);
@@ -281,7 +303,7 @@ async function saveSiteRole(formData: FormData) {
       if (clearResult.error) buildRedirect("error", clearResult.error.message);
     }
 
-    const result = await (supabase as any)
+    const result = await mutationDb
       .from("site_operational_roles")
       .update({
         site_id: siteIdValue,
@@ -327,7 +349,8 @@ async function deleteSiteRole(formData: FormData) {
     returnTo: ROUTE,
   });
 
-  const result = await (supabase as any)
+  const mutationDb = supabase as unknown as MutationSupabaseLike;
+  const result = await mutationDb
     .from("site_operational_roles")
     .delete()
     .eq("id", matrixIdValue);

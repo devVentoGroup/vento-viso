@@ -64,8 +64,12 @@ export function CommercialCollectionOrderEditor({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    setLocalItems(items);
-    setStatus("");
+    const timer = window.setTimeout(() => {
+      setLocalItems(items);
+      setStatus("");
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [items]);
 
   useEffect(() => {

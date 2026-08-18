@@ -262,14 +262,18 @@ function ShiftEditInline({
   const [isRestShift, setIsRestShift] = useState(shift.shift_kind === "descanso");
   const [isFullDayRest, setIsFullDayRest] = useState(
     shift.shift_kind === "descanso" &&
-      shift.start_time.slice(0, 5) === FULL_DAY_REST_START_TIME &&
-      shift.end_time.slice(0, 5) === FULL_DAY_REST_END_TIME,
+    shift.start_time.slice(0, 5) === FULL_DAY_REST_START_TIME &&
+    shift.end_time.slice(0, 5) === FULL_DAY_REST_END_TIME,
   );
 
   useEffect(() => {
-    if (!hasManualOperationalRole) {
+    if (hasManualOperationalRole) return undefined;
+
+    const timer = window.setTimeout(() => {
       setOperationalRole(suggestedOperationalRole);
-    }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [hasManualOperationalRole, suggestedOperationalRole]);
 
   return (
@@ -598,10 +602,10 @@ export function WeeklySchedulePlanner({
     () =>
       selection?.type === "slot"
         ? resolveDefaultOperationalRoleForEmployeeIds(
-            selection.employeeIds,
-            employeeById,
-            operationalRoleOptions,
-          )
+          selection.employeeIds,
+          employeeById,
+          operationalRoleOptions,
+        )
         : "",
     [employeeById, operationalRoleOptions, selection],
   );
@@ -953,11 +957,10 @@ export function WeeklySchedulePlanner({
                     return (
                       <div
                         key={`time-${slotIndex}`}
-                        className={`absolute left-0 right-0 border-b border-dashed px-2 ${
-                          isHourLine
+                        className={`absolute left-0 right-0 border-b border-dashed px-2 ${isHourLine
                             ? "border-[var(--ui-border)]"
                             : "border-[rgba(15,23,42,0.08)]"
-                        }`}
+                          }`}
                         style={{ top: (slotIndex - VISIBLE_SLOT_START) * SLOT_HEIGHT, height: SLOT_HEIGHT }}
                       >
                         {slotIndex % 2 === 0 ? (
@@ -1006,9 +1009,8 @@ export function WeeklySchedulePlanner({
                               }
                               selectSlot(day.iso, slotIndex);
                             }}
-                            className={`absolute left-0 right-0 border-b border-dashed text-left transition select-none ${
-                              highlighted ? "bg-[var(--ui-brand-soft)] " : "hover:bg-[var(--ui-brand-soft)] "
-                            }${borderClass}`}
+                            className={`absolute left-0 right-0 border-b border-dashed text-left transition select-none ${highlighted ? "bg-[var(--ui-brand-soft)] " : "hover:bg-[var(--ui-brand-soft)] "
+                              }${borderClass}`}
                             style={{ top: (slotIndex - VISIBLE_SLOT_START) * SLOT_HEIGHT, height: SLOT_HEIGHT }}
                             title={
                               inRange
@@ -1049,9 +1051,8 @@ export function WeeklySchedulePlanner({
                               }
                               selectGroup(group);
                             }}
-                            className={`absolute flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border px-2.5 py-2 text-left shadow-sm transition hover:shadow-md ${getGroupPublishedClass(group)} ${
-                              allSelected || someSelected ? "ring-2 ring-[var(--ui-brand)] ring-offset-2" : ""
-                            }`}
+                            className={`absolute flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border px-2.5 py-2 text-left shadow-sm transition hover:shadow-md ${getGroupPublishedClass(group)} ${allSelected || someSelected ? "ring-2 ring-[var(--ui-brand)] ring-offset-2" : ""
+                              }`}
                             style={{
                               top,
                               height,
@@ -1196,11 +1197,10 @@ export function WeeklySchedulePlanner({
                     return (
                       <label
                         key={shift.id}
-                        className={`flex cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm transition ${
-                          checked
+                        className={`flex cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm transition ${checked
                             ? "bg-[var(--ui-brand-soft)] text-[var(--ui-brand-600)]"
                             : "text-[var(--ui-text)] hover:bg-[var(--ui-brand-soft)]"
-                        }`}
+                          }`}
                       >
                         <span>
                           {getEmployeeLabel(employee)}
@@ -1241,11 +1241,10 @@ export function WeeklySchedulePlanner({
                   return (
                     <label
                       key={employee.id}
-                      className={`flex cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm transition ${
-                        checked
+                      className={`flex cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm transition ${checked
                           ? "bg-[var(--ui-brand-soft)] text-[var(--ui-brand-600)]"
                           : "text-[var(--ui-text)] hover:bg-[var(--ui-brand-soft)]"
-                      }`}
+                        }`}
                     >
                       <span>
                         {getEmployeeLabel(employee)}
@@ -1482,11 +1481,10 @@ export function WeeklySchedulePlanner({
                 return (
                   <label
                     key={emp.id}
-                    className={`flex cursor-pointer items-center justify-between rounded-xl px-3 py-2.5 text-sm transition ${
-                      checked
+                    className={`flex cursor-pointer items-center justify-between rounded-xl px-3 py-2.5 text-sm transition ${checked
                         ? "bg-[var(--ui-brand-soft)] text-[var(--ui-brand-600)]"
                         : "text-[var(--ui-text)] hover:bg-[var(--ui-brand-soft)]"
-                    }`}
+                      }`}
                   >
                     <span>
                       {getEmployeeLabel(emp)}

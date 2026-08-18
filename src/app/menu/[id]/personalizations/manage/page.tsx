@@ -21,31 +21,19 @@ export default async function ManagePersonalizationsPage({
   });
 
   const supabase = createAdminClient();
+  let snapshot: Awaited<ReturnType<typeof fetchPersonalizationSnapshot>> | null = null;
+  let loadError = "";
 
   try {
-    const snapshot = await fetchPersonalizationSnapshot(supabase, itemId);
-
-    return (
-      <div className="space-y-6">
-        <PageHeader
-          title={`Personalizaciones · ${snapshot.currentItem.name}`}
-          subtitle="Configura tamaños, extras, cambios, ingredientes, preferencias y sugerencias sin mezclar la edición comercial del producto."
-          actions={(
-            <Link href={`/menu/${itemId}`} className="ui-btn ui-btn--ghost">
-              Volver al producto
-            </Link>
-          )}
-        />
-
-        <MenuPersonalizationsClient
-          itemId={itemId}
-          initialSnapshot={snapshot}
-        />
-      </div>
-    );
+    snapshot = await fetchPersonalizationSnapshot(supabase, itemId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudieron cargar las personalizaciones.";
+    loadError =
+      error instanceof Error
+        ? error.message
+        : "No se pudieron cargar las personalizaciones.";
+  }
 
+  if (!snapshot) {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -58,8 +46,27 @@ export default async function ManagePersonalizationsPage({
           )}
         />
 
-        <div className="ui-alert ui-alert--error">{message}</div>
+        <div className="ui-alert ui-alert--error">{loadError}</div>
       </div>
     );
   }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title={`Personalizaciones · ${snapshot.currentItem.name}`}
+        subtitle="Configura tamaños, extras, cambios, ingredientes, preferencias y sugerencias sin mezclar la edición comercial del producto."
+        actions={(
+          <Link href={`/menu/${itemId}`} className="ui-btn ui-btn--ghost">
+            Volver al producto
+          </Link>
+        )}
+      />
+
+      <MenuPersonalizationsClient
+        itemId={itemId}
+        initialSnapshot={snapshot}
+      />
+    </div>
+  );
 }
