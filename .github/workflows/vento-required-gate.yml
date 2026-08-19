@@ -163,16 +163,16 @@ jobs:
           NODE
 
       - name: Descargar autoridad canónica TREQ para consumidores
-        if: ${{ github.repository != 'devVentoGroup/vento-shell' }}
+        if: ${{ github.repository != 'vento-group-sas/vento-shell' }}
         uses: actions/checkout@v4
         with:
-          repository: devVentoGroup/vento-shell
+          repository: vento-group-sas/vento-shell
           ref: main
           path: .ci018-shell
           fetch-depth: 1
 
       - name: Validar TREQ en SHELL con baseline explícita
-        if: ${{ github.repository == 'devVentoGroup/vento-shell' && github.event_name == 'pull_request' }}
+        if: ${{ github.repository == 'vento-group-sas/vento-shell' && github.event_name == 'pull_request' }}
         shell: bash
         env:
           AFFECTED: ${{ steps.declaration.outputs.affected }}
@@ -200,7 +200,7 @@ jobs:
           fi
 
       - name: Validar TREQ en SHELL fuera de PR
-        if: ${{ github.repository == 'devVentoGroup/vento-shell' && github.event_name != 'pull_request' }}
+        if: ${{ github.repository == 'vento-group-sas/vento-shell' && github.event_name != 'pull_request' }}
         shell: bash
         env:
           AFFECTED: ${{ steps.declaration.outputs.affected }}
@@ -213,7 +213,7 @@ jobs:
           fi
 
       - name: Validar TREQ en consumidor
-        if: ${{ github.repository != 'devVentoGroup/vento-shell' }}
+        if: ${{ github.repository != 'vento-group-sas/vento-shell' }}
         shell: bash
         env:
           AFFECTED: ${{ steps.declaration.outputs.affected }}
@@ -240,7 +240,7 @@ jobs:
           import path from 'node:path';
           import { pathToFileURL } from 'node:url';
 
-          const root = process.env.REPOSITORY === 'devVentoGroup/vento-shell'
+          const root = process.env.REPOSITORY === 'vento-group-sas/vento-shell'
             ? process.cwd()
             : path.join(process.cwd(), '.ci018-shell');
           const modulePath = path.join(root, 'scripts/docs/treq-registry-files.mjs');
@@ -249,7 +249,7 @@ jobs:
             baseDir: path.join(root, 'docs/plan-canonico/modular'),
           });
           const identity = `sha256:${createHash('sha256').update(bundle.source, 'utf8').digest('hex')}`;
-          const baseline = process.env.REPOSITORY === 'devVentoGroup/vento-shell'
+          const baseline = process.env.REPOSITORY === 'vento-group-sas/vento-shell'
             && process.env.EVENT_NAME === 'pull_request'
             ? String(process.env.BASE_SHA || '')
             : '';
