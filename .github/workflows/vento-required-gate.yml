@@ -365,7 +365,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || inputs.source_commit || github.sha }}
           EXECUTION_IDENTITY: ${{ steps.decision.outputs.execution_identity }}
-          REPORT_PATH: ${{ runner.temp }}/vento-ci019/gate-decision.json
+          REPORT_PATH: ${{ runner.temp }}/vento-ci019/evidence/gate-decision.json
           BUNDLE_PATH: ${{ runner.temp }}/vento-ci019/evidence/bundle.json
         run: |
           node .ci019-shell/scripts/quality/test-evidence-publisher.mjs verify-bundle \
@@ -503,7 +503,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           SOURCE_COMMIT: ${{ inputs.source_commit || github.sha }}
           EXECUTION_IDENTITY: ${{ steps.decision.outputs.execution_identity }}
-          REPORT_PATH: ${{ runner.temp }}/vento-ci019/gate-decision.json
+          REPORT_PATH: ${{ runner.temp }}/vento-ci019/evidence/gate-decision.json
           BUNDLE_PATH: ${{ runner.temp }}/vento-ci019/evidence/bundle.json
         run: |
           node .ci019-shell/scripts/quality/test-evidence-publisher.mjs verify-bundle \
